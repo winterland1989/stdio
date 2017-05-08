@@ -8,6 +8,11 @@ import Criterion.Main
 import qualified Data.ByteString as P
 import qualified Data.Bytes as B
 import qualified Data.List as List
+import qualified Data.Text.Internal.Fusion as T
+import qualified Data.Text.Internal.Fusion.Common as T
+import qualified Data.Vector.Unboxed as VU
+import Data.Word
+import Control.DeepSeq
 
 import Prelude hiding (reverse,head,tail,last,init,null
     ,length,map,lines,foldl,foldr,unlines
@@ -21,13 +26,20 @@ import Prelude hiding (reverse,head,tail,last,init,null
     )
 
 main :: IO ()
-main = defaultMain $ List.reverse
-    [ bgroup "pack/256 elems"  packSmall
-    , bgroup "pack/8192 elems"  packLarge
-    , bgroup "unpack" unpack
+main = defaultMain -- $ List.reverse
+    [ bgroup "singleton" singleton
+--   , bgroup "pack/256 elems"  packSmall
+--   , bgroup "pack/8192 elems"  packLarge
+--   , bgroup "unpack" unpack
     , bgroup "map" map
     , bgroup "reverse" reverse
     , bgroup "intersperse" intersperse
+    ]
+
+singleton :: [Benchmark]
+singleton =
+    [ bench "bytestring/singleton" $ nf P.singleton 128
+    , bench "bytes/singleton"      $ nf B.singleton 128
     ]
 
 packSmall :: [Benchmark]
@@ -35,6 +47,7 @@ packSmall =
     [ bench "bytestring/pack"  $ nf P.pack (List.replicate 256 128)
     , bench "bytes/pack"       $ nf B.pack (List.replicate 256 128)
     , bench "bytes/packN"      $ nf (B.packN 256) (List.replicate 256 128)
+    , bench "bytes/packN 64"   $ nf (B.packN 64) (List.replicate 256 128)
     ]
 
 packLarge :: [Benchmark]
@@ -42,6 +55,7 @@ packLarge =
     [ bench "bytestring/pack"  $ nf P.pack (List.replicate 8192 128)
     , bench "bytes/pack"       $ nf B.pack (List.replicate 8192 128)
     , bench "bytes/packN"      $ nf (B.packN 8192) (List.replicate 8192 128)
+    , bench "bytes/packN 64"   $ nf (B.packN 64) (List.replicate 8192 128)
     ]
 
 unpack :: [Benchmark]
@@ -54,6 +68,7 @@ map :: [Benchmark]
 map =
     [ bench "bytestring/map"  $ nf (P.map (+1)) (P.pack $ List.replicate 1024 128)
     , bench "bytes/map"       $ nf (B.map (+1)) (B.pack $ List.replicate 1024 128)
+    , bench "bytes/map"       $ nf (B.packN 1024 . List.map (+1) . B.unpack) (B.pack $ List.replicate 1024 128)
     ]
 
 reverse :: [Benchmark]
