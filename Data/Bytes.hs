@@ -202,18 +202,26 @@ pack ws0 = create (List.length ws0) (go 0 ws0)
 -- This function consume list lazily, and run faster than 'pack'
 -- (even the initial size is many times smaller).
 --
+
 packN :: Int -> [Word8] -> Bytes
-packN n0 = \ ws0 -> runST (newByteArray n0 >>= go 0 n0 ws0)
+packN n0 ws0 = runST (do mba <- newByteArray n0
+                         SP3 i _ mba' <- foldM go (SP3 0 n0 mba) ws0
+                         ba <- unsafeFreezeByteArray mba'
+                         return (Bytes ba 0 i)
+                     )
   where
-    go !i !n []     !mba = do ba <- unsafeFreezeByteArray mba
-                              return (Bytes ba 0 i)
-    go !i !n (w:ws) !mba
-        | i <  n    = do writeByteArray mba i w
-                         go (i+1) n ws mba
-        | otherwise = do let n' = n `shiftL` 1
-                         mba' <- resizeMutableByteArray mba n'
-                         writeByteArray mba' i w
-                         go (i+1) n' ws mba'
+    go (SP3 i n mba) x = if i < n then do writeByteArray mba i x
+                                          return (SP3 (i+1) n mba)
+                                  else do let !n' = n*2
+                                          mba' <- resizeMutableByteArray mba n'
+                                          writeByteArray mba' i x
+                                          return (SP3 (i+1) n' mba')
+-- | helper type
+data SP3 s = SP3 {-# UNPACK #-}!Int
+                {-# UNPACK #-}!Int
+                {-# UNPACK #-}!(MutableByteArray s)
+{-# INLINE packN #-}
+
 
 -- | /O(n)/ Convert 'Bytes' to a 'Word8' list.
 --
@@ -317,12 +325,12 @@ init (Bytes ba s l)
 -- | /O(n)/ 'map' @f xs@ is the Bytes obtained by applying @f@ to each
 -- element of @xs@.
 map :: (Word8 -> Word8) -> Bytes -> Bytes
-map f (Bytes ba s l) = create l (go 0)
+map f = \ (Bytes ba s l) -> create l (go ba (l+s) s)
   where
-    go !i !mba  | i >= l = return ()
-                | otherwise = do let !x = indexByteArray ba (s+i)
-                                 writeByteArray mba i (f x)
-                                 go (i+1) mba
+    go ba !sl !i !mba  | i >= sl = return ()
+                       | otherwise = do let !x = indexByteArray ba i
+                                        writeByteArray mba i (f x)
+                                        go ba sl (i+1) mba
 {-# INLINE map #-}
 
 -- | /O(n)/ 'reverse' @xs@ efficiently returns the elements of @xs@ in reverse order.

@@ -33,6 +33,7 @@ benchmark bench
                     ,   deepseq
                     ,   bytestring
                     ,   vector
+                    ,   array
                     ,   text
                     ,   stdio
                     ,   criterion == 1.1.*

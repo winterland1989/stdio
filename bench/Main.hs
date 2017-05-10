@@ -11,6 +11,7 @@ import qualified Data.List as List
 import qualified Data.Text.Internal.Fusion as T
 import qualified Data.Text.Internal.Fusion.Common as T
 import qualified Data.Vector.Unboxed as VU
+import qualified Data.Array.Unboxed as AU
 import Data.Word
 import Control.DeepSeq
 
@@ -28,7 +29,7 @@ import Prelude hiding (reverse,head,tail,last,init,null
 main :: IO ()
 main = defaultMain -- $ List.reverse
     [ bgroup "singleton" singleton
---   , bgroup "pack/256 elems"  packSmall
+  -- , bgroup "pack/256 elems"  packSmall
 --   , bgroup "pack/8192 elems"  packLarge
 --   , bgroup "unpack" unpack
     , bgroup "map" map
@@ -46,6 +47,7 @@ packSmall :: [Benchmark]
 packSmall =
     [ bench "bytestring/pack"  $ nf P.pack (List.replicate 256 128)
     , bench "bytes/pack"       $ nf B.pack (List.replicate 256 128)
+    , bench "vector/fromList"  $ nf VU.fromList (List.replicate 256 (128::Word8))
     , bench "bytes/packN"      $ nf (B.packN 256) (List.replicate 256 128)
     , bench "bytes/packN 64"   $ nf (B.packN 64) (List.replicate 256 128)
     ]
@@ -68,6 +70,7 @@ map :: [Benchmark]
 map =
     [ bench "bytestring/map"  $ nf (P.map (+1)) (P.pack $ List.replicate 1024 128)
     , bench "bytes/map"       $ nf (B.map (+1)) (B.pack $ List.replicate 1024 128)
+    , bench "vector/map"       $ nf (VU.map (+1)) (VU.fromList $ List.replicate 1024 (128::Word8))
     , bench "bytes/map"       $ nf (B.packN 1024 . List.map (+1) . B.unpack) (B.pack $ List.replicate 1024 128)
     ]
 
