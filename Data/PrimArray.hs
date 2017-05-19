@@ -22,7 +22,8 @@ module Data.PrimArray (
 
   -- * Information
   sizeofPrimArray, sizeofMutablePrimArray, sameMutablePrimArray,
-  primArrayContents, mutablePrimArrayContents
+  primArrayContents, mutablePrimArrayContents,
+  isPrimArrayPinned, isMutablePrimArrayPinned
 ) where
 
 
@@ -32,13 +33,23 @@ import Data.Typeable
 import GHC.Ptr (Ptr(..))
 
 
--- | Primitive array tagged with type @a@.
+-- | Primitive array tagged with element type @a@.
 --
 newtype PrimArray a = PrimArray ByteArray deriving Typeable
 
--- | Mutable primitive array tagged with type @a@.
+-- | Mutable primitive array tagged with element type @a@.
 --
 newtype MutablePrimArray s a = MutablePrimArray (MutableByteArray s) deriving Typeable
+
+-- | Auto allocate pinned primitive array if size(in bytes) larger than 4000.
+--
+-- A value slightly smaller than block size is choosen for extra header bytes.
+--
+newPrimArrayAuto :: forall m a . (PrimMonad m, Prim a) => Int -> m (MutablePrimArray (PrimState m) a)
+{-# INLINE newPrimArrayAuto #-}
+newPrimArrayAuto n = if n' < 4000 then newPrimArray n else newPinnedPrimArray n
+  where
+    n' = n * sizeOf (undefined :: a)
 
 -- | Create a new mutable primitive array of the specified size.
 newPrimArray :: forall m a . (PrimMonad m, Prim a) => Int -> m (MutablePrimArray (PrimState m) a)
@@ -181,3 +192,20 @@ setPrimArray :: forall m a. (PrimMonad m, Prim a)
              -> m ()
 {-# INLINE setPrimArray #-}
 setPrimArray (MutablePrimArray mba) s n x = setByteArray mba s n x
+
+--------------------------------------------------------------------------------
+--
+-- | Check if a primitive array is pinned.
+--
+isPrimArrayPinned :: PrimArray a -> Bool
+isPrimArrayPinned (PrimArray (ByteArray ba#)) =
+    c_is_byte_array_pinned ba# == 1
+
+-- | Check if a mutable primitive array is pinned.
+--
+isMutablePrimArrayPinned :: MutablePrimArray a -> Bool
+isMutablePrimArrayPinned (MutablePrimArray (MutableByteArray mba#)) =
+    c_is_byte_array_pinned ba# == 1
+
+foreign import ccall unsafe "bytes.c is_byte_array_pinned"
+    c_is_byte_array_pinned :: ByteArray# -> CInt

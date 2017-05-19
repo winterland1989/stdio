@@ -5,6 +5,7 @@
 {-# LANGUAGE ForeignFunctionInterface, CApiFFI #-}
 {-# LANGUAGE UnliftedFFITypes #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE GHCForeignImportPrim #-}
 
 -- |
 --
@@ -17,6 +18,7 @@ module Data.Bytes
   ( -- * The 'Bytes' type
     Bytes(..)
     -- * Creating 'Bytes' and conversion between list
+  , create
   , createN
   , empty
   , singleton
@@ -42,9 +44,6 @@ module Data.Bytes
   , all
   , maximum
   , minimum
-
-  -- * Utilities
-  , isPinned
   ) where
 
 import GHC.Prim
@@ -455,9 +454,6 @@ resizeMutableByteArray (MutableByteArray mba#) (I# i#) =
        )
 {-# INLINE resizeMutableByteArray #-}
 
-isPinned :: Bytes -> Bool
-isPinned (Bytes ba _ _) =
-    sizeofByteArray ba > fromIntegral (rts_LARGE_OBJECT_THRESHOLD)
 
 -- | Conversion between 'Word8' and 'Char'. Should compile to a no-op.
 --
@@ -501,6 +497,3 @@ foreign import ccall unsafe "bytes.c intersperse"
 
 foreign import ccall unsafe "bytes.c _memcmp"
     c_memcmp :: ByteArray# -> CSize -> ByteArray# -> CSize -> CSize -> IO CInt
-
-foreign import capi "Rts.h value LARGE_OBJECT_THRESHOLD"
-    rts_LARGE_OBJECT_THRESHOLD :: CInt

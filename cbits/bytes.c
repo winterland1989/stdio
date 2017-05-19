@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include "Rts.h"
 
 void reverse(unsigned char *dest, unsigned char *src, size_t n) {
     src += n-1;
@@ -27,4 +28,8 @@ int _memcmp(const void *a,
             size_t boff,
             size_t n) {
     return memcmp(a + aoff, b + boff, n);
+}
+
+int is_byte_array_pinned(unsigned char* p){
+    return Bdescr(p)->flags & BF_PINNED;
 }
