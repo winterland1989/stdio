@@ -6,60 +6,62 @@ import Control.Concurrent.MVar
 -- SeekMode type
 
 -- | A mode that determines the effect of 'hSeek' @hdl mode i@.
-data SeekMode
-  = AbsoluteSeek        -- ^ the position of @hdl@ is set to @i@.
-  | RelativeSeek        -- ^ the position of @hdl@ is set to offset @i@
-                        -- from the current position.
-  | SeekFromEnd         -- ^ the position of @hdl@ is set to offset @i@
-                        -- from the end of the file.
-    deriving (Eq, Ord, Ix, Enum, Read, Show)
+data SeekMode = AbsoluteSeek        -- ^ the position of @hdl@ is set to @i@.
+              | RelativeSeek        -- ^ the position of @hdl@ is set to offset @i@
+                                    -- from the current position.
+              | SeekFromEnd         -- ^ the position of @hdl@ is set to offset @i@
+                                    -- from the end of the file.
+    deriving (Eq, Ord, Enum, Read, Show)
 
-class Seekable h where
-    hseek    :: h -> SeekMode -> Int64 -> IO Int64
-    hgetSize :: h -> IO Int64
-    hsetSize :: h -> Int64 -> IO ()
+class SeekableFD f where
+    fseek    :: f -> SeekMode -> Int64 -> IO Int64
+    fgetSize :: f -> IO Int64
+    fsetSize :: f -> Int64 -> IO ()
+    fsync :: f -> IO ()
 
-class Handle h where
-    type URI h
-    type Config h
+class FD f where
+    type URI f
+    type Config f
 
-    hopen :: URI h -> Config h -> IO h
-    hclose :: h -> IO ()
+    fopen :: URI f -> Config f -> IO f
+    fclose :: f -> IO ()
 
-    hread :: h -> Int -> Ptr Word8 -> IO Int
-    hwrite :: Ptr Word8 -> Int -> h -> IO ()
-    hwritev :: [(Ptr Word8, Int)] -> h -> IO ()
+    fread :: f -> Int -> Ptr Word8 -> IO Int
+    fwrite :: f -> Ptr Word8 -> Int -> IO Int
 
-    hsync :: h -> IO ()
+hLoopWrite :: Handle f => f -> Ptr Word8 -> Int -> IO ()
 
-data File =
 
--- | Buffered handles
+newtype File = File FD
+
+-- | Handle
 --
--- A Buffered handle contain a read buffer and write buffer which are protected by seperated 'MVar's.
+-- A Handle handle contain a read buffer and write buffer which are protected by seperated 'MVar's.
 --
 --
 -- @
 --
 --
 --
---
---
 
-data Buffered h = Buffered
-    { handle   :: !h
+data Handle f = Handle
+    { fd  :: !f
     , readBufSize  :: {-# UNPACK #-} !Int
-    , writeBufSize :: {-# UNPACK #-} !Int
     , readBuf      :: {-# UNPACK #-} !MVar [Bytes]
-    , writeBuf     :: MutableByteArray
+    , writeBufSize :: {-# UNPACK #-} !Int
+    , writeBuf     :: {-# UNPACK #-} !(Ptr Word8)
     , writeBufLen  :: {-# UNPACK #-} !MVar Int
     }
 
-buffered :: (Handle h) => h -> IO (Buffered h)
-buffered h =
+newHandle32K :: FD f => f -> IO (Handle f)
+newHandle32K f = buffered f bufSiz bufSiz
+  where bufSiz = (32 * 1024) - 2 * sizeOf (undefined :: Word)
 
-read :: (Handle h) => Buffered h -> IO (Maybe Bytes)
-read Buffered{..} = modifyMVar readBuf $ \ rbuf ->
+newHandle :: FD f => f -> Int -> Int -> IO (Handle f)
+newHandle f rbufSize wbufSiz =
+
+read :: (FD f) => Handle f -> IO (Maybe Bytes)
+read Handle{..} = modifyMVar readBuf $ \ rbuf ->
     case rbuf of
         (x:xs) -> (xs, x)
         e -> do
@@ -69,20 +71,54 @@ read Buffered{..} = modifyMVar readBuf $ \ rbuf ->
                 then return (e, Nothing)
                 else do
                     ba <- unsafeFreezeByteArray mba
-                    return (e, Just (Vector ba 0 0))
+                    return (e, Just (PVector ba 0 0))
 
 
-pushBack :: (Handle h) => Buffered h -> Bytes -> IO ()
-pushBack Buffered{..} x = modifyMVar_ readBuf $ \ rbuf -> return (x:rbuf)
+push :: (FD f) => Handle f -> Bytes -> IO ()
+push Handle{..} x = modifyMVar_ readBuf $ \ rBuf -> return (x:rBuf)
 
-
-write :: (Handle h) => Buffered h -> Bytes -> IO ()
-write Buffered{..} bs = modifyMVar writeBufLen $ \ wbufLen ->
-    if wbufLen + B.length bs <= writeBufSize
+-- | Write 'Bytes' into buffered handle.
+--
+-- Copy 'Bytes' to buffer if it can hold, otherwise
+-- write both buffer(if not empty) and 'Bytes'.
+--
+write :: (FD f) => Handle f -> Bytes -> IO ()
+write Handle{..} (PVector ba s l) = modifyMVar writeBufLen $ \ wBufLen ->
+    if wBufLen + l <= writeBufSize
     then do
+        -- current buffer can hold it
+        copyByteArray writeBuf wBufLen ba s l
+        let !wBufLen' = (wBufLen + l)
+        return (wBufLen', ())
+    else do
+        -- flush buffer
+        when (wBufLen > 0) (hLoopWrite handle writeBuf writeBufSize)
+        if isPrimArrayPinned ba
+        -- if we have a pinned bytearray, which is most of the cases.
+        then do
+            hLoopWrite handle (addrToPtr (byteArrayContents ba) `plusPtr` s) l
+            return (0, ()) -- The writeBuf is empty now,
+        else do
+            -- somehow we meet an unpinned bytearray,
+            -- we use writeBuf as a transfer buffer.
+            go handle writeBuf writeBufSize ba s l
+  where
+    go :: (FD f) => f -> Ptr a -> PrimArray Word8 -> Int -> IO (Int, ())
+    go f wbuf !wbufSiz !ba !s !l
+        -- writeBuf is enough to transfer all the bytearray
+        | l <= wbufSiz = do
+            copyByteArray wbuf 0 ba s l
+            hLoopWrite f wbuf l
+            return (0, ())
+        -- loop to transfer
+        | otherwise = do
+            copyByteArray wbuf 0 ba s wbufSiz
+            hLoopWrite f wbuf wbufSiz
+            go f wbuf wbufSiz ba (s+wbufSiz) (l-wbufSiz)
 
-    else
-
-
-writeChunks :: (Handle h) => Buffered h -> [Bytes] -> IO ()
-
+-- | Flush the buffer(if not empty).
+--
+flush :: (FD f) => Hand f -> IO ()
+flush Hand{..} = modifyMVar writeBufLen $ \ wBufLen ->
+    when (wBufLen > 0) (hLoopWrite handle writeBuf writeBufSize)
+    return (0, ())

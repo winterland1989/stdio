@@ -1,8 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MagicHash #-}
-{-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE ForeignFunctionInterface, CApiFFI #-}
 {-# LANGUAGE UnliftedFFITypes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
@@ -33,6 +31,13 @@ module Data.Vector
   , cons, snoc, uncons, unsnoc
   , head, tail
   , last, init
+
+  -- * Reducing 'ByteString's (folds)
+  , foldl
+  , foldl'
+  , foldl1
+  , foldl1'
+
   -- * Transforming Vector
   , map
   , reverse
@@ -47,8 +52,6 @@ module Data.Vector
   , maximum
   , minimum
 
-  -- * Utilities
-  , resizeMutableArray
   ) where
 
 import GHC.Prim
@@ -235,10 +238,12 @@ packN n0 ws0 = runST (do marr <- newArray n0 uninitialized
                          return (Vector arr 0 i)
                      )
   where
+    go :: SP3 s a -> a -> ST s (SP3 s a)
     go (SP3 i n marr) x = if i < n then do writeArray marr i x
                                            return (SP3 (i+1) n marr)
                                    else do let !n' = n*2
-                                           marr' <- resizeMutableArray marr n'
+                                           marr' <- newArray n uninitialized
+                                           copyMutableArray marr' 0 marr 0 n'
                                            writeArray marr' i x
                                            return (SP3 (i+1) n' marr')
 
@@ -356,6 +361,11 @@ init (Vector arr s l)
 {-# INLINE init #-}
 
 --------------------------------------------------------------------------------
+--
+-- Reducing 'PVector's (folds)
+--
+
+--------------------------------------------------------------------------------
 -- * Transforming Vector
 --
 -- | /O(n)/ 'map' @f xs@ is the Vector obtained by applying @f@ to each
@@ -421,18 +431,18 @@ transpose vs =
 -- the length for allocation.
 --
 concat :: [Vector a] -> Vector a
-concat vs = case pre vs 0 [] of ([], _)    -> empty
+concat vs = case pre [] 0 vs of ([], _)    -> empty
                                 ([v], _)  -> v
                                 (vs', l') -> create l' (copy vs' l')
   where
     -- pre scan to filter empty bytes and calculate total length
     pre :: [Vector a] -> Int -> [Vector a] -> ([Vector a], Int)
-    pre !arrcc !lacc [] = (arrcc, lacc)
-    pre !arrcc !lacc (v@(Vector _ _ l):vs)
-        | l <= 0    = pre arrcc lacc vs
-        | otherwise = pre (v:arrcc) (l+lacc) vs
+    pre vacc !lacc [] = (vacc, lacc)
+    pre vacc !lacc (v@(Vector _ _ l):vs)
+        | l <= 0    = pre vacc lacc vs
+        | otherwise = pre (v:vacc) (l+lacc) vs
 
-    copy [] !_ !marr     = return ()
+    copy [] _ marr     = return ()
     copy (v:vs) !i !marr = do let Vector arr s l = v
                                   i' = i - l
                               copyArray marr i' arr s l
@@ -474,15 +484,6 @@ unsafeIndex (Vector arr s _) idx = indexArray arr (idx + s)
 {-# INLINE unsafeIndex #-}
 
 --------------------------------------------------------------------------------
-
-resizeMutableArray :: MutableArray s a -> Int -> ST s (MutableArray s a)
-resizeMutableArray marr n = do
-    let s = sizeofMutableArray marr
-    if n <= s then return marr
-              else do marr' <- newArray n uninitialized
-                      copyMutableArray marr' 0 marr 0 s
-                      return marr'
-{-# INLINE resizeMutableArray #-}
 
 -- Common up near identical calls to `error' to reduce the number
 -- constant strings created when compiled:

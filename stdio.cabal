@@ -16,8 +16,8 @@ extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
 library
-    exposed-modules:        Data.Bytes
-                            Data.PrimArray
+    exposed-modules:        Data.PrimArray
+                            Data.PrimVector
                             Data.Vector
     -- other-modules:       
     -- other-extensions:    

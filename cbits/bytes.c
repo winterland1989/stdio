@@ -31,5 +31,5 @@ int _memcmp(const void *a,
 }
 
 int is_byte_array_pinned(unsigned char* p){
-    return Bdescr(p)->flags & BF_PINNED;
+    return Bdescr((StgPtr)p)->flags & (BF_PINNED | BF_LARGE);
 }
