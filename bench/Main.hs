@@ -30,19 +30,22 @@ list10000 = List.replicate 10000 127
 
 
 vector100, vector1000, vector10000 :: V.Vector Word8
-vector100 = V.fromList $ list100
-vector1000 = V.fromList $ list1000
-vector10000 = V.fromList $ list10000
+vector100 = V.fromList list100
+vector1000 = V.fromList list1000
+vector10000 = V.fromList list10000
 
 bytes100, bytes1000, bytes10000 :: P.Bytes
-bytes100 = P.pack $ list100
-bytes1000 = P.pack $ list1000
-bytes10000 = P.pack $ list10000
+bytes100 = P.pack list100
+bytes1000 = P.pack list1000
+bytes10000 = P.pack list10000
 
 bytestring100, bytestring1000, bytestring10000 :: B.ByteString
-bytestring100 = B.pack $ list100
-bytestring1000 = B.pack $ list1000
-bytestring10000 = B.pack $ list10000
+bytestring100 = B.pack list100
+bytestring1000 = B.pack list1000
+bytestring10000 = B.pack list10000
+
+wordZ :: Word8
+wordZ = 0
 
 main :: IO ()
 main = defaultMain $ List.reverse
@@ -54,6 +57,15 @@ main = defaultMain $ List.reverse
     , bgroup "reverse" reverse
     , bgroup "intersperse" intersperse
     , bgroup "intercalate" intercalate
+    , bgroup "foldl" foldl
+    , bgroup "foldl'" foldl'
+    , bgroup "foldr" foldr
+    , bgroup "foldr'" foldr'
+    , bgroup "concatMap" concatMap
+    , bgroup "all" all
+    , bgroup "all" any
+    , bgroup "scanl1" scanl1
+    , bgroup "scanr1" scanr1
     ]
 
 singleton :: [Benchmark]
@@ -91,7 +103,7 @@ unpack =
 
 map :: [Benchmark]
 map =
-    [ bench "bytestring/map"  $ nf (B.map (+1)) bytestring1000
+    [ bench "bytestring/map"  $ nf (\ bs -> B.map (+1) bs) bytestring1000
     , bench "vector/map"      $ nf (V.map (+1)) vector1000
     , bench "bytes/map"       $ nf (P.map (+1)) bytes1000
     , bench "bytes/pack . List.map f . unpack" $
@@ -121,4 +133,67 @@ intercalate =
         nf (B.intercalate (B.singleton 0)) [bytestring1000, bytestring1000]
     , bench "bytestring/intercalateElem"  $
         nf (P.intercalateElem 0) [bytes1000, bytes1000]
+    ]
+
+foldl' :: [Benchmark]
+foldl' =
+    [ bench "bytestring/foldl'" $ nf (\ x -> B.foldl' (+) wordZ x) bytestring1000
+    , bench "vector/foldl'"     $ nf (V.foldl' (+) wordZ) vector1000
+    , bench "bytes/foldl'"      $ nf (P.foldl' (+) wordZ) bytes1000
+    ]
+
+foldl :: [Benchmark]
+foldl =
+    [ bench "bytestring/foldl" $ nf (\ x -> B.foldl (+) wordZ x) bytestring1000
+    , bench "vector/foldl"     $ nf (V.foldl (+) wordZ) vector1000
+    , bench "bytes/foldl"      $ nf (P.foldl (+) wordZ) bytes1000
+    ]
+
+foldr' :: [Benchmark]
+foldr' =
+    [ bench "bytestring/foldr'" $ nf (\ x -> B.foldr' (+) wordZ x) bytestring1000
+    , bench "vector/foldr'"     $ nf (V.foldr' (+) wordZ) vector1000
+    , bench "bytes/foldr'"      $ nf (P.foldr' (+) wordZ) bytes1000
+    ]
+
+foldr :: [Benchmark]
+foldr =
+    [ bench "bytestring/foldr" $ nf (\ x -> B.foldr (+) wordZ x) bytestring1000
+    , bench "vector/foldr"     $ nf (V.foldr (+) wordZ) vector1000
+    , bench "bytes/foldr"      $ nf (P.foldr (+) wordZ) bytes1000
+    ]
+
+concatMap :: [Benchmark]
+concatMap =
+    [ bench "bytestring/concatMap" $ nf (B.concatMap (const bytestring100)) bytestring1000
+    , bench "vector/concatMap"     $ nf (V.concatMap (const vector100)) vector1000
+    , bench "bytes/concatMap"      $ nf (P.concatMap (const bytes100)) bytes1000
+    ]
+
+all :: [Benchmark]
+all =
+    [ bench "bytestring/all" $ nf (B.all odd) bytestring1000
+    , bench "vector/all"     $ nf (V.all odd) vector1000
+    , bench "bytes/all"      $ nf (P.all odd) bytes1000
+    ]
+
+any :: [Benchmark]
+any =
+    [ bench "bytestring/any" $ nf (B.any even) bytestring1000
+    , bench "vector/any"     $ nf (V.any even) vector1000
+    , bench "bytes/any"      $ nf (P.any even) bytes1000
+    ]
+
+scanl1 :: [Benchmark]
+scanl1 =
+    [ bench "bytestring/scanl1" $ nf (B.scanl1 (+)) bytestring1000
+    , bench "vector/scanl1"     $ nf (V.scanl1 (+)) vector1000
+    , bench "bytes/scanl1"      $ nf (P.scanl1 (+)) bytes1000
+    ]
+
+scanr1 :: [Benchmark]
+scanr1 =
+    [ bench "bytestring/scanr1" $ nf (B.scanr1 (+)) bytestring1000
+    , bench "vector/scanr1"     $ nf (V.scanr1 (+)) vector1000
+    , bench "bytes/scanr1"      $ nf (P.scanr1 (+)) bytes1000
     ]

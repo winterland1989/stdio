@@ -32,12 +32,6 @@ module Data.Vector
   , head, tail
   , last, init
 
-  -- * Reducing 'ByteString's (folds)
-  , foldl
-  , foldl'
-  , foldl1
-  , foldl1'
-
   -- * Transforming Vector
   , map
   , reverse
@@ -359,11 +353,6 @@ init (Vector arr s l)
     | l <= 0    = errorEmptyVector "init"
     | otherwise = Vector arr s (l-1)
 {-# INLINE init #-}
-
---------------------------------------------------------------------------------
---
--- Reducing 'PVector's (folds)
---
 
 --------------------------------------------------------------------------------
 -- * Transforming Vector
