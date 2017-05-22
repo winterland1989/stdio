@@ -186,14 +186,14 @@ any =
 
 scanl1 :: [Benchmark]
 scanl1 =
-    [ bench "bytestring/scanl1" $ nf (B.scanl1 (+)) bytestring1000
+    [ bench "bytestring/scanl1" $ nf (\x-> B.scanl1 (+) x) bytestring1000
     , bench "vector/scanl1"     $ nf (V.scanl1 (+)) vector1000
     , bench "bytes/scanl1"      $ nf (P.scanl1 (+)) bytes1000
     ]
 
 scanr1 :: [Benchmark]
 scanr1 =
-    [ bench "bytestring/scanr1" $ nf (B.scanr1 (+)) bytestring1000
+    [ bench "bytestring/scanr1" $ nf (\x -> B.scanr1 (+) x) bytestring1000
     , bench "vector/scanr1"     $ nf (V.scanr1 (+)) vector1000
     , bench "bytes/scanr1"      $ nf (P.scanr1 (+)) bytes1000
     ]

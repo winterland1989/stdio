@@ -13,7 +13,7 @@ data SeekMode = AbsoluteSeek        -- ^ the position of @hdl@ is set to @i@.
                                     -- from the end of the file.
     deriving (Eq, Ord, Enum, Read, Show)
 
-class SeekableFD f where
+class DiskFD f where
     fseek    :: f -> SeekMode -> Int64 -> IO Int64
     fgetSize :: f -> IO Int64
     fsetSize :: f -> Int64 -> IO ()
@@ -118,7 +118,14 @@ write Handle{..} (PVector ba s l) = modifyMVar writeBufLen $ \ wBufLen ->
 
 -- | Flush the buffer(if not empty).
 --
-flush :: (FD f) => Hand f -> IO ()
+flush :: (FD f) => Handle f -> IO ()
 flush Hand{..} = modifyMVar writeBufLen $ \ wBufLen ->
     when (wBufLen > 0) (hLoopWrite handle writeBuf writeBufSize)
     return (0, ())
+
+
+seek :: (DiskFD f) => Handle f -> SeekMode -> Int -> IO ()
+fileSize :: (DiskFD f) => Handle f -> IO Int
+getFileSize :: (DiskFD f) => Handle f -> Int -> IO ()
+setFileSize :: (DiskFD f) => Handle f -> Int -> IO ()
+

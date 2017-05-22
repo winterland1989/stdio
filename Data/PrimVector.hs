@@ -67,6 +67,16 @@ module Data.PrimVector
   , scanr
   , scanr1
 
+  -- ** Accumulating maps
+  , mapAccumL
+  , mapAccumR
+
+  -- ** Generating and unfolding ByteStrings
+  , replicate
+  , unfoldr
+  , unfoldrN
+
+  -- * Substrings
 
   ) where
 
@@ -604,7 +614,7 @@ minimum :: (Prim a, Ord a) => PrimVector a -> a
 minimum = undefined
 
 --------------------------------------------------------------------------------
--- * Building ByteStrings
+-- Scans
 
 -- | 'scanl' is similar to 'foldl', but returns a list of successive
 -- reduced values from the left.
@@ -616,16 +626,15 @@ minimum = undefined
 -- > last (scanl f z xs) == foldl f z xs.
 --
 scanl :: (Prim a, Prim b) => (b -> a -> b) -> b -> PrimVector a -> PrimVector b
-scanl f z (PrimVector ba s l) =
-    create (l+1) (\ mba -> writePrimArray mba 0 z >> go z (s+1) mba)
+scanl f z = \ (PrimVector ba s l) ->
+    create (l+1) (\ mba -> writePrimArray mba 0 z >> go ba z s 1 l mba)
   where
-    !sl = s + l
-    go !acc !i !mba
-        | i > sl = return ()
+    go !ba !acc !i !j !l !mba
+        | j > l = return ()
         | otherwise = do
-            let !acc' = acc `f` (indexPrimArray ba i)
-            writePrimArray mba (i-s) acc'
-            go acc' (i+1) mba
+            let acc' = acc `f` (indexPrimArray ba i)
+            writePrimArray mba j acc'
+            go ba acc' (i+1) (j+1) l mba
 {-# INLINE scanl #-}
 
 -- | 'scanl1' is a variant of 'scanl' that has no starting value argument.
@@ -634,31 +643,53 @@ scanl f z (PrimVector ba s l) =
 -- > scanl1 f [x1, x2, ...] == [x1, x1 `f` x2, ...]
 --
 scanl1 :: Prim a => (a -> a -> a) -> PrimVector a -> PrimVector a
-scanl1 f (PrimVector ba s l)
-    | l <= 0 = errorEmptyVector "scanl1"
-    | otherwise = scanl f (indexPrimArray ba s) (PrimVector ba (s+1) (l-1))
+scanl1 f = \ (PrimVector ba s l) ->
+    if l <= 0 then errorEmptyVector "scanl1"
+              else scanl f (indexPrimArray ba s) (PrimVector ba (s+1) (l-1))
 {-# INLINE scanl1 #-}
 
 -- | scanr is the right-to-left dual of scanl.
 --
 scanr :: (Prim a, Prim b) => (a -> b -> b) -> b -> PrimVector a -> PrimVector b
-scanr f z (PrimVector ba s l) =
-    create (l+1) (\ mba -> writePrimArray mba l z >> go z (s+l-1) mba)
+scanr f z = \ (PrimVector ba s l) ->
+    create (l+1) (\ mba -> writePrimArray mba l z >> go ba z (s+l-1) (l-1) mba)
   where
-    go !acc !i !mba
-        | i < s = return ()
+    go !ba !acc !i !j !mba
+        | j < 0 = return ()
         | otherwise = do
-            let !acc' = indexPrimArray ba i `f` acc
-            writePrimArray mba (i-s) acc'
-            go acc' (i-1) mba
+            let acc' = indexPrimArray ba i `f` acc
+            writePrimArray mba j acc'
+            go ba acc' (i-1) (j-1) mba
 {-# INLINE scanr #-}
 
 -- | 'scanr1' is a variant of 'scanr' that has no starting value argument.
 scanr1 :: Prim a => (a -> a -> a) -> PrimVector a -> PrimVector a
-scanr1 f (PrimVector ba s l)
-    | l <= 0 = errorEmptyVector "scanl1"
-    | otherwise = scanr f (indexPrimArray ba (s+l-1)) (PrimVector ba s (l-1))
+scanr1 f = \ (PrimVector ba s l) ->
+    if l <= 0 then errorEmptyVector "scanl1"
+              else scanr f (indexPrimArray ba (s+l-1)) (PrimVector ba s (l-1))
 {-# INLINE scanr1 #-}
+
+--------------------------------------------------------------------------------
+-- Accumulating maps
+
+mapAccumL :: (Prim b, Prim c) => (a -> b -> (a, c)) -> a -> PrimVector b -> (a, PrimVector c)
+mapAccumL f z = \ (PrimVector ba s l) -> create l (go z i ba)
+  where
+    TODO
+{-# INLINE mapAccumL #-}
+
+
+mapAccumR = undefined
+
+--  Generating and unfolding ByteStrings
+--
+replicate = undefined
+
+unfoldr = undefined
+
+unfoldrN = undefined
+
+
 
 --------------------------------------------------------------------------------
 --
