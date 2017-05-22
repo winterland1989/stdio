@@ -616,17 +616,17 @@ minimum = undefined
 -- > last (scanl f z xs) == foldl f z xs.
 --
 scanl :: (Prim a, Prim b) => (b -> a -> b) -> b -> PrimVector a -> PrimVector b
-scanl f z = \ (PrimVector ba s l) ->
-    create (l+1) (\ mba -> writePrimArray mba 0 z >> go ba z s 1 l mba)
+scanl f z (PrimVector ba s l) =
+    create (l+1) (\ mba -> writePrimArray mba 0 z >> go z (s+1) mba)
   where
-    go !ba !acc !i !j !l !mba
-        | j >= l = return ()
+    !sl = s + l
+    go !acc !i !mba
+        | i > sl = return ()
         | otherwise = do
             let !acc' = acc `f` (indexPrimArray ba i)
-            writePrimArray mba j acc'
-            go ba acc' (i+1) (j+1) l mba
+            writePrimArray mba (i-s) acc'
+            go acc' (i+1) mba
 {-# INLINE scanl #-}
-
 
 -- | 'scanl1' is a variant of 'scanl' that has no starting value argument.
 -- This function will fuse.
@@ -642,15 +642,15 @@ scanl1 f (PrimVector ba s l)
 -- | scanr is the right-to-left dual of scanl.
 --
 scanr :: (Prim a, Prim b) => (a -> b -> b) -> b -> PrimVector a -> PrimVector b
-scanr f z = \ (PrimVector ba s l) ->
-    create (l+1) (\ mba -> writePrimArray mba l z >> go ba z s (l-1) mba)
+scanr f z (PrimVector ba s l) =
+    create (l+1) (\ mba -> writePrimArray mba l z >> go z (s+l-1) mba)
   where
-    go ba !acc !i !j !mba
-        | j < 0 = return ()
+    go !acc !i !mba
+        | i < s = return ()
         | otherwise = do
             let !acc' = indexPrimArray ba i `f` acc
-            writePrimArray mba j acc
-            go ba acc' (i-1) (j-1) mba
+            writePrimArray mba (i-s) acc'
+            go acc' (i-1) mba
 {-# INLINE scanr #-}
 
 -- | 'scanr1' is a variant of 'scanr' that has no starting value argument.
