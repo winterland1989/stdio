@@ -66,6 +66,11 @@ main = defaultMain $ List.reverse
     , bgroup "all" any
     , bgroup "scanl1" scanl1
     , bgroup "scanr1" scanr1
+    , bgroup "mapAccumL" mapAccumL
+    , bgroup "mapAccumR" mapAccumR
+    , bgroup "replicate" replicate
+    , bgroup "unfoldr" unfoldr
+    , bgroup "unfoldrN" unfoldrN
     ]
 
 singleton :: [Benchmark]
@@ -197,3 +202,44 @@ scanr1 =
     , bench "vector/scanr1"     $ nf (V.scanr1 (+)) vector1000
     , bench "bytes/scanr1"      $ nf (P.scanr1 (+)) bytes1000
     ]
+
+accumStep :: Word8 -> Word8 -> (Word8, Word8)
+accumStep x y = (x+1, x*y)
+
+mapAccumL :: [Benchmark]
+mapAccumL =
+    [ bench "bytestring/mapAccumL" $ nf (\x -> B.mapAccumL accumStep 0 x) bytestring1000
+    , bench "bytes/mapAccumL"      $ nf (P.mapAccumL accumStep 0) bytes1000
+    ]
+
+mapAccumR :: [Benchmark]
+mapAccumR =
+    [ bench "bytestring/mapAccumR" $ nf (\x -> B.mapAccumR accumStep 0 x) bytestring1000
+    , bench "bytes/mapAccumR"      $ nf (P.mapAccumR accumStep 0) bytes1000
+    ]
+
+replicate :: [Benchmark]
+replicate =
+    [ bench "bytestring/replicate" $ nf (B.replicate 1000) (127::Word8)
+    , bench "vector/replicate"     $ nf (V.replicate 1000) (127::Word8)
+    , bench "bytes/replicate"      $ nf (P.replicate 1000) (127::Word8)
+    ]
+
+unfoldrStep :: Word8 -> Maybe (Word8, Word8)
+unfoldrStep x | x < 254   = Just (x + 1, x + 1)
+              | otherwise = Nothing
+
+unfoldr :: [Benchmark]
+unfoldr =
+    [ bench "bytestring/unfoldr" $ nf (B.unfoldr unfoldrStep) (0::Word8)
+    , bench "vector/unfoldr"     $ nf (V.unfoldr unfoldrStep) (0::Word8)
+    , bench "bytes/unfoldr"      $ nf (P.unfoldr unfoldrStep) (0::Word8)
+    ]
+
+unfoldrN :: [Benchmark]
+unfoldrN =
+    [ bench "bytestring/unfoldrN" $ nf (\ z -> B.unfoldrN 200 unfoldrStep z) (0::Word8)
+    , bench "vector/unfoldrN"     $ nf (V.unfoldrN 200 unfoldrStep) (0::Word8)
+    , bench "bytes/unfoldrN"      $ nf (P.unfoldrN 200 unfoldrStep) (0::Word8)
+    ]
+

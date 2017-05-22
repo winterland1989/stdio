@@ -20,7 +20,7 @@ module Data.PrimVector
   ( -- * The 'PrimVector' type
     PrimVector(..)
     -- * Creating 'PrimVector' and conversion between list
-  , createN
+  , create, creating, createN
   , empty
   , singleton
   , pack, packN, packR, packRN
@@ -35,7 +35,7 @@ module Data.PrimVector
   , cons, snoc, uncons, unsnoc
   , head, tail
   , last, init
-  -- * Transforming PrimVector
+  -- * Transforming primitive vector
   , map
   , reverse
   , intersperse
@@ -44,7 +44,7 @@ module Data.PrimVector
   , transpose
 
 
-  -- * Reducing 'ByteString's (folds)
+  -- * Reducing primitive vector (folds)
   , foldl
   , foldl'
   , foldl1'
@@ -60,7 +60,7 @@ module Data.PrimVector
   , maximum
   , minimum
 
-  -- * Building ByteStrings
+  -- * Building primitive vector
     -- ** Scans
   , scanl
   , scanl1
@@ -71,12 +71,14 @@ module Data.PrimVector
   , mapAccumL
   , mapAccumR
 
-  -- ** Generating and unfolding ByteStrings
+  -- ** Generating and unfolding primitive vector
   , replicate
   , unfoldr
   , unfoldrN
 
   -- * Substrings
+  , take
+  , drop
 
   ) where
 
@@ -190,7 +192,7 @@ instance NFData (PrimVector a) where
     rnf PrimVector{} = ()
 
 instance (Prim a, Show a) => Show (PrimVector a) where
-    showsPrec p ps r = showsPrec p (unpack ps) r
+    showsPrec p v r = showsPrec p (unpack v) r
 
 instance (Prim a, Read a) => Read (PrimVector a) where
     readsPrec p str = [ (pack x, y) | (x, y) <- readsPrec p str ]
@@ -217,6 +219,20 @@ create l fill = runST (do
         return (PrimVector ba 0 l)
     )
 {-# INLINE create #-}
+
+-- | Create a 'PrimVector', return both the vector and the monadic result.
+--
+creating :: Prim a
+         => Int  -- length in elements of type @a@
+         -> (forall s. MutablePrimArray s a -> ST s b)  -- initialization function
+         -> (b, PrimVector a)
+creating l fill = runST (do
+        mba <- newPrimArray l
+        b <- fill mba
+        ba <- unsafeFreezePrimArray mba
+        return (b, PrimVector ba 0 l)
+    )
+{-# INLINE creating #-}
 
 -- | Create a 'PrimVector' up to a specific length.
 --
@@ -559,7 +575,7 @@ foldr1' f z = \ (PrimVector ba s l) ->
 --
 -- Special folds
 --
--- | /O(n)/ Concatenate a list of ByteStrings.
+-- | /O(n)/ Concatenate a list of primitive vector.
 --
 -- Note: 'concat' have to force the entire list to filter out empty 'PrimVector' and calculate
 -- the length for allocation.
@@ -672,24 +688,111 @@ scanr1 f = \ (PrimVector ba s l) ->
 --------------------------------------------------------------------------------
 -- Accumulating maps
 
+-- | The 'mapAccumL' function behaves like a combination of 'map' and
+-- 'foldl'; it applies a function to each element of a primitive vector,
+-- passing an accumulating parameter from left to right, and returning a
+-- final value of this accumulator together with the new list.
+--
 mapAccumL :: (Prim b, Prim c) => (a -> b -> (a, c)) -> a -> PrimVector b -> (a, PrimVector c)
-mapAccumL f z = \ (PrimVector ba s l) -> create l (go z i ba)
+mapAccumL f z = \ (PrimVector ba s l) -> creating l (go z s 0 (s+l) ba)
   where
-    TODO
+    go !acc !i !j !sl !ba !mba
+        | i >= sl   = return acc
+        | otherwise = do
+            let (acc', c) = acc `f` indexPrimArray ba i
+            writePrimArray mba j c
+            go acc' (i+1) (j+1) sl ba mba
 {-# INLINE mapAccumL #-}
 
-
-mapAccumR = undefined
-
---  Generating and unfolding ByteStrings
+-- | The 'mapAccumR' function behaves like a combination of 'map' and
+-- 'foldr'; it applies a function to each element of a primitive vector,
+-- passing an accumulating parameter from right to left, and returning a
+-- final value of this accumulator together with the new primitive vector.
 --
-replicate = undefined
+mapAccumR :: (Prim b, Prim c) => (a -> b -> (a, c)) -> a -> PrimVector b -> (a, PrimVector c)
+mapAccumR f z = \ (PrimVector ba s l) -> creating l (go z (s+l-1) s ba)
+  where
+    go !acc !i !s !ba !mba
+        | i < s     = return acc
+        | otherwise = do
+            let (acc', c) = acc `f` indexPrimArray ba i
+            writePrimArray mba (i-s) c
+            go acc' (i-1) s ba mba
+{-# INLINE mapAccumR #-}
 
-unfoldr = undefined
+--  Generating and unfolding primitive vector
+--
+---- | /O(n)/ 'replicate' @n x@ is a primitive vector of length @n@ with @x@
+-- the value of every element. The following holds:
+--
+-- > replicate w c = unfoldr w (\u -> Just (u,u)) c
+--
+-- This implemenation uses @setByteArray#@.
+--
+replicate :: (Prim a) => Int -> a -> PrimVector a
+replicate n x = create n (\ mba -> setPrimArray mba 0 n x)
+{-# INLINE replicate #-}
 
-unfoldrN = undefined
+-- | /O(n)/, where /n/ is the length of the result.  The 'unfoldr'
+-- function is analogous to the List \'unfoldr\'.  'unfoldr' builds a
+-- primitive vector from a seed value. The function takes the element and
+-- returns 'Nothing' if it is done producing the primitive vector or returns
+-- 'Just' @(a,b)@, in which case, @a@ is the next byte in the string,
+-- and @b@ is the seed value for further production.
+--
+-- Examples:
+--
+-- >    unfoldr (\x -> if x <= 5 then Just (x, x + 1) else Nothing) 0
+-- > == pack [0, 1, 2, 3, 4, 5]
+--
+unfoldr :: Prim b => (a -> Maybe (b, a)) -> a -> PrimVector b
+unfoldr f = pack . List.unfoldr f
+{-# INLINE unfoldr #-}
 
+-- | /O(n)/ Like 'unfoldr', 'unfoldrN' builds a ByteString from a seed
+-- value.  However, the length of the result is limited by the first
+-- argument to 'unfoldrN'.  This function is more efficient than 'unfoldr'
+-- when the maximum length of the result is known.
+--
+-- The following equation relates 'unfoldrN' and 'unfoldr':
+--
+-- > fst (unfoldrN n f s) == take n (unfoldr f s)
+--
+unfoldrN :: Prim b => Int -> (a -> Maybe (b, a)) -> a -> (PrimVector b, Maybe a)
+unfoldrN n f
+    | n < 0     = \ z -> (empty, Just z)
+    | otherwise = \ z ->
+        let ((r, len), v) = creating n (go z 0)
+        in (take len v, r)
+  where
+    go !acc !i !mba
+      | n == i    = return (Just acc, i)
+      | otherwise = case f acc of
+          Nothing     -> return (Nothing, i)
+          Just (x, acc') -> do writePrimArray mba i x
+                               go acc' (i+1) mba
+{-# INLINE unfoldrN #-}
 
+-- ---------------------------------------------------------------------
+-- Substrings
+
+-- | /O(1)/ 'take' @n@, applied to a ByteString @xs@, returns the prefix
+-- of @xs@ of length @n@, or @xs@ itself if @n > 'length' xs@.
+take :: Prim a => Int -> PrimVector a -> PrimVector a
+take n v@(PrimVector ba s l)
+    | n <= 0    = empty
+    | n >= l    = v
+    | otherwise = PrimVector ba s n
+{-# INLINE take #-}
+
+-- | /O(1)/ 'drop' @n xs@ returns the suffix of @xs@ after the first @n@
+-- elements, or @[]@ if @n > 'length' xs@.
+drop :: Prim a => Int -> PrimVector a -> PrimVector a
+drop n v@(PrimVector ba s l)
+    | n <= 0    = v
+    | n >= l    = empty
+    | otherwise = PrimVector ba (s+n) (l-n)
+{-# INLINE drop #-}
 
 --------------------------------------------------------------------------------
 --
