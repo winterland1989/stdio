@@ -6,7 +6,20 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BangPatterns #-}
 
-module Data.Array where
+module Data.Array (
+  -- * Common array interface
+    Arr(..)
+  -- * Boxed array type
+  , Array(..)
+  , uninitialized
+  , MutableArray(..)
+  -- * Primitive array type
+  , PrimArray(..)
+  , MutablePrimArray(..)
+  , newPinnedPrimArray, newAlignedPinnedPrimArray
+  , primArrayContents, mutablePrimArrayContents
+  , isPrimArrayPinned, isMutablePrimArrayPinned
+  ) where
 
 import Data.Primitive.Types
 import Control.Monad.Primitive
@@ -18,7 +31,7 @@ import GHC.ST
 uninitialized :: a
 uninitialized = error "Data.Array: uninitialized element accessed"
 
-class IsList (arr a) => Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr where
+class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr where
     -- | Test
     newArr :: (PrimMonad m, PrimState m ~ s) => Int -> m (marr s a)
     newArrWith :: (PrimMonad m, PrimState m ~ s) => Int -> a -> m (marr s a)
@@ -50,7 +63,7 @@ class IsList (arr a) => Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> ma
     sizeofArr :: arr a -> Int
     sizeofMutableArr :: marr s a -> Int
 
-instance IsList (arr a) => Arr MutableArray Array a where
+instance Arr MutableArray Array a where
     newArr n = newArray n uninitialized
     {-# INLINE newArr #-}
     newArrWith = newArray

@@ -3,6 +3,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE UnliftedFFITypes #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Data.Primitive.PrimArray (
   -- * Types
