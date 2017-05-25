@@ -1,12 +1,14 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PackageImports #-}
 
 module Main (main) where
 
 import Criterion.Main
 import qualified Data.ByteString as B
 import qualified Data.PrimVector as P
+import qualified "stdio" Data.Vector as VV
 import qualified Data.List as List
 import qualified Data.Vector.Unboxed as V
 import Data.Word
@@ -48,11 +50,11 @@ wordZ :: Word8
 wordZ = 0
 
 main :: IO ()
-main = defaultMain $ List.reverse
+main = defaultMain -- $ List.reverse
     [ bgroup "singleton" singleton
     , bgroup "pack/100 elems"  packSmall
     , bgroup "pack/10000 elems"  packLarge
-    , bgroup "unpack" unpack
+  -- , bgroup "unpack" unpack
     , bgroup "map" map
     , bgroup "reverse" reverse
     , bgroup "intersperse" intersperse
@@ -85,8 +87,10 @@ packSmall =
     , bench "vector/fromList"  $ nf V.fromList list100
     , bench "bytes/pack"       $ nf P.pack list100
     , bench "bytes/packN 64"   $ nf (P.packN 64)  list100
+    , bench "bytes/VV.packN 64"   $ nf (VV.packN 64 :: [Word8] -> P.Bytes)  list100
     , bench "bytes/packN 100"      $ nf (P.packN 100) list100
     , bench "bytes/packR"      $ nf P.packR list100
+    , bench "bytes/VV.packR"      $ nf (VV.packR :: [Word8] -> P.Bytes) list100
     ]
 
 packLarge :: [Benchmark]
@@ -95,9 +99,12 @@ packLarge =
     , bench "vector/fromList"   $ nf V.fromList list10000
     , bench "bytes/pack"        $ nf P.pack list10000
     , bench "bytes/packN 64"    $ nf (P.packN 64) list10000
+    , bench "bytes/VV.packN 64"    $ nf (VV.packN 64 :: [Word8] -> P.Bytes) list10000
     , bench "bytes/packN 10000" $ nf (P.packN 10000) list10000
     , bench "bytes/packR"       $ nf P.packR list10000
+    , bench "bytes/VV.packR"      $ nf (VV.packR :: [Word8] -> P.Bytes) list10000
     , bench "bytes/packN 10000/fused" $ nf (\ n -> P.packN n (List.replicate n (128 :: Word8))) 10000
+    , bench "bytes/VV.packN 10000/fused" $ nf (\ n -> VV.packN n (List.replicate n (128 :: Word8)) :: P.Bytes) 10000
     ]
 
 unpack :: [Benchmark]
@@ -111,6 +118,7 @@ map =
     [ bench "bytestring/map"  $ nf (\ bs -> B.map (+1) bs) bytestring1000
     , bench "vector/map"      $ nf (V.map (+1)) vector1000
     , bench "bytes/map"       $ nf (P.map (+1)) bytes1000
+    , bench "bytes/VV.map"       $ nf (VV.map (+1) :: P.Bytes -> P.Bytes) bytes1000
     , bench "bytes/pack . List.map f . unpack" $
         nf (P.packN 1000 . List.map (+1) . P.unpack) bytes1000
     ]
@@ -145,6 +153,7 @@ foldl' =
     [ bench "bytestring/foldl'" $ nf (\ x -> B.foldl' (+) wordZ x) bytestring1000
     , bench "vector/foldl'"     $ nf (V.foldl' (+) wordZ) vector1000
     , bench "bytes/foldl'"      $ nf (P.foldl' (+) wordZ) bytes1000
+    , bench "bytes/VV.foldl'"      $ nf (VV.foldl' (+) wordZ) bytes1000
     ]
 
 foldl :: [Benchmark]
@@ -152,6 +161,7 @@ foldl =
     [ bench "bytestring/foldl" $ nf (\ x -> B.foldl (+) wordZ x) bytestring1000
     , bench "vector/foldl"     $ nf (V.foldl (+) wordZ) vector1000
     , bench "bytes/foldl"      $ nf (P.foldl (+) wordZ) bytes1000
+    , bench "bytes/VV.foldl"      $ nf (VV.foldl (+) wordZ) bytes1000
     ]
 
 foldr' :: [Benchmark]
