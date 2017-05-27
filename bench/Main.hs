@@ -7,7 +7,7 @@ module Main (main) where
 
 import Criterion.Main
 import qualified Data.ByteString as B
-import qualified Data.PrimVector as P
+import qualified "stdio" Data.Vector as P
 import qualified "stdio" Data.Vector as VV
 import qualified Data.List as List
 import qualified Data.Vector.Unboxed as V

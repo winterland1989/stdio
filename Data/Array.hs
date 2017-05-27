@@ -8,7 +8,7 @@
 {-# LANGUAGE BangPatterns #-}
 
 module Data.Array (
-  -- * Common array interface
+  -- * Arr typeclass
     Arr(..)
   -- * Boxed array type
   , Array(..)
@@ -37,6 +37,9 @@ import Control.Exception (assert)
 uninitialized :: a
 uninitialized = error "Data.Array: uninitialized element accessed"
 
+-- | A typeclass to unify box and unboxed array operations.
+--
+--
 class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr where
     -- | Test
     newArr :: (PrimMonad m, PrimState m ~ s) => Int -> m (marr s a)

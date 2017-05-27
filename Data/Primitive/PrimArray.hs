@@ -32,6 +32,7 @@ module Data.Primitive.PrimArray (
 import Control.Monad.Primitive
 import Data.Primitive
 import Data.Typeable
+import Data.Data
 import Foreign.C.Types (CInt(..))
 import GHC.Ptr (Ptr(..))
 import GHC.Types
@@ -41,11 +42,13 @@ import GHC.ST
 
 -- | Primitive array tagged with element type @a@.
 --
-newtype PrimArray a = PrimArray ByteArray deriving Typeable
+newtype PrimArray a = PrimArray ByteArray
+    deriving (Typeable, Data)
 
 -- | Mutable primitive array tagged with element type @a@.
 --
-newtype MutablePrimArray s a = MutablePrimArray (MutableByteArray s) deriving Typeable
+newtype MutablePrimArray s a = MutablePrimArray (MutableByteArray s)
+    deriving (Typeable, Data)
 
 -- | Create a new mutable primitive array of the specified size.
 newPrimArray :: forall m a . (PrimMonad m, Prim a) => Int -> m (MutablePrimArray (PrimState m) a)
