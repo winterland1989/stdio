@@ -12,6 +12,7 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE UnliftedFFITypes #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 
 module Data.Vector (
@@ -80,7 +81,8 @@ module Data.Vector (
 import Control.DeepSeq
 import Control.Exception (assert)
 import GHC.Exts (IsList(..))
-import GHC.ST
+import Control.Monad.ST.Unsafe
+import Control.Monad.ST
 import Data.Primitive
 import Data.Primitive.Types
 import Data.Primitive.ByteArray
@@ -144,6 +146,10 @@ instance Vec Vector a where
     {-# INLINE toArr #-}
     fromArr arr s l = Vector arr s l
     {-# INLINE fromArr #-}
+
+-- | A pattern synonyms for matching the underline array, offset and length.
+--
+pattern VecPat ba s l <- (toArr -> (ba,s,l))
 
 instance Eq a => Eq (Vector a) where
     v1 == v2 = eqVector v1 v2
@@ -433,7 +439,7 @@ data SP3 a = SP3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int a
 -- This function is a /good producer/ in the sense of build/foldr fusion.
 --
 unpack :: Vec v a => v a -> [a]
-unpack (toArr -> (ba,s,l)) = List.map (indexArr ba) [s..s+l-1]
+unpack (VecPat ba s l) = List.map (indexArr ba) [s..s+l-1]
 {-# INLINE unpack #-}
 
 -- | /O(n)/ Convert vector to a list in reverse order.
@@ -441,7 +447,7 @@ unpack (toArr -> (ba,s,l)) = List.map (indexArr ba) [s..s+l-1]
 -- This function is a /good producer/ in the sense of build/foldr fusion.
 --
 unpackR :: Vec v a => v a -> [a]
-unpackR (toArr -> (ba,s,l)) =
+unpackR (VecPat ba s l) =
     let !sl = s + l
     in List.map (\ i -> indexArr ba (sl-i)) [1..l]
 {-# INLINE unpackR #-}
@@ -452,7 +458,7 @@ unpackR (toArr -> (ba,s,l)) =
 -- |  /O(1)/ The length of a vector.
 --
 length :: Vec v a => v a -> Int
-length (toArr -> (_,_,l)) = l
+length (VecPat _ _ l) = l
 {-# INLINE length #-}
 
 -- | /O(1)/ Test whether a vector is empty.
@@ -464,9 +470,9 @@ null v = length v == 0
 -- | /O(m+n)/
 --
 append :: Vec v a => v a -> v a -> v a
-append (toArr -> (_,_,0)) b                    = b
-append a                  (toArr -> (_,_,0)) = a
-append (toArr -> (baA,sA,lA)) (toArr -> (baB,sB,lB)) = create (lA+lB) $ \ mba -> do
+append (VecPat _ _ 0) b                    = b
+append a                (VecPat _ _ 0)     = a
+append (VecPat baA sA lA) (VecPat baB sB lB) = create (lA+lB) $ \ mba -> do
     copyArr mba 0  baA sA lA
     copyArr mba lA baB sB lB
 {-# INLINE append #-}
@@ -475,7 +481,7 @@ append (toArr -> (baA,sA,lA)) (toArr -> (baB,sB,lB)) = create (lA+lB) $ \ mba ->
 -- complexity, as it requires making a copy.
 --
 cons :: Vec v a => a -> v a -> v a
-cons x (toArr -> (ba,s,l)) = create (l+1) $ \ mba -> do
+cons x (VecPat ba s l) = create (l+1) $ \ mba -> do
     writeArr mba 0 x
     copyArr mba 1 ba s l
 {-# INLINE cons #-}
@@ -483,7 +489,7 @@ cons x (toArr -> (ba,s,l)) = create (l+1) $ \ mba -> do
 -- | /O(n)/ Append a byte to the end of a vector
 --
 snoc :: Vec v a => v a -> a -> v a
-snoc (toArr -> (ba,s,l)) x = create (l+1) $ \ mba -> do
+snoc (VecPat ba s l) x = create (l+1) $ \ mba -> do
     copyArr mba 0 ba s l
     writeArr mba l x
 {-# INLINE snoc #-}
@@ -492,7 +498,7 @@ snoc (toArr -> (ba,s,l)) x = create (l+1) $ \ mba -> do
 -- if it is empty.
 --
 uncons :: Vec v a => v a -> Maybe (a, v a)
-uncons (toArr -> (ba,s,l))
+uncons (VecPat ba s l)
     | l <= 0    = Nothing
     | otherwise = Just (indexArr ba s, fromArr ba (s+1) (l-1))
 {-# INLINE uncons #-}
@@ -501,7 +507,7 @@ uncons (toArr -> (ba,s,l))
 -- if it is empty.
 --
 unsnoc :: Vec v a => v a -> Maybe (v a, a)
-unsnoc (toArr -> (ba,s,l))
+unsnoc (VecPat ba s l)
     | l <= 0    = Nothing
     | otherwise = Just (fromArr ba s (l-1), indexArr ba (s+l-1))
 {-# INLINE unsnoc #-}
@@ -510,7 +516,7 @@ unsnoc (toArr -> (ba,s,l))
 -- An exception will be thrown in the case of an empty PrimVector.
 --
 head :: Vec v a => v a -> a
-head (toArr -> (ba,s,l))
+head (VecPat ba s l)
     | l <= 0    = errorEmptyVector "head"
     | otherwise = indexArr ba s
 {-# INLINE head #-}
@@ -518,7 +524,7 @@ head (toArr -> (ba,s,l))
 -- | /O(1)/ Extract the elements after the head of a PrimVector, which must be non-empty.
 -- An exception will be thrown in the case of an empty PrimVector.
 tail :: Vec v a => v a -> v a
-tail (toArr -> (ba,s,l))
+tail (VecPat ba s l)
     | l <= 0    = errorEmptyVector "tail"
     | otherwise = fromArr ba (s+1) (l-1)
 {-# INLINE tail #-}
@@ -527,7 +533,7 @@ tail (toArr -> (ba,s,l))
 -- An exception will be thrown in the case of an empty PrimVector.
 --
 last :: Vec v a => v a -> a
-last (toArr -> (ba,s,l))
+last (VecPat ba s l)
     | l <= 0    = errorEmptyVector "last"
     | otherwise = indexArr ba (s+l-1)
 {-# INLINE last #-}
@@ -535,15 +541,15 @@ last (toArr -> (ba,s,l))
 -- | /O(1)/ Extract the elements after the head of a PrimVector, which must be non-empty.
 -- An exception will be thrown in the case of an empty PrimVector.
 init :: Vec v a => v a -> v a
-init (toArr -> (ba,s,l))
+init (VecPat ba s l)
     | l <= 0    = errorEmptyVector "init"
     | otherwise = fromArr ba s (l-1)
 {-# INLINE init #-}
 
 --------------------------------------------------------------------------------
 
-map :: forall u a v b. (Vec u a, Vec v b) => (a -> b) -> u a -> v b
-map f = \ (toArr -> (ba, s, l)) -> create l (go ba (l+s) s 0)
+map :: forall u v a b. (Vec u a, Vec v b) => (a -> b) -> u a -> v b
+map f = \ (VecPat ba s l) -> create l (go ba (l+s) s 0)
   where
     go :: (IArray u a) -> Int -> Int -> Int -> (MArray v s b) -> ST s ()
     go !ba !sl !i !j !mba  | i >= sl = return ()
@@ -554,11 +560,11 @@ map f = \ (toArr -> (ba, s, l)) -> create l (go ba (l+s) s 0)
 
 -- | /O(n)/ 'reverse' @xs@ efficiently returns the elements of @xs@ in reverse order.
 --
-reverse :: forall v u a. (Vec v a, Vec u a) => v a -> u a
-reverse (toArr -> (ba,s,l)) = create l (go s)
+reverse :: forall v a. (Vec v a) => v a -> v a
+reverse (VecPat ba s l) = create l (go s)
   where
     !sl = s + l -1
-    go :: Int -> MArray u s a -> ST s ()
+    go :: Int -> MArray v s a -> ST s ()
     go !i !mba | i > sl = return ()
                | otherwise = do let x = indexArr ba i
                                 writeArr mba (sl-i) x
@@ -577,14 +583,15 @@ reverseBytes (PrimVector (PrimArray (ByteArray ba#)) s l) =
 -- the 'PrimVector'.  It is analogous to the intersperse function on
 -- Lists.
 --
-intersperse :: Vec v a => a -> v a -> v a
-intersperse x v@(toArr -> (ba,s,l))
+intersperse :: forall v a. Vec v a => a -> v a -> v a
+intersperse x v@(VecPat ba s l)
     | l < 2  = v
     | otherwise = create (2*l-1) (go s 0)
    where
     sl = s + l -1
+    go :: Int -> Int -> MArray v s a -> ST s ()
     go !i !j !mba
-        | i == sl = writeArr mba j (indexArr ba i)
+        | i == sl = writeArr mba j =<< indexArrM ba i
         | otherwise = do
             writeArr mba j (indexArr ba i)
             writeArr mba (j+1) (indexArr ba i)
@@ -617,12 +624,12 @@ intercalate s = concat . List.intersperse s
 intercalateElem :: Vec v a => a -> [v a] -> v a
 intercalateElem w = \ vs -> create (len vs) (copy 0 vs)
   where
-    len []                  = 0
-    len [PrimVector _ _ l]     = l
-    len (PrimVector _ _ l:vs) = l + 1 + len vs
+    len []                      = 0
+    len [VecPat _ _ l]    = l
+    len (VecPat _ _ l:vs) = l + 1 + len vs
 
     copy !i []                 !mba = return ()
-    copy !i (PrimVector ba s l:vs) !mba = do
+    copy !i (VecPat ba s l:vs) !mba = do
         let !i' = i + l
         copyArr mba i ba s l
         copy i' vs mba
@@ -645,17 +652,17 @@ foldl f z = List.foldl f z . unpack
 {-# INLINE foldl #-}
 
 foldl' :: (Vec v a) => (b -> a -> b) -> b -> v a -> b
-foldl' f z = \ (toArr -> (ba, s, l)) -> go z s (s+l) ba
+foldl' f z = \ (VecPat ba s l) -> go z s (s+l) ba
   where
     -- tail recursive; traverses array left to right
     go !acc !p !q ba | p >= q    = acc
                      | otherwise = go (f acc (indexArr ba p)) (p + 1) q ba
 {-# INLINE foldl' #-}
 
-foldl1' :: Vec v a => (a -> a -> a) -> a -> v a -> a
-foldl1' f z = \ (toArr -> (ba,s,l)) ->
+foldl1' :: forall v a. Vec v a => (a -> a -> a) -> a -> v a -> a
+foldl1' f z = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "foldl1'"
-              else foldl' f (indexArr ba s) (fromArr ba (s+1) (l-1))
+              else foldl' f (indexArr ba s) (fromArr ba (s+1) (l-1) :: v a)
 {-# INLINE foldl1' #-}
 
 
@@ -664,17 +671,17 @@ foldr f z = List.foldr f z . unpack
 {-# INLINE foldr #-}
 
 foldr' :: Vec v a => (a -> b -> b) -> b -> v a -> b
-foldr' f z =  \ (toArr -> (ba,s,l)) -> go z (s+l-1) s ba
+foldr' f z =  \ (VecPat ba s l) -> go z (s+l-1) s ba
   where
     -- tail recursive; traverses array right to left
     go !acc !p !q ba | p < q     = acc
                      | otherwise = go (f (indexArr ba p) acc) (p - 1) q ba
 {-# INLINE foldr' #-}
 
-foldr1' :: Vec v a => (a -> a -> a) -> a -> v a -> a
-foldr1' f z = \ (toArr -> (ba,s,l)) ->
+foldr1' :: forall v a. Vec v a => (a -> a -> a) -> a -> v a -> a
+foldr1' f z = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "foldr1'"
-              else foldl' f (indexArr ba (s+l-1)) (fromArr ba s (l-1))
+              else foldl' f (indexArr ba (s+l-1)) (fromArr ba s (l-1) :: v a)
 {-# INLINE foldr1' #-}
 
 --------------------------------------------------------------------------------
@@ -695,7 +702,7 @@ concat vs = case pre 0 0 vs of
     -- pre scan to decide if we really need to copy and calculate total length
     pre :: Int -> Int -> [v a] -> (Int, Int)
     pre !nacc !lacc [] = (nacc, lacc)
-    pre !nacc !lacc (v@(toArr ->(_,_,l)):vs)
+    pre !nacc !lacc (v@(VecPat _ _ l):vs)
         | l <= 0    = pre nacc lacc vs
         | otherwise = pre (nacc+1) (l+lacc) vs
 
@@ -749,7 +756,7 @@ minimum = undefined
 -- > last (scanl f z xs) == foldl f z xs.
 --
 scanl :: forall v u a b. (Vec v a, Vec u b) => (b -> a -> b) -> b -> v a -> u b
-scanl f z = \ (toArr -> (ba,s,l)) ->
+scanl f z = \ (VecPat ba s l) ->
     create (l+1) (\ mba -> writeArr mba 0 z >> go ba z s 1 l mba)
   where
     go :: IArray v a -> b -> Int -> Int -> Int -> MArray u s b -> ST s ()
@@ -766,16 +773,16 @@ scanl f z = \ (toArr -> (ba,s,l)) ->
 --
 -- > scanl1 f [x1, x2, ...] == [x1, x1 `f` x2, ...]
 --
-scanl1 :: Vec v a => (a -> a -> a) -> v a -> v a
-scanl1 f = \ (toArr -> (ba,s,l)) ->
+scanl1 :: forall v a. Vec v a => (a -> a -> a) -> v a -> v a
+scanl1 f = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "scanl1"
-              else scanl f (indexArr ba s) (fromArr ba (s+1) (l-1))
+              else scanl f (indexArr ba s) (fromArr ba (s+1) (l-1) :: v a)
 {-# INLINE scanl1 #-}
 
 -- | scanr is the right-to-left dual of scanl.
 --
 scanr :: forall v u a b. (Vec v a, Vec u b) => (a -> b -> b) -> b -> v a -> u b
-scanr f z = \ (toArr -> (ba,s,l)) ->
+scanr f z = \ (VecPat ba s l) ->
     create (l+1) (\ mba -> writeArr mba l z >> go ba z (s+l-1) (l-1) mba)
   where
     go :: IArray v a -> b -> Int -> Int -> MArray u s b -> ST s ()
@@ -788,10 +795,10 @@ scanr f z = \ (toArr -> (ba,s,l)) ->
 {-# INLINE scanr #-}
 
 -- | 'scanr1' is a variant of 'scanr' that has no starting value argument.
-scanr1 :: (Vec v a, Vec u a) => (a -> a -> a) -> v a -> u a
-scanr1 f = \ (toArr -> (ba,s,l)) ->
+scanr1 :: forall v a. Vec v a => (a -> a -> a) -> v a -> v a
+scanr1 f = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "scanl1"
-              else scanr f (indexArr ba (s+l-1)) (fromArr ba s (l-1))
+              else scanr f (indexArr ba (s+l-1)) (fromArr ba s (l-1) :: v a)
 {-# INLINE scanr1 #-}
 
 --------------------------------------------------------------------------------
@@ -803,7 +810,7 @@ scanr1 f = \ (toArr -> (ba,s,l)) ->
 -- final value of this accumulator together with the new list.
 --
 mapAccumL :: forall u v a b c. (Vec u b, Vec v c) => (a -> b -> (a, c)) -> a -> u b -> (a, v c)
-mapAccumL f z = \ (toArr -> (ba,s,l)) -> creating l (go z s 0 (s+l) ba)
+mapAccumL f z = \ (VecPat ba s l) -> creating l (go z s 0 (s+l) ba)
   where
     go :: a -> Int -> Int -> Int -> IArray u b -> MArray v s c -> ST s a
     go !acc !i !j !sl !ba !mba
@@ -820,7 +827,7 @@ mapAccumL f z = \ (toArr -> (ba,s,l)) -> creating l (go z s 0 (s+l) ba)
 -- final value of this accumulator together with the new primitive vector.
 --
 mapAccumR :: forall u v a b c. (Vec u b, Vec v c) => (a -> b -> (a, c)) -> a -> u b -> (a, v c)
-mapAccumR f z = \ (toArr -> (ba,s,l)) -> creating l (go z (s+l-1) s ba)
+mapAccumR f z = \ (VecPat ba s l) -> creating l (go z (s+l-1) s ba)
   where
     go :: a -> Int -> Int -> IArray u b -> MArray v s c -> ST s a
     go !acc !i !s !ba !mba
@@ -869,7 +876,7 @@ unfoldr f = pack . List.unfoldr f
 --
 -- > fst (unfoldrN n f s) == take n (unfoldr f s)
 --
-unfoldrN :: forall a b v. Vec v b => Int -> (a -> Maybe (b, a)) -> a -> (v b, Maybe a)
+unfoldrN :: forall v a b. Vec v b => Int -> (a -> Maybe (b, a)) -> a -> (v b, Maybe a)
 unfoldrN n f
     | n < 0     = \ z -> (empty, Just z)
     | otherwise = \ z ->
@@ -891,7 +898,7 @@ unfoldrN n f
 -- | /O(1)/ 'take' @n@, applied to a ByteString @xs@, returns the prefix
 -- of @xs@ of length @n@, or @xs@ itself if @n > 'length' xs@.
 take :: Vec v a => Int -> v a -> v a
-take n v@(toArr -> (ba,s,l))
+take n v@(VecPat ba s l)
     | n <= 0    = empty
     | n >= l    = v
     | otherwise = fromArr ba s n
@@ -900,7 +907,7 @@ take n v@(toArr -> (ba,s,l))
 -- | /O(1)/ 'drop' @n xs@ returns the suffix of @xs@ after the first @n@
 -- elements, or @[]@ if @n > 'length' xs@.
 drop :: Vec v a => Int -> v a -> v a
-drop n v@(toArr -> (ba,s,l))
+drop n v@(VecPat ba s l)
     | n <= 0    = v
     | n >= l    = empty
     | otherwise = fromArr ba (s+n) (l-n)
