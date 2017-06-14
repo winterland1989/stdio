@@ -3,36 +3,20 @@ module System.IO.Handle where
 
 import Control.Concurrent.MVar
 
--- SeekMode type
 
--- | A mode that determines the effect of 'hSeek' @hdl mode i@.
-data SeekMode = AbsoluteSeek        -- ^ the position of @hdl@ is set to @i@.
-              | RelativeSeek        -- ^ the position of @hdl@ is set to offset @i@
-                                    -- from the current position.
-              | SeekFromEnd         -- ^ the position of @hdl@ is set to offset @i@
-                                    -- from the end of the file.
-    deriving (Eq, Ord, Enum, Read, Show)
-
-class DiskFD f where
-    fseek    :: f -> SeekMode -> Int64 -> IO Int64
-    fgetSize :: f -> IO Int64
-    fsetSize :: f -> Int64 -> IO ()
-    fsync :: f -> IO ()
 
 class FD f where
-    type URI f
-    type Config f
+    type Path f
 
-    fopen :: URI f -> Config f -> IO f
+    fopen :: Path f -> IO f
     fclose :: f -> IO ()
 
     fread :: f -> Int -> Ptr Word8 -> IO Int
-    fwrite :: f -> Ptr Word8 -> Int -> IO Int
+    fwrite :: f -> Ptr Word8 -> Int -> IO ()
+    fflush :: f -> IO ()
 
-hLoopWrite :: Handle f => f -> Ptr Word8 -> Int -> IO ()
 
 
-newtype File = File FD
 
 -- | Handle
 --
@@ -46,11 +30,10 @@ newtype File = File FD
 
 data Handle f = Handle
     { fd  :: !f
-    , readBufSize  :: {-# UNPACK #-} !Int
-    , readBuf      :: {-# UNPACK #-} !MVar [Bytes]
-    , writeBufSize :: {-# UNPACK #-} !Int
-    , writeBuf     :: {-# UNPACK #-} !(Ptr Word8)
-    , writeBufLen  :: {-# UNPACK #-} !MVar Int
+    , readBufSize   :: {-# UNPACK #-} !Int
+    , readBuf       :: {-# UNPACK #-} !MVar [Bytes]
+    , writeBuf      :: {-# UNPACK #-} !(PrimArray Word8)
+    , writeBufIndex :: {-# UNPACK #-} !MVar Int
     }
 
 newHandle32K :: FD f => f -> IO (Handle f)
