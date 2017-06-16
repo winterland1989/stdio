@@ -74,8 +74,11 @@ module Data.Vector (
   -- * Substrings
   , take
   , drop
-
-
+  -- * Misc
+  , defaultInitSize
+  , chunkOverhead
+  , defaultChunkSize
+  , smallChunkSize
  ) where
 
 import Control.DeepSeq
@@ -362,11 +365,32 @@ singleton c = create 1 (\ mba -> writeArr mba 0 c)
 --
 -- | /O(n)/ Convert a list into a vector
 --
--- Alias for @'packN' 16@.
+-- Alias for @'packN' 'defaultInitSize'@.
 --
 pack :: Vec v a => [a] -> v a
-pack = packN 16
+pack = packN defaultInitSize
 {-# INLINE pack #-}
+
+-- | The chunk size used for I\/O. Currently set to 32k, less the memory management overhead
+defaultChunkSize :: Int
+defaultChunkSize = 32 * 1024 - chunkOverhead
+{-# INLINE defaultChunkSize #-}
+
+-- | The recommended chunk size. Currently set to 4k, less the memory management overhead
+smallChunkSize :: Int
+smallChunkSize = 32 * 1024 - chunkOverhead
+{-# INLINE smallChunkSize #-}
+
+-- | @defaultInitSize = 16 - chunkOverhead@
+--
+defaultInitSize :: Int
+defaultInitSize = 64 - chunkOverhead
+{-# INLINE defaultInitSize #-}
+
+-- | The memory management overhead. Currently this is tuned for GHC only.
+chunkOverhead :: Int
+chunkOverhead = 2 * sizeOf (undefined :: Int)
+{-# INLINE chunkOverhead #-}
 
 -- | /O(n)/ Convert a list into a vector with an approximate size.
 --
@@ -391,7 +415,7 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
         then do writeArr mba i x
                 let !i' = i+1
                 return (SP3 i' n mba)
-        else do let !n' = n `shiftL` 1
+        else do let !n' = (n + chunkOverhead) `shiftL` 1 - chunkOverhead
                     !i' = i+1
                 !mba' <- resizeMutableArr mba n'
                 writeArr mba' i x

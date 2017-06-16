@@ -16,6 +16,7 @@ import Data.Monoid (Monoid(..))
 import Data.Semigroup (Semigroup(..))
 #endif
 import Data.Word
+import Data.Bits (shiftL)
 import Data.Primitive
 import Debug.Trace
 import Control.Monad.ST.Unsafe
@@ -73,14 +74,6 @@ empty :: Builder
 empty = Builder id
 {-# INLINE empty #-}
 
--- | The memory management overhead. Currently this is tuned for GHC only.
-chunkOverhead :: Int
-chunkOverhead = 2 * sizeOf (undefined :: Int)
-
--- | The chunk size used for I\/O. Currently set to 32k, less the memory management overhead
-defaultChunkSize :: Int
-defaultChunkSize = 32 * k - chunkOverhead
-   where k = 1024
 
 -- | A builder that modify the resulting list of chunk.
 modifyChunks :: ([V.Bytes] -> [V.Bytes]) -> Builder
@@ -97,7 +90,8 @@ writeN n f = ensureFree n `append`
 -- | Ensure that there are at least @n@ many elements available.
 ensureFree :: Int -> Builder
 ensureFree !n = Builder $ \ k strategy buffer@(Buffer buf offset) -> do
-    let siz = A.sizeofMutableArr buf
+    let siz = A.sizeofMutableArr buf  -- You may think doing this will be slow
+                                      -- but this value lives in CPU cache for most of the time
     if siz - offset >= n
     then k strategy buffer
     else (runBuilder flush) k strategy buffer
@@ -111,20 +105,21 @@ flush = Builder $ \ k strategy buffer@(Buffer buf offset) ->
     let siz = A.sizeofMutableArr buf
     in case strategy of
         DoubleBuffer -> do
-            buf' <- A.resizeMutableArr buf (siz*2)              -- double the buffer
-            k strategy (Buffer buf' offset)          -- no need to be lazy here
+            buf' <- A.resizeMutableArr buf ((siz + V.chunkOverhead) `shiftL` 1 - V.chunkOverhead)   -- double the buffer
+            k strategy (Buffer buf' offset)          -- continue building
 
         OneShotAction action -> do
-            arr <- A.unsafeFreezeArr buf              -- popup a copy
+            arr <- A.unsafeFreezeArr buf             -- popup a copy
             action (V.PrimVector arr 0 offset)
-            k strategy (Buffer buf 0)             -- no need to be lazy here
+            k strategy (Buffer buf 0)           -- continue building with old buf
 
         InsertChunk -> do
             arr <- A.unsafeFreezeArr buf       -- popup a copy
             buf' <- A.newArr siz               -- make a new buffer
             xs <- unsafeInterleaveIO (k strategy (Buffer buf' 0 ))  -- delay the rest building process
-            let !v = V.fromArr arr 0 offset
-            return (v : xs)
+            let v = V.fromArr arr 0 offset
+            v `seq` return (v : xs)
+
 {-# NOINLINE flush #-} -- We really don't want to bloat our code with bound handling.
 
 word8 :: Word8 -> Builder
@@ -133,7 +128,7 @@ word8 x = writeN 1 $ \ !marr !o -> A.writeArr marr o x
 
 buildBytes :: Builder -> V.Bytes
 buildBytes (Builder b) = runST $ unsafeIOToST $ do
-    buf <- A.newArr 16
+    buf <- A.newArr V.defaultInitSize
     [bs] <- b lastStep DoubleBuffer (Buffer buf 0 )
     return bs
   where
@@ -144,7 +139,7 @@ buildBytes (Builder b) = runST $ unsafeIOToST $ do
 
 buildBytesList :: Builder -> [V.Bytes]
 buildBytesList (Builder b) = runST $ unsafeIOToST $ do
-    buf <- A.newArr defaultChunkSize
+    buf <- A.newArr V.smallChunkSize
     b lastStep InsertChunk (Buffer buf 0)
   where
     lastStep _ (Buffer buf offset) = do
@@ -154,7 +149,7 @@ buildBytesList (Builder b) = runST $ unsafeIOToST $ do
 
 buildAndRun :: (V.Bytes -> IO ()) -> Builder -> IO ()
 buildAndRun action (Builder b) = do
-    buf <- A.newArr defaultChunkSize
+    buf <- A.newArr V.defaultChunkSize
     _ <- b lastStep (OneShotAction action) (Buffer buf 0)
     return ()
   where
