@@ -13,6 +13,7 @@ import qualified Data.List as List
 import qualified Data.Vector.Unboxed as VU
 import Data.Word
 import Control.DeepSeq
+import Builder
 
 import Prelude hiding (reverse,head,tail,last,init,null
     ,length,map,lines,foldl,foldr,unlines
@@ -50,7 +51,7 @@ wordZ :: Word8
 wordZ = 0
 
 main :: IO ()
-main = defaultMain -- $ List.reverse
+main = defaultMain  $ List.reverse
     [ bgroup "singleton" singleton
     , bgroup "pack/100 elems"  packSmall
     , bgroup "pack/10000 elems"  packLarge
@@ -73,6 +74,7 @@ main = defaultMain -- $ List.reverse
     , bgroup "replicate" replicate
     , bgroup "unfoldr" unfoldr
     , bgroup "unfoldrN" unfoldrN
+    , bgroup "Builder" builder
     ]
 
 singleton :: [Benchmark]

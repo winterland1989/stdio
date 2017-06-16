@@ -1,0 +1,183 @@
+{-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP #-}
+
+module Data.Builder.Internal where
+
+import Control.Monad.Primitive
+import Control.Monad.ST
+import qualified Data.Vector as V
+import qualified Data.Array as A
+import Data.Monoid (Monoid(..))
+#if MIN_VERSION_base(4,9,0)
+import Data.Semigroup (Semigroup(..))
+#endif
+import Data.Word
+import Data.Primitive
+import Debug.Trace
+import Control.Monad.ST.Unsafe
+import System.IO.Unsafe (unsafeInterleaveIO)
+
+-- | 'AllocateStrategy' will decide how each 'BuildStep' proceed when previous buffer is not enough.
+--
+data AllocateStrategy m
+    = DoubleBuffer       -- Double the buffer and continue building
+    | InsertChunk        -- Insert a new chunk and continue building
+    | OneShotAction (V.Bytes -> m ())   -- Freeze current chunk and perform action with it.
+                                        -- Use the 'V.Bytes' argument outside the action is dangerous
+                                        -- since we will reuse the buffer after action finished.
+
+data Buffer s = Buffer {-# UNPACK #-} !(A.MutablePrimArray s Word8)  -- well, the buffer content
+                       {-# UNPACK #-} !Int  -- writing offset
+                       {-# UNPACK #-} !Int  -- free bytes left
+
+-- | @BuilderStep@ is a function that fill buffer under given conditions.
+--
+type BuildStep m =
+       AllocateStrategy m                    -- see 'AllocateStrategy'
+    -> Buffer (PrimState m)
+    -> m [V.Bytes]
+
+-- | @Builder@ is a monoid to help compose @BuilderStep@. With next @BuilderStep@ continuation,
+-- We can do interesting things like perform some action, or interleave the build process.
+--
+newtype Builder = Builder { runBuilder :: BuildStep IO -> BuildStep IO }
+
+#if MIN_VERSION_base(4,9,0)
+instance Semigroup Builder where
+   (<>) = append
+   {-# INLINE (<>) #-}
+#endif
+
+instance Monoid Builder where
+   mempty  = empty
+   {-# INLINE mempty #-}
+#if MIN_VERSION_base(4,9,0)
+   mappend = (<>) -- future-proof definition
+#else
+   mappend = append
+#endif
+   {-# INLINE mappend #-}
+   mconcat = foldr append empty
+   {-# INLINE mconcat #-}
+
+append :: Builder -> Builder -> Builder
+append (Builder f) (Builder g) = Builder (f . g)
+{-# INLINE append #-}
+
+empty :: Builder
+empty = Builder id
+{-# INLINE empty #-}
+
+-- | The memory management overhead. Currently this is tuned for GHC only.
+chunkOverhead :: Int
+chunkOverhead = 2 * sizeOf (undefined :: Int)
+
+-- | The chunk size used for I\/O. Currently set to 32k, less the memory management overhead
+defaultChunkSize :: Int
+defaultChunkSize = 32 * k - chunkOverhead
+   where k = 1024
+
+-- | A builder that modify the resulting list of chunk.
+modifyChunks :: ([V.Bytes] -> [V.Bytes]) -> Builder
+modifyChunks f = Builder (\ k strategy buffer -> f `fmap` (k strategy buffer))
+{-# INLINE modifyChunks #-}
+
+writeN :: Int -> (A.MutablePrimArray (PrimState IO) Word8 -> Int -> IO ()) -> Builder
+writeN n f = ensureFree n `append`
+    Builder (\ k strategy (Buffer buf offset free) ->
+        f buf offset >> k strategy (Buffer buf (offset+n) (free-n))
+    )
+{-# INLINE writeN #-}
+
+-- | Ensure that there are at least @n@ many elements available.
+ensureFree :: Int -> Builder
+ensureFree !n = Builder $ \ k strategy buffer@(Buffer buf offset free) ->
+    if free >= n
+    then k strategy buffer
+    else (runBuilder flush) k strategy buffer
+{-# INLINE ensureFree #-}
+
+-- | /O(1)./ Pop the strict @Bytes@ we have constructed so far, if any.
+--
+--
+flush :: Builder
+flush = Builder $ \ k strategy buffer@(Buffer buf offset free) ->
+    let siz = A.sizeofMutableArr buf
+    in if siz == free  -- buffer is unused, no need to flush
+        then k strategy buffer
+        else case strategy of
+            DoubleBuffer -> do
+                buf' <- A.resizeMutableArr buf (siz*2)              -- double the buffer
+                k strategy (Buffer buf' offset (siz+free))          -- no need to be lazy here
+
+            OneShotAction action -> do
+                let l = siz - free
+                arr <- A.unsafeFreezeArr buf              -- popup a copy
+                action (V.PrimVector arr 0 l)
+                k strategy (Buffer buf 0 siz)             -- no need to be lazy here
+
+            InsertChunk -> do
+                let l = siz - free
+                arr <- A.unsafeFreezeArr buf       -- popup a copy
+                buf' <- A.newArr siz               -- make a new buffer
+                xs <- unsafeInterleaveIO (k strategy (Buffer buf' 0 siz))  -- delay the rest building process
+                let !v = V.fromArr arr 0 l
+                return (v : xs)
+{-# NOINLINE flush #-} -- We really don't want to bloat our code with bound handling.
+
+word8 :: Word8 -> Builder
+word8 x = writeN 1 $ \ !marr !o -> A.writeArr marr o x
+{-# INLINE word8 #-}
+
+buildBytes :: Builder -> V.Bytes
+buildBytes (Builder b) = runST $ unsafeIOToST $ do
+    buf <- A.newArr 16
+    [bs] <- b lastStep DoubleBuffer (Buffer buf 0 16)
+    return bs
+  where
+    lastStep _ (Buffer buf _ free) = do
+        let siz = A.sizeofMutableArr buf
+        arr <- A.unsafeFreezeArr buf
+        return [V.PrimVector arr 0 (siz - free)]
+{-# INLINE buildBytes #-}
+
+buildBytesList :: Builder -> [V.Bytes]
+buildBytesList (Builder b) = runST $ unsafeIOToST $ do
+    buf <- A.newArr defaultChunkSize
+    b lastStep InsertChunk (Buffer buf 0 defaultChunkSize)
+  where
+    lastStep _ (Buffer buf _ free) = do
+        let siz = A.sizeofMutableArr buf
+        arr <- A.unsafeFreezeArr buf
+        return [V.PrimVector arr 0 (siz - free)]
+{-# INLINE buildBytesList #-}
+
+buildAndRun :: (V.Bytes -> IO ()) -> Builder -> IO ()
+buildAndRun action (Builder b) = do
+    buf <- A.newArr defaultChunkSize
+    _ <- b lastStep (OneShotAction action) (Buffer buf 0 defaultChunkSize)
+    return ()
+  where
+    lastStep _ (Buffer buf _ free) = do
+        let siz = A.sizeofMutableArr buf
+        arr <- A.unsafeFreezeArr buf
+        action (V.PrimVector arr 0 (siz - free))
+        return [] -- to match the silly return type
+{-# INLINE buildAndRun #-}
+
+--------------------------------------------------------------------------------
+
+data BoundedBuilder = BoundedBuilder {-# UNPACK #-} !Int (A.PrimArray Word8 -> IO Int)
+
+--------------------------------------------------------------------------------
+
+class Build a => BoundedBuild a where
+    fbuild :: a -> BoundedBuilder
+
+class Build a where
+    build :: a -> Builder
+

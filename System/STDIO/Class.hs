@@ -1,4 +1,4 @@
-module System.IO.Handle where
+module StdIO.Handle where
 
 
 import Control.Concurrent.MVar
