@@ -30,9 +30,10 @@ data AllocateStrategy m
                                         -- Use the 'V.Bytes' argument outside the action is dangerous
                                         -- since we will reuse the buffer after action finished.
 
+-- | Helper type to help ghc unpack
+--
 data Buffer s = Buffer {-# UNPACK #-} !(A.MutablePrimArray s Word8)  -- well, the buffer content
                        {-# UNPACK #-} !Int  -- writing offset
-                       {-# UNPACK #-} !Int  -- free bytes left
 
 -- | @BuilderStep@ is a function that fill buffer under given conditions.
 --
@@ -88,15 +89,16 @@ modifyChunks f = Builder (\ k strategy buffer -> f `fmap` (k strategy buffer))
 
 writeN :: Int -> (A.MutablePrimArray (PrimState IO) Word8 -> Int -> IO ()) -> Builder
 writeN n f = ensureFree n `append`
-    Builder (\ k strategy (Buffer buf offset free) ->
-        f buf offset >> k strategy (Buffer buf (offset+n) (free-n))
+    Builder (\ k strategy (Buffer buf offset ) ->
+        f buf offset >> k strategy (Buffer buf (offset+n))
     )
 {-# INLINE writeN #-}
 
 -- | Ensure that there are at least @n@ many elements available.
 ensureFree :: Int -> Builder
-ensureFree !n = Builder $ \ k strategy buffer@(Buffer buf offset free) ->
-    if free >= n
+ensureFree !n = Builder $ \ k strategy buffer@(Buffer buf offset) -> do
+    let siz = A.sizeofMutableArr buf
+    if siz - offset >= n
     then k strategy buffer
     else (runBuilder flush) k strategy buffer
 {-# INLINE ensureFree #-}
@@ -105,28 +107,24 @@ ensureFree !n = Builder $ \ k strategy buffer@(Buffer buf offset free) ->
 --
 --
 flush :: Builder
-flush = Builder $ \ k strategy buffer@(Buffer buf offset free) ->
+flush = Builder $ \ k strategy buffer@(Buffer buf offset) ->
     let siz = A.sizeofMutableArr buf
-    in if siz == free  -- buffer is unused, no need to flush
-        then k strategy buffer
-        else case strategy of
-            DoubleBuffer -> do
-                buf' <- A.resizeMutableArr buf (siz*2)              -- double the buffer
-                k strategy (Buffer buf' offset (siz+free))          -- no need to be lazy here
+    in case strategy of
+        DoubleBuffer -> do
+            buf' <- A.resizeMutableArr buf (siz*2)              -- double the buffer
+            k strategy (Buffer buf' offset)          -- no need to be lazy here
 
-            OneShotAction action -> do
-                let l = siz - free
-                arr <- A.unsafeFreezeArr buf              -- popup a copy
-                action (V.PrimVector arr 0 l)
-                k strategy (Buffer buf 0 siz)             -- no need to be lazy here
+        OneShotAction action -> do
+            arr <- A.unsafeFreezeArr buf              -- popup a copy
+            action (V.PrimVector arr 0 offset)
+            k strategy (Buffer buf 0)             -- no need to be lazy here
 
-            InsertChunk -> do
-                let l = siz - free
-                arr <- A.unsafeFreezeArr buf       -- popup a copy
-                buf' <- A.newArr siz               -- make a new buffer
-                xs <- unsafeInterleaveIO (k strategy (Buffer buf' 0 siz))  -- delay the rest building process
-                let !v = V.fromArr arr 0 l
-                return (v : xs)
+        InsertChunk -> do
+            arr <- A.unsafeFreezeArr buf       -- popup a copy
+            buf' <- A.newArr siz               -- make a new buffer
+            xs <- unsafeInterleaveIO (k strategy (Buffer buf' 0 ))  -- delay the rest building process
+            let !v = V.fromArr arr 0 offset
+            return (v : xs)
 {-# NOINLINE flush #-} -- We really don't want to bloat our code with bound handling.
 
 word8 :: Word8 -> Builder
@@ -136,36 +134,33 @@ word8 x = writeN 1 $ \ !marr !o -> A.writeArr marr o x
 buildBytes :: Builder -> V.Bytes
 buildBytes (Builder b) = runST $ unsafeIOToST $ do
     buf <- A.newArr 16
-    [bs] <- b lastStep DoubleBuffer (Buffer buf 0 16)
+    [bs] <- b lastStep DoubleBuffer (Buffer buf 0 )
     return bs
   where
-    lastStep _ (Buffer buf _ free) = do
-        let siz = A.sizeofMutableArr buf
+    lastStep _ (Buffer buf offset) = do
         arr <- A.unsafeFreezeArr buf
-        return [V.PrimVector arr 0 (siz - free)]
+        return [V.PrimVector arr 0 offset]
 {-# INLINE buildBytes #-}
 
 buildBytesList :: Builder -> [V.Bytes]
 buildBytesList (Builder b) = runST $ unsafeIOToST $ do
     buf <- A.newArr defaultChunkSize
-    b lastStep InsertChunk (Buffer buf 0 defaultChunkSize)
+    b lastStep InsertChunk (Buffer buf 0)
   where
-    lastStep _ (Buffer buf _ free) = do
-        let siz = A.sizeofMutableArr buf
+    lastStep _ (Buffer buf offset) = do
         arr <- A.unsafeFreezeArr buf
-        return [V.PrimVector arr 0 (siz - free)]
+        return [V.PrimVector arr 0 offset]
 {-# INLINE buildBytesList #-}
 
 buildAndRun :: (V.Bytes -> IO ()) -> Builder -> IO ()
 buildAndRun action (Builder b) = do
     buf <- A.newArr defaultChunkSize
-    _ <- b lastStep (OneShotAction action) (Buffer buf 0 defaultChunkSize)
+    _ <- b lastStep (OneShotAction action) (Buffer buf 0)
     return ()
   where
-    lastStep _ (Buffer buf _ free) = do
-        let siz = A.sizeofMutableArr buf
+    lastStep _ (Buffer buf offset) = do
         arr <- A.unsafeFreezeArr buf
-        action (V.PrimVector arr 0 (siz - free))
+        action (V.PrimVector arr 0 offset)
         return [] -- to match the silly return type
 {-# INLINE buildAndRun #-}
 

@@ -15,13 +15,13 @@ import Control.Exception (evaluate)
 
 builder :: [Benchmark]
 builder =
-    [ bgroup "1000000 word8" word8
+    [ bgroup "10000 word8" word8
     ]
 
 word8 :: [Benchmark]
 word8 =
-    [ bench "bytestring/word8" $ nf BB.toLazyByteString (mconcat (replicate 1000000 (BB.word8 123)))
-    , bench "stdio/word8"     $ nf B.buildBytesList (mconcat (replicate 1000000 (B.word8 123)))
-    , bench "stdio/word8"     $ nf B.buildBytes (mconcat (replicate 1000000 (B.word8 123)))
-    , bench "stdio/word8"     $ nfIO (B.buildAndRun (void . evaluate) (mconcat (replicate 1000000 (B.word8 123))))
+    [ bench "bytestring/word8" $ nf BB.toLazyByteString (mconcat (replicate 10000 (BB.word8 123)))
+    , bench "stdio/word8"     $ nf B.buildBytesList (mconcat (replicate 10000 (B.word8 123)))
+    , bench "stdio/word8"     $ nf B.buildBytes (mconcat (replicate 10000 (B.word8 123)))
+    , bench "stdio/word8"     $ nfIO (B.buildAndRun (void . evaluate) (mconcat (replicate 10000 (B.word8 123))))
     ]
