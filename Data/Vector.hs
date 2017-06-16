@@ -74,6 +74,8 @@ module Data.Vector (
   -- * Substrings
   , take
   , drop
+  , slice
+  , splitAt
 
 
  ) where
@@ -914,6 +916,49 @@ drop n v@(VecPat ba s l)
 {-# INLINE drop #-}
 
 
+-- | /O(1)/ Extract a sub-range vector with give start index and length.
+--
+-- This function is a total function just like 'take/drop', e.g.
+--
+-- @
+-- slice 1 3 "hello"   == "ell"
+-- slice -1 -1 "hello" == ""
+-- slice 2 10 "hello"  == "llo"
+-- @
+--
+slice :: Vec v a => Int -> Int -> v a -> v a
+slice s' l' (VecPat arr s l) | l'' == 0  = empty
+                             | otherwise = fromArr ba s'' l''
+  where
+    s'' = rangeCut (s+s') s (s+l)
+    l'' = rangeCut l 0 (s+l-s'')
+
+-- | /O(1)/ Extract a sub-range vector with give start and end, both start and end index
+-- can be negative which stand for counting from the end(similar to the slicing operator([..])
+-- in many other language).
+--
+-- This function is a total function just like 'take/drop', e.g.
+--
+-- @
+-- "hello" |..| (1, 3) == "el"
+-- "hello" |..| (1, -1) == "ell"
+-- slice "hello" (-3, -2) == "l"
+-- slice "hello" (-3, -4) == ""
+-- @
+--
+(|..|) :: Vec va => v a -> (Int, Int) -> v a
+(VecPat arr s l) |..| (s1, s2) | s1' <= s2' = empty
+                               | otherwise  = fromArr arr s1' (s2' - s1')
+  where
+    s1' = rangeCut (if s1>0 then s+s1 else s+l+s1) s (s+l)
+    s2' = rangeCut (if s2>0 then s+s2 else s+l+s2) s (s+l)
+
+-- | /O(1)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
+splitAt :: Vec v a => Int -> v a -> (v a, v a)
+splitAt (VecPat arr s l) s' = (fromArr arr s'' (s''-s), fromArr arr s'' (s+l-s''))
+  where s'' = rangeCut (s+s') s (s+l)
+
+
 --------------------------------------------------------------------------------
 -- Common up near identical calls to `error' to reduce the number
 -- constant strings created when compiled:
@@ -923,6 +968,11 @@ errorEmptyVector fun = error (moduleErrorMsg fun "empty PrimVector")
 
 moduleErrorMsg :: String -> String -> String
 moduleErrorMsg fun msg = "Data.PrimVector." ++ fun ++ ':':' ':msg
+
+rangeCut :: Int -> Int -> Int
+rangeCut !r !min !max | r < min = min
+                      | r > max = max
+                      | otherwise = r
 
 --------------------------------------------------------------------------------
 
