@@ -19,8 +19,9 @@ library
     exposed-modules:        Data.Primitive.PrimArray
                             Data.Vector
                             Data.Array
+                            Data.Builder.Internal
 
-                            System.IO.File
+                            System.STDIO.File
     -- other-modules:       
     -- other-extensions:    
     build-depends:          base >=4.6 && <4.10
@@ -36,6 +37,7 @@ library
 
 benchmark bench
     build-depends:      base
+                    ,   binary
                     ,   deepseq
                     ,   bytestring
                     ,   vector

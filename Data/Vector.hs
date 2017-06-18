@@ -78,6 +78,11 @@ module Data.Vector (
   , splitAt
 
 
+  -- * Misc
+  , defaultInitSize
+  , chunkOverhead
+  , defaultChunkSize
+  , smallChunkSize
  ) where
 
 import Control.DeepSeq
@@ -364,11 +369,32 @@ singleton c = create 1 (\ mba -> writeArr mba 0 c)
 --
 -- | /O(n)/ Convert a list into a vector
 --
--- Alias for @'packN' 16@.
+-- Alias for @'packN' 'defaultInitSize'@.
 --
 pack :: Vec v a => [a] -> v a
-pack = packN 16
+pack = packN defaultInitSize
 {-# INLINE pack #-}
+
+-- | The chunk size used for I\/O. Currently set to 32k, less the memory management overhead
+defaultChunkSize :: Int
+defaultChunkSize = 32 * 1024 - chunkOverhead
+{-# INLINE defaultChunkSize #-}
+
+-- | The recommended chunk size. Currently set to 4k, less the memory management overhead
+smallChunkSize :: Int
+smallChunkSize = 32 * 1024 - chunkOverhead
+{-# INLINE smallChunkSize #-}
+
+-- | @defaultInitSize = 16 - chunkOverhead@
+--
+defaultInitSize :: Int
+defaultInitSize = 64 - chunkOverhead
+{-# INLINE defaultInitSize #-}
+
+-- | The memory management overhead. Currently this is tuned for GHC only.
+chunkOverhead :: Int
+chunkOverhead = 2 * sizeOf (undefined :: Int)
+{-# INLINE chunkOverhead #-}
 
 -- | /O(n)/ Convert a list into a vector with an approximate size.
 --
@@ -393,7 +419,7 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
         then do writeArr mba i x
                 let !i' = i+1
                 return (SP3 i' n mba)
-        else do let !n' = n `shiftL` 1
+        else do let !n' = (n + chunkOverhead) `shiftL` 1 - chunkOverhead
                     !i' = i+1
                 !mba' <- resizeMutableArr mba n'
                 writeArr mba' i x
@@ -928,7 +954,7 @@ drop n v@(VecPat ba s l)
 --
 slice :: Vec v a => Int -> Int -> v a -> v a
 slice s' l' (VecPat arr s l) | l'' == 0  = empty
-                             | otherwise = fromArr ba s'' l''
+                             | otherwise = fromArr arr s'' l''
   where
     s'' = rangeCut (s+s') s (s+l)
     l'' = rangeCut l 0 (s+l-s'')
@@ -946,7 +972,7 @@ slice s' l' (VecPat arr s l) | l'' == 0  = empty
 -- slice "hello" (-3, -4) == ""
 -- @
 --
-(|..|) :: Vec va => v a -> (Int, Int) -> v a
+(|..|) :: Vec v a => v a -> (Int, Int) -> v a
 (VecPat arr s l) |..| (s1, s2) | s1' <= s2' = empty
                                | otherwise  = fromArr arr s1' (s2' - s1')
   where
@@ -955,7 +981,7 @@ slice s' l' (VecPat arr s l) | l'' == 0  = empty
 
 -- | /O(1)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
 splitAt :: Vec v a => Int -> v a -> (v a, v a)
-splitAt (VecPat arr s l) s' = (fromArr arr s'' (s''-s), fromArr arr s'' (s+l-s''))
+splitAt s' (VecPat arr s l) = (fromArr arr s'' (s''-s), fromArr arr s'' (s+l-s''))
   where s'' = rangeCut (s+s') s (s+l)
 
 
@@ -969,10 +995,11 @@ errorEmptyVector fun = error (moduleErrorMsg fun "empty PrimVector")
 moduleErrorMsg :: String -> String -> String
 moduleErrorMsg fun msg = "Data.PrimVector." ++ fun ++ ':':' ':msg
 
-rangeCut :: Int -> Int -> Int
+rangeCut :: Int -> Int -> Int -> Int
 rangeCut !r !min !max | r < min = min
                       | r > max = max
                       | otherwise = r
+{-# INLINE rangeCut #-}
 
 --------------------------------------------------------------------------------
 
