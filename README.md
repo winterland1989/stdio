@@ -41,9 +41,9 @@ No, this package only target a very limited focus: packed data types and IO inte
 
 + Why not use bytestring and text?
 
-Bytestring is based on `ForeignPtr` which always allocate pinned memory, which can be slow and bring memory fragmentation. stdio use `ByteArray` based representation will leaverage RTS's memory allocator. 
+Bytestring is based on `ForeignPtr` which always allocate pinned memory, that can be slow and bring memory fragmentation. stdio use `ByteArray` based representation, which leave RTS's memory allocator to decide where to allocate. 
 
-`Text` in stdio are UTF8-encoded.
+`Text` in stdio is UTF8-encoded.
 
 + Why not use vector?
 
@@ -55,14 +55,14 @@ pack . map YYY . filter XXX . unpack
 
 `pack/unpack` has a little constant overhead but if the processing chain is long, it may be paid off. 
 
-The reason for not introduce implicit fusion is that packed datatype is designed for sharing, which will destroy any form of fusion. On another hand, list in based is very bad at sharing but nice for processing. So in stdio the choice is simple: we only provide packed operations, `pack/unpack` when you want fusion to happen.
+The reason for not introduce implicit fusion is that packed datatype is designed for sharing, which will destroy any form of fusion. On another hand, list in base is very bad at sharing but nice for processing. So in stdio the choice is simple: we only provide packed operations, `pack/unpack` when you want fusion to happen.
 
 + Why not foundation?
 
 The array type in foundation is a sum type, and carry extra word for pinned status. Which is unreasonable. And the abuse of type class/family is only a comlication IMO.
 
-+ What about FFI with bytes in stdio?
++ What about FFI with `Bytes` in stdio?
 
-You just have to understand a little bit about GHC's RTS: an unsafe FFI call works like a fat primitive machine code which stops GC. So basically you can pass `ByteArray` to any unsafe FFI calls with the help of `UnliftedFFITypes` extension. On the other hand, if you want to make a safe FFI call, use `isPrimArrayPinned` to decide if you want to allocate a pinned copy.
+You just have to understand a little bit about GHC's RTS: an unsafe FFI call works like a fat primitive machine code op which stops GC. So basically you can pass `ByteArray` to any unsafe FFI calls with the help of `UnliftedFFITypes` extension. On the other hand, if you want to make a safe FFI call, use `isPrimArrayPinned` to decide if you want to allocate a pinned copy.
 
-I plan to add `Foregin` module to help, which is not implemented yet.
+I plan to add a `Foregin.Bytes` module to help, which is not implemented yet.
