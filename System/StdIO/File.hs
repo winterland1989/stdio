@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP #-}
-module System.STDIO.File where
+module System.StdIO.File where
 
 import qualified Control.Exception as E
 import qualified GHC.IO.Exception as E
