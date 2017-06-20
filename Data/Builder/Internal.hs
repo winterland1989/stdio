@@ -71,6 +71,13 @@ empty :: Builder
 empty = Builder $ \ _ -> id
 {-# INLINE empty #-}
 
+concat :: [Builder] -> Builder
+concat bs = Builder $ \ strategy k buffer ->
+    go strategy k buffer bs
+  where
+    go strategy k buffer [] = k strategy buffer
+    go strategy k buffer (b:bs) = go strategy (k strategy . runBuilder b strategy) buffer bs
+{-# INLINE concat #-}
 
 -- | A builder that modify the resulting list of chunk.
 modifyChunks :: ([V.Bytes] -> [V.Bytes]) -> Builder
@@ -164,13 +171,9 @@ buildAndRun action (Builder b) = do
 
 --------------------------------------------------------------------------------
 
-data BoundedBuilder = BoundedBuilder {-# UNPACK #-} !Int (A.PrimArray Word8 -> IO Int)
-
---------------------------------------------------------------------------------
-
 class Build a => BoundedBuild a where
-    fbuild :: a -> BoundedBuilder
+    bound :: a -> Int
+    writeBounded :: MutableByteArray (PrimState IO) -> Int -> a -> IO Int
 
-class Build a where
-    build :: a -> Builder
-
+buildBoundedList :: BoundedBuild a => [a] -> Builder
+buildBoundedList =

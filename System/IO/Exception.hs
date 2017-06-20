@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module System.StdIO.Exception where
+module System.IO.Exception where
 
 import Control.Exception
 import Data.Typeable

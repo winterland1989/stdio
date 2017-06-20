@@ -1,10 +1,10 @@
 module Data.Builder.Textual where
 
 
-class BuildT a where
-    buildT :: a -> Builder
+class Textual a where
+    text :: a -> Builder
 
 
-class BuildT a => BuildF a where
+class Textual a => TextualFormat a where
     data Format a
-    build :: Format a -> a -> Builder
+    format :: Format a -> a -> Builder

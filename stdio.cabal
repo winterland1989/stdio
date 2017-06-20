@@ -21,7 +21,7 @@ library
                             Data.Array
                             Data.Builder.Internal
 
-                            System.STDIO.File
+                            System.IO.File
     -- other-modules:       
     -- other-extensions:    
     build-depends:          base >=4.6 && <4.10

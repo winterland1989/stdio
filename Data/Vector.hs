@@ -382,10 +382,10 @@ defaultChunkSize = 32 * 1024 - chunkOverhead
 
 -- | The recommended chunk size. Currently set to 4k, less the memory management overhead
 smallChunkSize :: Int
-smallChunkSize = 32 * 1024 - chunkOverhead
+smallChunkSize = 4 * 1024 - chunkOverhead
 {-# INLINE smallChunkSize #-}
 
--- | @defaultInitSize = 16 - chunkOverhead@
+-- | @defaultInitSize = 64 - chunkOverhead@
 --
 defaultInitSize :: Int
 defaultInitSize = 64 - chunkOverhead

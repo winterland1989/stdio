@@ -1,21 +1,8 @@
-module System.StdIO.Handle where
+module System.IO.Handle where
 
 
 import Control.Concurrent.MVar
-
-
-
-class FD f where
-    type Path f
-
-    fopen :: Path f -> IO f
-    fclose :: f -> IO ()
-
-    fread :: f -> Int -> Ptr Word8 -> IO Int
-    fwrite :: f -> Ptr Word8 -> Int -> IO ()
-    fflush :: f -> IO ()
-
-
+import System.IO.FD
 
 
 -- | Handle
@@ -108,7 +95,5 @@ flush Hand{..} = modifyMVar writeBufLen $ \ wBufLen ->
 
 
 seek :: (DiskFD f) => Handle f -> SeekMode -> Int -> IO ()
-fileSize :: (DiskFD f) => Handle f -> IO Int
-getFileSize :: (DiskFD f) => Handle f -> Int -> IO ()
+getFileSize :: (DiskFD f) => Handle f -> IO Int
 setFileSize :: (DiskFD f) => Handle f -> Int -> IO ()
-
