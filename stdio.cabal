@@ -19,6 +19,9 @@ library
     exposed-modules:        Data.Primitive.PrimArray
                             Data.Vector
                             Data.Array
+                            Data.Array.Checked
+
+                            Data.Builder.Binary
                             Data.Builder.Internal
 
                             System.IO.File

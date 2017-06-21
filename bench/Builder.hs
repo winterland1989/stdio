@@ -10,10 +10,12 @@ import Criterion.Main
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Builder.Internal as B
+import qualified Data.Builder.Binary as B
 import Control.DeepSeq
 import Control.Monad
 import Control.Exception (evaluate)
 import Data.Monoid ((<>))
+import Data.Word
 
 builder :: [Benchmark]
 builder =
@@ -35,9 +37,9 @@ word8_10000 :: [Benchmark]
 word8_10000 =
     [ bench "bytestring/toLazyByteString" $ nf BB.toLazyByteString (mconcat (replicate 10000 (BB.word8 123)))
     , bench "bytestring/toStrict . toLazyByteString" $ nf (BL.toStrict . BB.toLazyByteString) (mconcat (replicate 10000 (BB.word8 123)))
-    , bench "stdio/buildBytesList"     $ nf B.buildBytesList (mconcat (replicate 10000 (B.word8 123)))
-    , bench "stdio/buildBytes"     $ nf B.buildBytes (mconcat (replicate 10000 (B.word8 123)))
-    , bench "stdio/buildAndRun"     $ nfIO (B.buildAndRun (void . evaluate) (mconcat (replicate 10000 (B.word8 123))))
+    , bench "stdio/buildBytesList"     $ nf B.buildBytesList (mconcat (replicate 10000 (B.put @Word8 123)))
+    , bench "stdio/buildBytes"     $ nf B.buildBytes (mconcat (replicate 10000 (B.put @Word8 123)))
+    , bench "stdio/buildAndRun"     $ nfIO (B.buildAndRun (void . evaluate) (mconcat (replicate 10000 (B.put @Word8 123))))
     ]
 
 word8_32 :: [Benchmark]

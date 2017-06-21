@@ -71,25 +71,17 @@ empty :: Builder
 empty = Builder $ \ _ -> id
 {-# INLINE empty #-}
 
-concat :: [Builder] -> Builder
-concat bs = Builder $ \ strategy k buffer ->
-    go strategy k buffer bs
-  where
-    go strategy k buffer [] = k strategy buffer
-    go strategy k buffer (b:bs) = go strategy (k strategy . runBuilder b strategy) buffer bs
-{-# INLINE concat #-}
-
 -- | A builder that modify the resulting list of chunk.
 modifyChunks :: ([V.Bytes] -> [V.Bytes]) -> Builder
 modifyChunks f = Builder (\ _ k buffer -> f `fmap` (k buffer))
 {-# INLINE modifyChunks #-}
 
-writeN :: Int -> (A.MutablePrimArray (PrimState IO) Word8 -> Int -> IO ()) -> Builder
-writeN n f = ensureFree n `append`
+writeAtMost :: Int -> (A.MutablePrimArray (PrimState IO) Word8 -> Int -> IO Int) -> Builder
+writeAtMost n f = ensureFree n `append`
     Builder (\ _  k (Buffer buf offset ) ->
-        f buf offset >> k (Buffer buf (offset+n))
+        f buf offset >>= \ offset' -> k (Buffer buf offset')
     )
-{-# INLINE writeN #-}
+{-# INLINE writeAtMost #-}
 
 -- | Ensure that there are at least @n@ many elements available.
 ensureFree :: Int -> Builder
@@ -133,7 +125,7 @@ flush strategy !wantSiz k buffer@(Buffer buf offset) =
 {-# NOINLINE flush #-} -- We really don't want to bloat our code with bound handling.
 
 word8 :: Word8 -> Builder
-word8 x = writeN 1 (\ buf offset -> A.writeArr buf offset x)
+word8 x = writeAtMost 1 (\ buf offset -> A.writeArr buf offset x >> (return $! offset + 1))
 {-# INLINE word8 #-}
 
 buildBytes :: Builder -> V.Bytes
@@ -168,12 +160,3 @@ buildAndRun action (Builder b) = do
         action (V.PrimVector arr 0 offset)
         return [] -- to match the silly return type
 {-# INLINABLE buildAndRun #-}
-
---------------------------------------------------------------------------------
-
-class Build a => BoundedBuild a where
-    bound :: a -> Int
-    writeBounded :: MutableByteArray (PrimState IO) -> Int -> a -> IO Int
-
-buildBoundedList :: BoundedBuild a => [a] -> Builder
-buildBoundedList =

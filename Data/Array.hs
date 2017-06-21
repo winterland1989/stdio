@@ -32,7 +32,6 @@ import Data.Primitive.SmallArray
 import GHC.ST
 import GHC.Prim
 import GHC.Types (isTrue#)
-import Control.Exception (assert)
 
 uninitialized :: a
 uninitialized = error "Data.Array: uninitialized element accessed"
@@ -73,65 +72,42 @@ class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr wh
     sizeofMutableArr :: marr s a -> Int
 
 instance Arr MutableArray Array a where
-    newArr n = assert
-        (n>=0)
-        (newArray n uninitialized)
+    newArr n = newArray n uninitialized
     {-# INLINE newArr #-}
-    newArrWith n x = assert
-        (n>=0)
-        (newArray n x)
+    newArrWith n x = newArray n x
     {-# INLINE newArrWith #-}
-    readArr marr i = assert
-        (i>=0 && i<sizeofMutableArray marr)
-        (readArray marr i)
+    readArr marr i = readArray marr i
     {-# INLINE readArr #-}
-    writeArr marr i x = assert
-        (i>=0 && i<sizeofMutableArray marr)
-        (writeArray marr i x)
+    writeArr marr i x = writeArray marr i x
     {-# INLINE writeArr #-}
-    setArr marr s l x = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofMutableArray marr)
-        (go s)
+    setArr marr s l x = go s
       where
         !sl = s + l
         go !i | i >= sl = return ()
               | otherwise = writeArray marr i x >> go (i+1)
     {-# INLINE setArr #-}
-    indexArr arr i = assert
-        (i>=0 && i<sizeofArray arr)
-        (indexArray arr i)
+    indexArr arr i = indexArray arr i
     {-# INLINE indexArr #-}
-    indexArrM arr i = assert
-        (i>=0 && i<sizeofArray arr)
-        (indexArrayM arr i)
+    indexArrM arr i = indexArrayM arr i
     {-# INLINE indexArrM #-}
-    freezeArr marr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofMutableArray marr)
-        (freezeArray marr s l)
+    freezeArr marr s l = freezeArray marr s l
     {-# INLINE freezeArr #-}
-    thawArr arr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofArray arr)
-        (thawArray arr s l)
+    thawArr arr s l = thawArray arr s l
     {-# INLINE thawArr #-}
     unsafeFreezeArr = unsafeFreezeArray
     {-# INLINE unsafeFreezeArr #-}
     unsafeThawArr = unsafeThawArray
     {-# INLINE unsafeThawArr #-}
 
-    copyArr marr s1 arr s2 l  = assert
-        (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofArray arr && (s1+l)<=sizeofMutableArray marr)
-        (copyArray marr s1 arr s2 l)
+    copyArr marr s1 arr s2 l  = copyArray marr s1 arr s2 l
     {-# INLINE copyArr #-}
-    copyMutableArr marr1 s1 marr2 s2 l = assert
-        (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofMutableArray marr2 && (s1+l)<=sizeofMutableArray marr1)
-        (copyMutableArray marr1 s1 marr2 s2 l)
+    copyMutableArr marr1 s1 marr2 s2 l = copyMutableArray marr1 s1 marr2 s2 l
     {-# INLINE copyMutableArr #-}
 
     moveArr marr1 s1 marr2 s2 l
         | l <= 0 = return ()
-        | sameMutableArray marr1 marr2 = assert
-            (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofMutableArray marr2 && (s1+l)<=sizeofMutableArray marr1)
-            (case compare s1 s2 of
+        | sameMutableArray marr1 marr2 =
+            case compare s1 s2 of
                 LT ->
                     let !d = s2 - s1
                         !s2l = s2 + l
@@ -150,26 +126,18 @@ instance Arr MutableArray Array a where
                                                writeArray marr1 (i+d) x
                                                go (i-1)
                     in go (s2+l-1)
-            )
         | otherwise = copyMutableArray marr1 s1 marr2 s2 l
     {-# INLINE moveArr #-}
 
-    cloneArr arr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofArray arr)
-        (cloneArray arr s l)
+    cloneArr arr s l = cloneArray arr s l
     {-# INLINE cloneArr #-}
-    cloneMutableArr marr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofMutableArray marr)
-        (cloneMutableArray marr s l)
+    cloneMutableArr marr s l = cloneMutableArray marr s l
     {-# INLINE cloneMutableArr #-}
 
-    resizeMutableArr marr n = assert
-        (n>=sizeofMutableArray marr)
-        (do
-            marr' <- newArray n uninitialized
-            copyMutableArray marr' 0 marr 0 n
-            return marr'
-        )
+    resizeMutableArr marr n = do
+        marr' <- newArray n uninitialized
+        copyMutableArray marr' 0 marr 0 n
+        return marr'
     {-# INLINE resizeMutableArr #-}
     shrinkMutableArr _ _ = return ()
     {-# INLINE shrinkMutableArr #-}
@@ -182,65 +150,42 @@ instance Arr MutableArray Array a where
     {-# INLINE sizeofMutableArr #-}
 
 instance Arr SmallMutableArray SmallArray a where
-    newArr n = assert
-        (n>=0)
-        (newSmallArray n uninitialized)
+    newArr n = newSmallArray n uninitialized
     {-# INLINE newArr #-}
-    newArrWith n x = assert
-        (n>=0)
-        (newSmallArray n x)
+    newArrWith n x = newSmallArray n x
     {-# INLINE newArrWith #-}
-    readArr marr i = assert
-        (i>=0 && i<sizeofSmallMutableArray marr)
-        (readSmallArray marr i)
+    readArr marr i = readSmallArray marr i
     {-# INLINE readArr #-}
-    writeArr marr i x = assert
-        (i>=0 && i<sizeofSmallMutableArray marr)
-        (writeSmallArray marr i x)
+    writeArr marr i x = writeSmallArray marr i x
     {-# INLINE writeArr #-}
-    setArr marr s l x = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofSmallMutableArray marr)
-        (go s)
+    setArr marr s l x = go s
       where
         !sl = s + l
         go !i | i >= sl = return ()
               | otherwise = writeSmallArray marr i x >> go (i+1)
     {-# INLINE setArr #-}
-    indexArr arr i = assert
-        (i>=0 && i<sizeofSmallArray arr)
-        (indexSmallArray arr i)
+    indexArr arr i = indexSmallArray arr i
     {-# INLINE indexArr #-}
-    indexArrM arr i = assert
-        (i>=0 && i<sizeofSmallArray arr)
-        (indexSmallArrayM arr i)
+    indexArrM arr i = indexSmallArrayM arr i
     {-# INLINE indexArrM #-}
-    freezeArr marr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofSmallMutableArray marr)
-        (freezeSmallArray marr s l)
+    freezeArr marr s l = freezeSmallArray marr s l
     {-# INLINE freezeArr #-}
-    thawArr arr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofSmallArray arr)
-        (thawSmallArray arr s l)
+    thawArr arr s l = thawSmallArray arr s l
     {-# INLINE thawArr #-}
     unsafeFreezeArr = unsafeFreezeSmallArray
     {-# INLINE unsafeFreezeArr #-}
     unsafeThawArr = unsafeThawSmallArray
     {-# INLINE unsafeThawArr #-}
 
-    copyArr marr s1 arr s2 l  = assert
-        (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofSmallArray arr && (s1+l)<=sizeofSmallMutableArray marr)
-        (copySmallArray marr s1 arr s2 l)
+    copyArr marr s1 arr s2 l  = copySmallArray marr s1 arr s2 l
     {-# INLINE copyArr #-}
-    copyMutableArr marr1 s1 marr2 s2 l = assert
-        (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofSmallMutableArray marr2 && (s1+l)<=sizeofSmallMutableArray marr1)
-        (copySmallMutableArray marr1 s1 marr2 s2 l)
+    copyMutableArr marr1 s1 marr2 s2 l = copySmallMutableArray marr1 s1 marr2 s2 l
     {-# INLINE copyMutableArr #-}
 
     moveArr marr1 s1 marr2 s2 l
         | l <= 0 = return ()
-        | sameMutableArr marr1 marr2 = assert
-            (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofSmallMutableArray marr2 && (s1+l)<=sizeofSmallMutableArray marr1)
-            (case compare s1 s2 of
+        | sameMutableArr marr1 marr2 =
+            case compare s1 s2 of
                 LT ->
                     let !d = s2 - s1
                         !s2l = s2 + l
@@ -259,26 +204,18 @@ instance Arr SmallMutableArray SmallArray a where
                                                writeSmallArray marr1 (i+d) x
                                                go (i-1)
                     in go (s2+l-1)
-            )
         | otherwise = copySmallMutableArray marr1 s1 marr2 s2 l
     {-# INLINE moveArr #-}
 
-    cloneArr arr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofSmallArray arr)
-        (cloneSmallArray arr s l)
+    cloneArr arr s l = cloneSmallArray arr s l
     {-# INLINE cloneArr #-}
-    cloneMutableArr marr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofSmallMutableArray marr)
-        (cloneSmallMutableArray marr s l)
+    cloneMutableArr marr s l = cloneSmallMutableArray marr s l
     {-# INLINE cloneMutableArr #-}
 
-    resizeMutableArr marr n = assert
-        (n>=sizeofSmallMutableArray marr)
-        (do
-            marr' <- newSmallArray n uninitialized
-            copySmallMutableArray marr' 0 marr 0 n
-            return marr'
-        )
+    resizeMutableArr marr n = do
+        marr' <- newSmallArray n uninitialized
+        copySmallMutableArray marr' 0 marr 0 n
+        return marr'
     {-# INLINE resizeMutableArr #-}
     shrinkMutableArr _ _ = return ()
     {-# INLINE shrinkMutableArr #-}
@@ -292,93 +229,61 @@ instance Arr SmallMutableArray SmallArray a where
     {-# INLINE sizeofMutableArr #-}
 
 instance Prim a => Arr MutablePrimArray PrimArray a where
-    newArr n = assert
-        (n>=0)
-        (newPrimArray n)
+    newArr n = newPrimArray n
     {-# INLINE newArr #-}
-    newArrWith n x = assert
-        (n>=0)
-        (do marr <- newPrimArray n
-            setPrimArray marr 0 n x
-            return marr
-        )
+    newArrWith n x = do
+        marr <- newPrimArray n
+        setPrimArray marr 0 n x
+        return marr
     {-# INLINE newArrWith #-}
-    readArr marr i = assert
-        (i>=0 && i<sizeofMutablePrimArray marr)
-        (readPrimArray marr i)
+    readArr marr i = readPrimArray marr i
     {-# INLINE readArr #-}
-    writeArr marr i x = assert
-        (i>=0 && i<sizeofMutablePrimArray marr)
-        (writePrimArray marr i x)
+    writeArr marr i x = writePrimArray marr i x
     {-# INLINE writeArr #-}
-    setArr marr s l x = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofMutablePrimArray marr)
-        (setPrimArray marr s l x)
+    setArr marr s l x = setPrimArray marr s l x
     {-# INLINE setArr #-}
-    indexArr arr i = assert
-        (i>=0 && i<sizeofPrimArray arr)
-        (indexPrimArray arr i)
+    indexArr arr i = indexPrimArray arr i
     {-# INLINE indexArr #-}
-    indexArrM arr i = assert
-        (i>=0 && i<sizeofPrimArray arr)
-        (return (indexPrimArray arr i))
+    indexArrM arr i = return (indexPrimArray arr i)
     {-# INLINE indexArrM #-}
-    freezeArr marr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofMutablePrimArray marr)
-        (do marr' <- newPrimArray l
-            copyMutablePrimArray marr' 0 marr s l
-            unsafeFreezePrimArray marr'
-        )
+    freezeArr marr s l = do
+        marr' <- newPrimArray l
+        copyMutablePrimArray marr' 0 marr s l
+        unsafeFreezePrimArray marr'
     {-# INLINE freezeArr #-}
-    thawArr arr s l = assert
-        (s>=0 && l>=0 && (s+l)<=sizeofPrimArray arr)
-        (do marr' <- newPrimArray l
-            copyPrimArray marr' 0 arr s l
-            return marr'
-        )
+    thawArr arr s l = do
+        marr' <- newPrimArray l
+        copyPrimArray marr' 0 arr s l
+        return marr'
     {-# INLINE thawArr #-}
     unsafeFreezeArr = unsafeFreezePrimArray
     {-# INLINE unsafeFreezeArr #-}
     unsafeThawArr = unsafeThawPrimArray
     {-# INLINE unsafeThawArr #-}
 
-    copyArr marr s1 arr s2 l = assert
-        (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofPrimArray arr && (s1+l)<=sizeofMutablePrimArray marr)
-        (copyPrimArray marr s1 arr s2 l)
+    copyArr marr s1 arr s2 l = copyPrimArray marr s1 arr s2 l
     {-# INLINE copyArr #-}
-    copyMutableArr marr1 s1 marr2 s2 l = assert
-        (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofMutablePrimArray marr1 && (s1+l)<=sizeofMutablePrimArray marr2)
-        (copyMutablePrimArray marr1 s1 marr2 s2 l)
+    copyMutableArr marr1 s1 marr2 s2 l = copyMutablePrimArray marr1 s1 marr2 s2 l
     {-# INLINE copyMutableArr #-}
 
-    moveArr marr1 s1 marr2 s2 l = assert
-        (s1>=0 && s2>=0 && l>=0 && (s2+l)<=sizeofMutablePrimArray marr1 && (s1+l)<=sizeofMutablePrimArray marr2)
-        (movePrimArray marr1 s1 marr2 s2 l)
+    moveArr marr1 s1 marr2 s2 l = movePrimArray marr1 s1 marr2 s2 l
     {-# INLINE moveArr #-}
 
-    cloneArr arr s l = assert
-        (s>=0 && l>=0 && s+l<=sizeofPrimArray arr)
-        (runST (do
+    cloneArr arr s l = runST (do
             marr <- newPrimArray l
             copyPrimArray marr 0 arr s l
             unsafeFreezePrimArray marr
-        ))
-    {-# INLINE cloneArr #-}
-    cloneMutableArr marr s l = assert
-        (s>=0 && l>=0 && s+l<=sizeofMutablePrimArray marr)
-        (do marr' <- newPrimArray l
-            copyMutablePrimArray marr' 0 marr s l
-            return marr'
         )
+    {-# INLINE cloneArr #-}
+    cloneMutableArr marr s l = do
+        marr' <- newPrimArray l
+        copyMutablePrimArray marr' 0 marr s l
+        return marr'
     {-# INLINE cloneMutableArr #-}
 
-    resizeMutableArr marr n = assert
-        (n>=sizeofMutablePrimArray marr)
-        (resizeMutablePrimArray marr n)
+    resizeMutableArr marr n = resizeMutablePrimArray marr n
     {-# INLINE resizeMutableArr #-}
-    shrinkMutableArr marr n = assert
-        (n<=sizeofMutablePrimArray marr)
-        (shrinkMutablePrimArray marr n)
+    shrinkMutableArr marr n = shrinkMutablePrimArray marr n
     {-# INLINE shrinkMutableArr #-}
 
     sameMutableArr = sameMutablePrimArray
