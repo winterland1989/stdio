@@ -1,9 +1,13 @@
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+
 module Data.Builder.Binary where
 
 import Data.Array
 import Data.Builder.Internal
 import Control.Monad.Primitive (RealWorld)
 import Data.Word
+import qualified Data.Vector as V
 
 class Put a where
     put :: a -> Builder
@@ -13,8 +17,11 @@ class Put a => PrimPut a where
     boundedWrite :: a -> MutablePrimArray RealWorld Word8 -> Int -> IO Int
 
 primPut :: PrimPut a => a -> Builder
-primPut x = writeAtMost (boundedSize x) (boundedWrite x)
+primPut x = atMost (boundedSize x) (boundedWrite x)
+{-# INLINE primPut #-}
 
+-- | A newtype wrapper for little endian's instances.
+--
 newtype LE a = LE a
 
 -- | Bools are encoded as a byte, 0 for 'False', 1 for 'True'.
@@ -32,3 +39,5 @@ instance PrimPut Word8 where
     {-# INLINE boundedSize #-}
     boundedWrite w marr i = writeArr marr i w >> (return $! i+1)
     {-# INLINE boundedWrite #-}
+
+instance Put V.Bytes where put = bytes

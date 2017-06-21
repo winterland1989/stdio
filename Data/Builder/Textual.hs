@@ -1,8 +1,8 @@
 module Data.Builder.Textual where
 
-class Textual a where
-    text :: a -> Builder
+class Write a where
+    write :: a -> Builder
 
-class Textual a => TextualFormat a where
+class Write a => FormatWrite a where
     data Format a
     format :: Format a -> a -> Builder
