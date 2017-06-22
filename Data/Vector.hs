@@ -20,9 +20,12 @@ module Data.Vector (
     Vec(..)
   -- * Boxed and unboxed vector type
   , Vector(..)
+  , pattern VecPat
   , PrimVector(..)
   -- ** 'Word8' vector
   , Bytes
+  , pattern BytesPat
+  , newBytesFromAddr
   , w2c, c2w
   -- * Basic creating
   , create, creating, createN
@@ -87,7 +90,7 @@ module Data.Vector (
 
 import Control.DeepSeq
 import Control.Exception (assert)
-import GHC.Exts (IsList(..))
+import GHC.Exts (IsList(..), IsString(..))
 import Control.Monad.ST.Unsafe
 import Control.Monad.ST
 import Data.Primitive
@@ -98,6 +101,7 @@ import Data.Primitive.PrimArray
 import Data.Array
 import GHC.Word
 import GHC.Prim
+import GHC.CString
 import Data.Typeable
 import Data.Data
 import Data.Bits (shiftL)
@@ -296,6 +300,16 @@ instance (Prim a, Read a) => Read (PrimVector a) where
 -- | 'Bytes' is just primitive word8 vectors.
 type Bytes = PrimVector Word8
 
+instance IsString (PrimVector Char) where
+    {-# INLINE fromString #-}
+    fromString = pack
+
+{-# RULES "Bytes literal" forall addr.  pack (unpackCString# addr) = newBytesFromAddr addr #-}
+
+newBytesFromAddr = undefined
+
+pattern BytesPat ba s l <- (toArr -> ((PrimArray ba),s,l))
+
 -- | Conversion between 'Word8' and 'Char'. Should compile to a no-op.
 --
 w2c :: Word8 -> Char
@@ -373,7 +387,7 @@ singleton c = create 1 (\ mba -> writeArr mba 0 c)
 --
 pack :: Vec v a => [a] -> v a
 pack = packN defaultInitSize
-{-# INLINE pack #-}
+{-# INLINE [1] pack #-}
 
 -- | The chunk size used for I\/O. Currently set to 32k, less the memory management overhead
 defaultChunkSize :: Int
@@ -598,7 +612,7 @@ reverse (VecPat ba s l) = create l (go s)
                                 writeArr mba (sl-i) x
                                 go (i+1) mba
 {-# INLINE [1] reverse #-}
-{-# RULES "reverse/Bytes" [~1] reverse = reverseBytes #-}
+{-# RULES "reverse/Bytes" reverse = reverseBytes #-}
 
 reverseBytes :: Bytes -> Bytes
 reverseBytes (PrimVector (PrimArray (ByteArray ba#)) s l) =
@@ -625,7 +639,7 @@ intersperse x v@(VecPat ba s l)
             writeArr mba (j+1) (indexArr ba i)
             go (i+1) (j+2) mba
 {-# INLINE [1] intersperse #-}
-{-# RULES "intersperse/Bytes" [~1] intersperse = intersperseBytes #-}
+{-# RULES "intersperse/Bytes" intersperse = intersperseBytes #-}
 
 intersperseBytes :: Word8 -> Bytes -> Bytes
 intersperseBytes w v@(PrimVector (PrimArray (ByteArray ba#)) s l)

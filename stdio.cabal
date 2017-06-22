@@ -20,9 +20,10 @@ library
                             Data.Vector
                             Data.Array
                             Data.Array.Checked
+                            Data.Text
 
-                            Data.Builder.Binary
-                            Data.Builder.Internal
+                            Data.Binary
+                            Data.Builder
 
                             System.IO.File
     -- other-modules:       
