@@ -16,7 +16,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 
-#include "MachDeps.h"
 
 module Data.Vector (
   -- * Vec typeclass
@@ -118,7 +117,7 @@ import Foreign.C.Types
 import Foreign.Storable (peekElemOff)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as Q
-import Data.LiteralQ
+import Data.Array.LiteralQ as Q
 
 import Prelude hiding (reverse,head,tail,last,init,null
     ,length,map,lines,foldl,foldr,unlines
@@ -234,29 +233,11 @@ data PrimVector a = PrimVector
 
 pvW16 :: Q.QuasiQuoter
 pvW16 = Q.QuasiQuoter
-    (word16LiteralLE $ \ len addr -> [| word16VectorFromAddr len $(addr) |])
+    (Q.word16LiteralLE $ \ len addr -> [| PrimVector (Q.word16ArrayFromAddr len $(addr)) 0 len |])
+
     (error "Cannot use bAsc as a pattern")
     (error "Cannot use bAsc as a type")
     (error "Cannot use bAsc as a dec")
-
-word16VectorFromAddr :: Int -> Addr# -> PrimVector Word16
-word16VectorFromAddr l addr# = unsafeDupablePerformIO $ do
-    mba <- newArr l
-    go l (Ptr addr#) mba 0
-    ba <- unsafeFreezePrimArray mba :: IO (PrimArray Word16)
-    return (PrimVector ba 0 l)
-  where
-    go l ptr mba idx = do
-#ifdef WORDS_BIGENDIAN
-        when (idx < l) $ do
-            w1 <- peekElemOff ptr (idx*2) :: IO Word8
-            w2 <- peekElemOff ptr (idx*2+1) :: IO Word8
-            writePrimArray mba idx (fromIntegral w2 `shiftL` 8 .|. fromIntegral w1 :: Word16)
-            go l ptr mba (idx+1)
-#else
-        copyMutablePrimArrayFromPtr mba 0 ptr l
-#endif
-{-# NOINLINE word16VectorFromAddr #-} -- don't dump every literal with this code
 
 instance Prim a => Vec PrimVector a where
     type MArray PrimVector = MutablePrimArray

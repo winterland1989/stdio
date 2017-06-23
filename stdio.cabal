@@ -20,6 +20,7 @@ library
                             Data.Vector
                             Data.Array
                             Data.Array.Checked
+                            Data.Array.LiteralQ
                             Data.Text
 
                             Data.Binary

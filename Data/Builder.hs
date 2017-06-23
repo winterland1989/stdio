@@ -96,13 +96,15 @@ bytes bs@(V.PrimVector arr s l) = Builder go
             | offset /= 0 ->
                  insertChunk chunkSiz 0 (\ buffer' -> (bs:) `fmap` k buffer') buffer
             | otherwise -> (bs:) `fmap` k buffer
-        OneShotAction action -> case A.sizeofMutableArr buf of
-            chunkSiz
-                | l <= chunkSiz `shiftR` 1 ->
-                    copy strategy k buffer
-                | offset /= 0 ->
-                    oneShotAction action 0 (\ buffer' -> action bs >> k buffer') buffer
-                | otherwise -> action bs >> k buffer
+        OneShotAction action -> do
+            chunkSiz <- A.sizeofMutableArr buf
+            case () of
+                _
+                    | l <= chunkSiz `shiftR` 1 ->
+                        copy strategy k buffer
+                    | offset /= 0 ->
+                        oneShotAction action 0 (\ buffer' -> action bs >> k buffer') buffer
+                    | otherwise -> action bs >> k buffer
     {-# NOINLINE go #-}
     copy strategy k =
         runBuilder (ensureFree l) strategy ( \ (Buffer buf offset) -> do
@@ -115,8 +117,8 @@ bytes bs@(V.PrimVector arr s l) = Builder go
 -- | Ensure that there are at least @n@ many elements available.
 ensureFree :: Int -> Builder
 ensureFree !n = Builder $ \ strategy k buffer@(Buffer buf offset) -> do
-    let siz = A.sizeofMutableArr buf  -- You may think doing this will be slow
-                                      -- but this value lives in CPU cache for most of the time
+    siz <- A.sizeofMutableArr buf  -- You may think doing this will be slow
+                                   -- but this value lives in CPU cache for most of the time
     if siz - offset >= n
     then k buffer
     else handleBoundary strategy n k buffer
@@ -133,45 +135,49 @@ ensureFree !n = Builder $ \ strategy k buffer@(Buffer buf offset) -> do
 --
 doubleBuffer :: Int -> BuildStep IO -> BuildStep IO
 doubleBuffer !wantSiz k buffer@(Buffer buf offset) = do
-    let !siz = A.sizeofMutableArr buf
-        !siz' = max (offset + wantSiz `shiftL` 1)
+    !siz <- A.sizeofMutableArr buf
+    let !siz' = max (offset + wantSiz `shiftL` 1)
                     ((siz + V.chunkOverhead) `shiftL` 1 - V.chunkOverhead)
     buf' <- A.resizeMutableArr buf siz'   -- double the buffer
     k (Buffer buf' offset)                 -- continue building
 {-# INLINE doubleBuffer #-}
 
 insertChunk :: Int -> Int -> BuildStep IO -> BuildStep IO
-insertChunk !chunkSiz !wantSiz k buffer@(Buffer buf offset)
-    | offset /= 0 = do     -- this is certainly hold, but we still guard it
-        when (offset < siz)
-            (A.shrinkMutableArr buf offset)            -- shrink old buffer if not full
-        arr <- A.unsafeFreezeArr buf                   -- popup old buffer
-        buf' <- A.newArr (max wantSiz chunkSiz)        -- make a new buffer
-        xs <- unsafeInterleaveIO (k (Buffer buf' 0))  -- delay the rest building process
-        let v = V.fromArr arr 0 offset
-        v `seq` return (v : xs)
-    | wantSiz <= siz = k (Buffer buf 0)
-    | otherwise = do
-        buf' <- A.newArr wantSiz        -- make a new buffer
-        k (Buffer buf' 0 )
-  where !siz = A.sizeofMutableArr buf
+insertChunk !chunkSiz !wantSiz k buffer@(Buffer buf offset) = do
+    !siz <- A.sizeofMutableArr buf
+    case () of
+        _
+            | offset /= 0 -> do     -- this is certainly hold, but we still guard it
+                when (offset < siz)
+                    (A.shrinkMutableArr buf offset)            -- shrink old buffer if not full
+                arr <- A.unsafeFreezeArr buf                   -- popup old buffer
+                buf' <- A.newArr (max wantSiz chunkSiz)        -- make a new buffer
+                xs <- unsafeInterleaveIO (k (Buffer buf' 0))  -- delay the rest building process
+                let v = V.fromArr arr 0 offset
+                v `seq` return (v : xs)
+            | wantSiz <= siz -> k (Buffer buf 0)
+            | otherwise -> do
+                buf' <- A.newArr wantSiz        -- make a new buffer
+                k (Buffer buf' 0 )
 {-# INLINE insertChunk #-}
 
 oneShotAction :: (V.Bytes -> IO ()) -> Int -> BuildStep IO -> BuildStep IO
-oneShotAction action !wantSiz k buffer@(Buffer buf offset)
-    | offset /= 0 = do
-        arr <- A.unsafeFreezeArr buf             -- popup old buffer
-        action (V.PrimVector arr 0 offset)
-        if wantSiz <= siz
-        then k (Buffer buf 0)                    -- continue building with old buf
-        else do
-            buf' <- A.newArr wantSiz             -- make a new buffer
-            k (Buffer buf' 0)
-    | wantSiz <= siz = k (Buffer buf 0)
-    | otherwise = do
-        buf' <- A.newArr wantSiz                -- make a new buffer
-        k (Buffer buf' 0 )
-  where !siz = A.sizeofMutableArr buf
+oneShotAction action !wantSiz k buffer@(Buffer buf offset) = do
+    !siz <- A.sizeofMutableArr buf
+    case () of
+        _
+            | offset /= 0 -> do
+                arr <- A.unsafeFreezeArr buf             -- popup old buffer
+                action (V.PrimVector arr 0 offset)
+                if wantSiz <= siz
+                then k (Buffer buf 0)                    -- continue building with old buf
+                else do
+                    buf' <- A.newArr wantSiz             -- make a new buffer
+                    k (Buffer buf' 0)
+            | wantSiz <= siz -> k (Buffer buf 0)
+            | otherwise -> do
+                buf' <- A.newArr wantSiz                -- make a new buffer
+                k (Buffer buf' 0 )
 {-# INLINE oneShotAction #-}
 
 --------------------------------------------------------------------------------
@@ -185,8 +191,10 @@ buildBytesWith initSiz (Builder b) = unsafeDupablePerformIO $ do
     [bs] <- b DoubleBuffer lastStep (Buffer buf 0 )
     return bs
   where
+    lastStep :: Buffer RealWorld -> IO [V.PrimVector Word8]
     lastStep (Buffer buf offset) = do
-        when (offset < A.sizeofMutableArr buf) (A.shrinkMutableArr buf offset)
+        siz <- A.sizeofMutableArr buf
+        when (offset < siz) (A.shrinkMutableArr buf offset)
         arr <- A.unsafeFreezeArr buf
         return [V.PrimVector arr 0 offset]
 {-# INLINABLE buildBytes #-}
