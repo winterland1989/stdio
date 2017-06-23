@@ -21,7 +21,7 @@ module Data.Primitive.PrimArray (
   -- * Block operations
   copyPrimArray, copyMutablePrimArray, movePrimArray,
   setPrimArray, resizeMutablePrimArray, shrinkMutablePrimArray,
-
+  copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr,
   -- * Information
   sizeofPrimArray, sizeofMutablePrimArray, sameMutablePrimArray,
   primArrayContents, mutablePrimArrayContents,
@@ -148,10 +148,56 @@ copyPrimArray :: forall m a. (PrimMonad m, Prim a)
               -> Int                              -- ^ number of prims to copy
               -> m ()
 {-# INLINE copyPrimArray #-}
-
 copyPrimArray (MutablePrimArray dst) doff (PrimArray src) soff n =
     copyByteArray dst (doff*siz) src (soff*siz) (n*siz)
   where siz = sizeOf (undefined :: a)
+
+-- | Copy a slice of an immutable primitive array to an address.
+-- The offset and length are given in elements of type @a@.
+copyPrimArrayToPtr :: forall m a. (PrimMonad m, Prim a)
+              => Ptr a                            -- ^ destination pointer
+              -> PrimArray a                      -- ^ source array
+              -> Int                              -- ^ offset into source array
+              -> Int                              -- ^ number of prims to copy
+              -> m ()
+{-# INLINE copyPrimArrayToPtr #-}
+copyPrimArrayToPtr (Ptr addr#) (PrimArray (ByteArray ba#)) (I# soff#) (I# n#) =
+    primitive (\ s# ->
+        let s'# = copyByteArrayToAddr# ba# (soff# *# siz#) addr# (n# *# siz#) s#
+        in (# s'#, () #))
+  where siz# = sizeOf# (undefined :: a)
+
+-- | Copy a slice of an mutable primitive array to an address.
+-- The offset and length are given in elements of type @a@.
+--
+copyMutablePrimArrayToPtr :: forall m a. (PrimMonad m, Prim a)
+              => Ptr a                            -- ^ destination pointer
+              -> MutablePrimArray (PrimState m) a -- ^ source array
+              -> Int                              -- ^ offset into source array
+              -> Int                              -- ^ number of prims to copy
+              -> m ()
+{-# INLINE copyMutablePrimArrayToPtr #-}
+copyMutablePrimArrayToPtr (Ptr addr#) (MutablePrimArray (MutableByteArray mba#)) (I# soff#) (I# n#) =
+    primitive (\ s# ->
+        let s'# = copyMutableByteArrayToAddr# mba# (soff# *# siz#) addr# (n# *# siz#) s#
+        in (# s'#, () #))
+  where siz# = sizeOf# (undefined :: a)
+
+-- | Copy a slice of an mutable primitive array from an address.
+-- The offset and length are given in elements of type @a@.
+--
+copyMutablePrimArrayFromPtr :: forall m a. (PrimMonad m, Prim a)
+              => MutablePrimArray (PrimState m) a -- ^ destination array
+              -> Int                              -- ^ offset into destination array
+              -> Ptr a                            -- ^ source pointer
+              -> Int                              -- ^ number of prims to copy
+              -> m ()
+{-# INLINE copyMutablePrimArrayFromPtr #-}
+copyMutablePrimArrayFromPtr (MutablePrimArray (MutableByteArray mba#)) (I# doff#) (Ptr addr#) (I# n#) =
+    primitive (\ s# ->
+        let s'# = copyAddrToByteArray# addr# mba# (doff# *# siz#) (n# *# siz#) s#
+        in (# s'#, () #))
+  where siz# = sizeOf# (undefined :: a)
 
 -- | Copy a slice of a mutable primitive array into another array. The two slices
 -- may not overlap.

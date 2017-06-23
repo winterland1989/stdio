@@ -9,8 +9,9 @@ import GHC.CString
 import GHC.Exts (IsString(..))
 import Data.Primitive.ByteArray
 import qualified Data.Vector as V
-import qualified Data.Primitive.PrimArray as PA
+import qualified Data.Array as A
 import Control.Monad.ST
+import Data.Foldable (foldlM)
 import Data.Word
 import Data.Char
 import Data.Bits
@@ -19,11 +20,16 @@ import Data.Bits
 --
 newtype Text = Text V.Bytes
 
+instance Show Text where
+    showsPrec p t = showsPrec p (unpack t)
+
+
 instance IsString Text where
     {-# INLINE fromString #-}
     fromString = pack
 
-{-# RULES "Text literal" forall addr. pack (unpackCString# addr) = Text (V.newBytesFromAddr addr) #-}
+{-# RULES "ASCII literal" forall addr. pack (unpackCString# addr) = Text (V.newBytesFromAddr addr) #-}
+{-# RULES "UTF8 literal" forall addr. pack (unpackCStringUtf8# addr) = Text (V.newBytesFromAddrUtf8 addr) #-}
 
 {-
 validateUTF8 :: Bytes -> (Bool, Int)
@@ -53,11 +59,11 @@ pack = packN V.defaultInitSize
 -- This function is a /good consumer/ in the sense of build/foldr fusion.
 --
 packN :: Int -> String -> Text
-packN n0 = \ ws0 -> runST (do mba <- newArr n0
+packN n0 = \ ws0 -> runST (do mba <- A.newArr n0
                               (SP3 i _ mba') <- foldlM go (SP3 0 n0 mba) ws0
-                              shrinkMutableArr mba' i
-                              ba <- unsafeFreezeArr mba'
-                              return (fromArr ba 0 i)
+                              A.shrinkMutableArr mba' i
+                              ba <- A.unsafeFreezeArr mba'
+                              return (Text (V.fromArr ba 0 i))
                           )
   where
     -- It's critical that this function get specialized and unboxed
@@ -68,49 +74,49 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
         then case ord c of
             n
                 | n <= 0x0000007F -> do
-                    PA.writePrimArray mba i (fromIntegral n)
+                    A.writeArr mba i (fromIntegral n)
                     return (SP3 (i+1) siz mba)
                 | n <= 0x000007FF -> do
-                    PA.writePrimArray mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
-                    PA.writePrimArray mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+                    A.writeArr mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
+                    A.writeArr mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
                     return (SP3 (i+2) siz mba)
                 | n <= 0x0000FFFF -> do
-                    PA.writePrimArray mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
-                    PA.writePrimArray mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                    PA.writePrimArray mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+                    A.writeArr mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
+                    A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
+                    A.writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
                     return (SP3 (i+3) siz mba)
                 | n <= 0x0010FFFF -> do
-                    PA.writePrimArray mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
-                    PA.writePrimArray mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
-                    PA.writePrimArray mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                    PA.writePrimArray mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+                    A.writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
+                    A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
+                    A.writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
+                    A.writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
                     return (SP3 (i+4) siz mba)
         else do
-            let !siz' = (siz + chunkOverhead) `shiftL` 1 - chunkOverhead
+            let !siz' = (siz + V.chunkOverhead) `shiftL` 1 - V.chunkOverhead
                 !i' = i+1
-            !mba' <- resizeMutableArr mba n'
+            !mba' <- A.resizeMutableArr mba siz'
             case ord c of
                 n
                     | n <= 0x0000007F -> do
-                        PA.writePrimArray mba i (fromIntegral n)
+                        A.writeArr mba i (fromIntegral n)
                         return (SP3 (i+1) siz' mba)
                     | n <= 0x000007FF -> do
-                        PA.writePrimArray mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
-                        PA.writePrimArray mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+                        A.writeArr mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
+                        A.writeArr mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
                         return (SP3 (i+2) siz' mba)
                     | n <= 0x0000FFFF -> do
-                        PA.writePrimArray mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
-                        PA.writePrimArray mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                        PA.writePrimArray mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+                        A.writeArr mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
+                        A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
+                        A.writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
                         return (SP3 (i+3) siz' mba)
                     | n <= 0x0010FFFF -> do
-                        PA.writePrimArray mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
-                        PA.writePrimArray mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
-                        PA.writePrimArray mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                        PA.writePrimArray mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+                        A.writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
+                        A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
+                        A.writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
+                        A.writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
                         return (SP3 (i+4) siz' mba)
 
-data SP3 s = SP3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(PA.MutablePrimArray s Word8)
+data SP3 s = SP3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(A.MutablePrimArray s Word8)
 {-# INLINE packN #-}
 
 

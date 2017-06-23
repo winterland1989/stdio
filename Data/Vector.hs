@@ -93,6 +93,7 @@ import Control.Exception (assert)
 import GHC.Exts (IsList(..), IsString(..))
 import Control.Monad.ST.Unsafe
 import Control.Monad.ST
+import Control.Monad
 import Data.Primitive
 import Data.Primitive.Types
 import Data.Primitive.ByteArray
@@ -101,6 +102,7 @@ import Data.Primitive.PrimArray
 import Data.Array
 import GHC.Word
 import GHC.Prim
+import GHC.Ptr (Ptr(..))
 import GHC.CString
 import Data.Typeable
 import Data.Data
@@ -208,7 +210,7 @@ instance NFData (Vector a) where
     rnf Vector{} = ()
 
 instance (Show a) => Show (Vector a) where
-    showsPrec p v r = showsPrec p (unpack v) r
+    showsPrec p v = showsPrec p (unpack v)
 
 instance (Read a) => Read (Vector a) where
     readsPrec p str = [ (pack x, y) | (x, y) <- readsPrec p str ]
@@ -290,7 +292,7 @@ instance NFData (PrimVector a) where
     rnf PrimVector{} = ()
 
 instance (Prim a, Show a) => Show (PrimVector a) where
-    showsPrec p v r = showsPrec p (unpack v) r
+    showsPrec p v = showsPrec p (unpack v)
 
 instance (Prim a, Read a) => Read (PrimVector a) where
     readsPrec p str = [ (pack x, y) | (x, y) <- readsPrec p str ]
@@ -300,15 +302,36 @@ instance (Prim a, Read a) => Read (PrimVector a) where
 -- | 'Bytes' is just primitive word8 vectors.
 type Bytes = PrimVector Word8
 
-instance IsString (PrimVector Char) where
+instance IsString (PrimVector Word8) where
     {-# INLINE fromString #-}
-    fromString = pack
+    fromString = packString
 
-{-# RULES "Bytes literal" forall addr.  pack (unpackCString# addr) = newBytesFromAddr addr #-}
+packString :: String -> Bytes
+packString = pack . List.map c2w
+{-# INLINE [1] packString #-}
 
-newBytesFromAddr = undefined
+{-# RULES "Bytes literal" forall addr.  packString (unpackCString# addr) = newBytesFromAddr addr #-}
+{-# RULES "Bytes literal" forall addr.  packString (unpackCStringUtf8# addr) = newBytesFromAddrUtf8 addr #-}
 
-pattern BytesPat ba s l <- (toArr -> ((PrimArray ba),s,l))
+newBytesFromAddr :: Addr# -> Bytes
+newBytesFromAddr addr# = unsafeDupablePerformIO $ do
+    l <- fromIntegral `fmap` c_strlen addr#
+    mba <- newArr l
+    copyMutablePrimArrayFromPtr mba 0 (Ptr addr#) l
+    ba <- unsafeFreezePrimArray mba
+    return (PrimVector ba 0 l)
+{-# NOINLINE newBytesFromAddr #-} -- don't dump every literal with this code
+
+newBytesFromAddrUtf8 :: Addr# -> Bytes
+newBytesFromAddrUtf8 addr# = unsafeDupablePerformIO $ do
+    l <- fromIntegral `fmap` c_strlen addr#
+    mba <- newArr l
+    copyMutablePrimArrayFromPtr mba 0 (Ptr addr#) l
+    ba <- unsafeFreezePrimArray mba
+    return (PrimVector ba 0 l)
+{-# NOINLINE newBytesFromAddrUtf8 #-} -- don't dump every literal with this code
+
+pattern BytesPat ba s l <- (toArr -> (PrimArray ba,s,l))
 
 -- | Conversion between 'Word8' and 'Char'. Should compile to a no-op.
 --
@@ -334,7 +357,7 @@ create l fill = runST (do
         mba <- newArr l
         fill mba
         ba <- unsafeFreezeArr mba
-        return (fromArr ba 0 l)
+        return $! fromArr ba 0 l
     )
 {-# INLINE create #-}
 
@@ -348,7 +371,8 @@ creating l fill = runST (do
         mba <- newArr l
         b <- fill mba
         ba <- unsafeFreezeArr mba
-        return (b, fromArr ba 0 l)
+        let !v = fromArr ba 0 l
+        return (b, v)
     )
 {-# INLINE creating #-}
 
@@ -363,7 +387,7 @@ createN l fill = runST (do
         mba <- newArr l
         l' <- fill mba
         ba <- unsafeFreezeArr mba
-        assert (l' <= l) $ return (fromArr ba 0 l')
+        assert (l' <= l) (return $! fromArr ba 0 l')
     )
 {-# INLINE createN #-}
 
@@ -387,7 +411,7 @@ singleton c = create 1 (\ mba -> writeArr mba 0 c)
 --
 pack :: Vec v a => [a] -> v a
 pack = packN defaultInitSize
-{-# INLINE [1] pack #-}
+{-# INLINE pack #-}
 
 -- | The chunk size used for I\/O. Currently set to 32k, less the memory management overhead
 defaultChunkSize :: Int
@@ -422,12 +446,12 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
                               (SP3 i _ mba') <- foldlM go (SP3 0 n0 mba) ws0
                               shrinkMutableArr mba' i
                               ba <- unsafeFreezeArr mba'
-                              return (fromArr ba 0 i)
+                              return $! fromArr ba 0 i
                           )
   where
     -- It's critical that this function get specialized and unboxed
     -- Keep an eye on its core!
-    go :: (SP3 (MArray v s a)) -> a -> ST s (SP3 (MArray v s a))
+    go :: SP3 (MArray v s a) -> a -> ST s (SP3 (MArray v s a))
     go (SP3 i n mba) !x =
         if i < n
         then do writeArr mba i x
@@ -542,7 +566,7 @@ snoc (VecPat ba s l) x = create (l+1) $ \ mba -> do
 uncons :: Vec v a => v a -> Maybe (a, v a)
 uncons (VecPat ba s l)
     | l <= 0    = Nothing
-    | otherwise = Just (indexArr ba s, fromArr ba (s+1) (l-1))
+    | otherwise = let v = fromArr ba (s+1) (l-1) in v `seq` Just (indexArr ba s, v)
 {-# INLINE uncons #-}
 
 -- | /O(1)/ Extract the 'init' and 'last' of a PrimVector, returning Nothing
@@ -551,7 +575,7 @@ uncons (VecPat ba s l)
 unsnoc :: Vec v a => v a -> Maybe (v a, a)
 unsnoc (VecPat ba s l)
     | l <= 0    = Nothing
-    | otherwise = Just (fromArr ba s (l-1), indexArr ba (s+l-1))
+    | otherwise = let v = fromArr ba s (l-1) in v `seq` Just (v, indexArr ba (s+l-1))
 {-# INLINE unsnoc #-}
 
 -- | /O(1)/ Extract the first element of a PrimVector, which must be non-empty.
@@ -593,7 +617,7 @@ init (VecPat ba s l)
 map :: forall u v a b. (Vec u a, Vec v b) => (a -> b) -> u a -> v b
 map f = \ (VecPat ba s l) -> create l (go ba (l+s) s 0)
   where
-    go :: (IArray u a) -> Int -> Int -> Int -> (MArray v s b) -> ST s ()
+    go :: IArray u a -> Int -> Int -> Int -> MArray v s b -> ST s ()
     go !ba !sl !i !j !mba  | i >= sl = return ()
                            | otherwise = do x <- indexArrM ba i
                                             writeArr mba j (f x)
@@ -752,7 +776,7 @@ concat vs = case pre 0 0 vs of
     copy [] _ _           = return ()
     copy (v:vs) !i !mba = do let (ba, s, l) = toArr v
                                  !i' = i - l
-                             if (l /= 0) then copyArr mba i' ba s l else return ()
+                             when (l /= 0) (copyArr mba i' ba s l)
                              copy vs i' mba
 {-# INLINE concat #-}
 
@@ -995,7 +1019,9 @@ slice s' l' (VecPat arr s l) | l'' == 0  = empty
 
 -- | /O(1)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
 splitAt :: Vec v a => Int -> v a -> (v a, v a)
-splitAt s' (VecPat arr s l) = (fromArr arr s'' (s''-s), fromArr arr s'' (s+l-s''))
+splitAt s' (VecPat arr s l) = let v1 = fromArr arr s'' (s''-s)
+                                  v2 = fromArr arr s'' (s+l-s'')
+                              in v1 `seq` v2 `seq` (v1, v2)
   where s'' = rangeCut (s+s') s (s+l)
 
 
@@ -1017,11 +1043,8 @@ rangeCut !r !min !max | r < min = min
 
 --------------------------------------------------------------------------------
 
-foreign import ccall unsafe "bytes.c is_byte_array_pinned"
-    c_is_byte_array_pinned :: ByteArray# -> CInt
-
-foreign import ccall unsafe "bytes.c is_byte_array_pinned"
-    c_is_mutable_byte_array_pinned :: MutableByteArray# s -> CInt
+foreign import ccall unsafe "string.h strlen" c_strlen
+    :: Addr# -> IO CSize
 
 foreign import ccall unsafe "bytes.c reverse"
     c_reverse :: MutableByteArray# s -> ByteArray# -> CSize -> IO ()
