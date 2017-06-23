@@ -23,14 +23,6 @@ newtype Text = Text V.Bytes
 instance Show Text where
     showsPrec p t = showsPrec p (unpack t)
 
-
-instance IsString Text where
-    {-# INLINE fromString #-}
-    fromString = pack
-
-{-# RULES "ASCII literal" forall addr. pack (unpackCString# addr) = Text (V.newBytesFromAddr addr) #-}
-{-# RULES "UTF8 literal" forall addr. pack (unpackCStringUtf8# addr) = Text (V.newBytesFromAddrUtf8 addr) #-}
-
 {-
 validateUTF8 :: Bytes -> (Bool, Int)
 
@@ -134,6 +126,41 @@ unpack (Text (V.BytesPat (ByteArray ba#) (I# s#) (I# l#))) = go s#
 
 
 --------------------------------------------------------------------------------
+
+utf8CharLength :: Char -> Int
+{-# INLINE utf8CharLength #-}
+utf8CharLength n
+    | n <= '\x00007F' = 1
+    | n <= '\x0007FF' = 2
+    | n <= '\x00FFFF' = 3
+    | n <= '\x10FFFF' = 4
+
+ord2 :: Char -> (Word8,Word8)
+{-# INLINE ord2 #-}
+ord2 c = (x1,x2)
+  where
+    n  = ord c
+    x1 = fromIntegral $ (n `shiftR` 6) + 0xC0
+    x2 = fromIntegral $ (n .&. 0x3F)   + 0x80
+
+ord3 :: Char -> (Word8,Word8,Word8)
+{-# INLINE ord3 #-}
+ord3 c = (x1,x2,x3)
+  where
+    n  = ord c
+    x1 = fromIntegral $ (n `shiftR` 12) + 0xE0
+    x2 = fromIntegral $ ((n `shiftR` 6) .&. 0x3F) + 0x80
+    x3 = fromIntegral $ (n .&. 0x3F) + 0x80
+
+ord4 :: Char -> (Word8,Word8,Word8,Word8)
+{-# INLINE ord4 #-}
+ord4 c = (x1,x2,x3,x4)
+  where
+    n  = ord c
+    x1 = fromIntegral $ (n `shiftR` 18) + 0xF0
+    x2 = fromIntegral $ ((n `shiftR` 12) .&. 0x3F) + 0x80
+    x3 = fromIntegral $ ((n `shiftR` 6) .&. 0x3F) + 0x80
+    x4 = fromIntegral $ (n .&. 0x3F) + 0x80
 
 decodeChar :: ByteArray# -> Int# -> (# Char#, Int# #)
 {-# INLINE decodeChar #-}

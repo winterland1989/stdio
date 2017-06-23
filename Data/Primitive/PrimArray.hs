@@ -4,6 +4,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE UnliftedFFITypes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP #-}
 
 module Data.Primitive.PrimArray (
   -- * Types
@@ -113,10 +114,20 @@ sizeofPrimArray (PrimArray ba) = sizeofByteArray ba `quot` siz
   where siz = sizeOf (undefined :: a)
 
 -- | Size of the mutable primitive array.
-sizeofMutablePrimArray :: forall s a . (Prim a) => MutablePrimArray s a -> Int
+sizeofMutablePrimArray :: forall m a . (PrimMonad m, Prim a) => MutablePrimArray (PrimState m) a -> m Int
 {-# INLINE sizeofMutablePrimArray #-}
-sizeofMutablePrimArray (MutablePrimArray mba) = sizeofMutableByteArray mba `quot` siz
-  where siz = sizeOf (undefined :: a)
+sizeofMutablePrimArray (MutablePrimArray mba) =
+#if MIN_VERSION_ghc_prim(0,5,0)
+    (`quot` siz) `fmap` getSizeofMutableByteArray mba
+#else
+    return (sizeofMutableByteArray mba `quot` siz)
+#endif
+  where
+    siz = sizeOf (undefined :: a)
+    getSizeofMutableByteArray (MutableByteArray mba#) = primitive (\ s# ->
+            let (# s'#, l# #) = getSizeofMutableByteArray# mba# s#
+            in (# s'#, (I# l#) #)
+        )
 
 -- | Read a primitive value from the primitive array. The offset is given in
 -- elements of type @a@.

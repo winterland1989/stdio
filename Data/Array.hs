@@ -22,6 +22,7 @@ module Data.Array (
   , newPinnedPrimArray, newAlignedPinnedPrimArray
   , primArrayContents, mutablePrimArrayContents
   , isPrimArrayPinned, isMutablePrimArrayPinned
+  , copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr
   ) where
 
 import Data.Primitive.Types
@@ -33,11 +34,25 @@ import GHC.ST
 import GHC.Prim
 import GHC.Types (isTrue#)
 
+-- | Bottom value (@error "Data.Array: uninitialized element accessed"@)
+-- for initialize a new boxed array('Array', 'SmallArray'..).
+--
 uninitialized :: a
 uninitialized = error "Data.Array: uninitialized element accessed"
 
--- | A typeclass to unify box and unboxed array operations.
+-- | A typeclass to unify box & unboxed, mutable & immutable array operations.
 --
+-- Most of these functions simply wrap their primitive counterpart, if there's no primitive ones,
+-- we polyfilled using other operations to get the same semantics.
+--
+-- One exception is that 'shrinkMutableArr' only perform closure resizing on 'PrimArray' because
+-- current RTS support only that, 'shrinkMutableArr' will do nothing on other array type.
+--
+-- It's reasonable to trust GHC with specializing & inlining these polymorphric functions.
+-- They are used across this package and perform identical to their monomophric counterpart.
+--
+-- All operations are NOT bound checked, if you need checked operations please use "Data.Array.Checked".
+-- It exports exactly same APIs so that you can switch them without too much trouble.
 --
 class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr where
     -- | Test
@@ -69,7 +84,7 @@ class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr wh
 
     sameMutableArr :: marr s a -> marr s a -> Bool
     sizeofArr :: arr a -> Int
-    sizeofMutableArr :: marr s a -> Int
+    sizeofMutableArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> m Int
 
 instance Arr MutableArray Array a where
     newArr n = newArray n uninitialized
@@ -146,7 +161,7 @@ instance Arr MutableArray Array a where
     {-# INLINE sameMutableArr #-}
     sizeofArr = sizeofArray
     {-# INLINE sizeofArr #-}
-    sizeofMutableArr = sizeofMutableArray
+    sizeofMutableArr = return . sizeofMutableArray
     {-# INLINE sizeofMutableArr #-}
 
 instance Arr SmallMutableArray SmallArray a where
@@ -225,7 +240,7 @@ instance Arr SmallMutableArray SmallArray a where
     {-# INLINE sameMutableArr #-}
     sizeofArr = sizeofSmallArray
     {-# INLINE sizeofArr #-}
-    sizeofMutableArr = sizeofSmallMutableArray
+    sizeofMutableArr = return . sizeofSmallMutableArray
     {-# INLINE sizeofMutableArr #-}
 
 instance Prim a => Arr MutablePrimArray PrimArray a where

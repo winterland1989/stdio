@@ -13,7 +13,10 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE UnliftedFFITypes #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
+#include "MachDeps.h"
 
 module Data.Vector (
   -- * Vec typeclass
@@ -22,10 +25,11 @@ module Data.Vector (
   , Vector(..)
   , pattern VecPat
   , PrimVector(..)
+  , pvW16
   -- ** 'Word8' vector
   , Bytes
   , pattern BytesPat
-  , newBytesFromAddr
+  , bAsc
   , w2c, c2w
   -- * Basic creating
   , create, creating, createN
@@ -106,11 +110,15 @@ import GHC.Ptr (Ptr(..))
 import GHC.CString
 import Data.Typeable
 import Data.Data
-import Data.Bits (shiftL)
+import Data.Bits
 import qualified Data.List as List
 import Data.Foldable (foldlM, foldrM)
 import GHC.Types
 import Foreign.C.Types
+import Foreign.Storable (peekElemOff)
+import qualified Language.Haskell.TH as TH
+import qualified Language.Haskell.TH.Quote as Q
+import Data.LiteralQ
 
 import Prelude hiding (reverse,head,tail,last,init,null
     ,length,map,lines,foldl,foldr,unlines
@@ -224,6 +232,32 @@ data PrimVector a = PrimVector
     {-# UNPACK #-} !Int         -- length in elements of type a rather than in bytes
   deriving (Typeable, Data)
 
+pvW16 :: Q.QuasiQuoter
+pvW16 = Q.QuasiQuoter
+    (word16LiteralLE $ \ len addr -> [| word16VectorFromAddr len $(addr) |])
+    (error "Cannot use bAsc as a pattern")
+    (error "Cannot use bAsc as a type")
+    (error "Cannot use bAsc as a dec")
+
+word16VectorFromAddr :: Int -> Addr# -> PrimVector Word16
+word16VectorFromAddr l addr# = unsafeDupablePerformIO $ do
+    mba <- newArr l
+    go l (Ptr addr#) mba 0
+    ba <- unsafeFreezePrimArray mba :: IO (PrimArray Word16)
+    return (PrimVector ba 0 l)
+  where
+    go l ptr mba idx = do
+#ifdef WORDS_BIGENDIAN
+        when (idx < l) $ do
+            w1 <- peekElemOff ptr (idx*2) :: IO Word8
+            w2 <- peekElemOff ptr (idx*2+1) :: IO Word8
+            writePrimArray mba idx (fromIntegral w2 `shiftL` 8 .|. fromIntegral w1 :: Word16)
+            go l ptr mba (idx+1)
+#else
+        copyMutablePrimArrayFromPtr mba 0 ptr l
+#endif
+{-# NOINLINE word16VectorFromAddr #-} -- don't dump every literal with this code
+
 instance Prim a => Vec PrimVector a where
     type MArray PrimVector = MutablePrimArray
     type IArray PrimVector = PrimArray
@@ -302,37 +336,6 @@ instance (Prim a, Read a) => Read (PrimVector a) where
 -- | 'Bytes' is just primitive word8 vectors.
 type Bytes = PrimVector Word8
 
-instance IsString (PrimVector Word8) where
-    {-# INLINE fromString #-}
-    fromString = packString
-
-packString :: String -> Bytes
-packString = pack . List.map c2w
-{-# INLINE [1] packString #-}
-
-{-# RULES "Bytes literal" forall addr.  packString (unpackCString# addr) = newBytesFromAddr addr #-}
-{-# RULES "Bytes literal" forall addr.  packString (unpackCStringUtf8# addr) = newBytesFromAddrUtf8 addr #-}
-
-newBytesFromAddr :: Addr# -> Bytes
-newBytesFromAddr addr# = unsafeDupablePerformIO $ do
-    l <- fromIntegral `fmap` c_strlen addr#
-    mba <- newArr l
-    copyMutablePrimArrayFromPtr mba 0 (Ptr addr#) l
-    ba <- unsafeFreezePrimArray mba
-    return (PrimVector ba 0 l)
-{-# NOINLINE newBytesFromAddr #-} -- don't dump every literal with this code
-
-newBytesFromAddrUtf8 :: Addr# -> Bytes
-newBytesFromAddrUtf8 addr# = unsafeDupablePerformIO $ do
-    l <- fromIntegral `fmap` c_strlen addr#
-    mba <- newArr l
-    copyMutablePrimArrayFromPtr mba 0 (Ptr addr#) l
-    ba <- unsafeFreezePrimArray mba
-    return (PrimVector ba 0 l)
-{-# NOINLINE newBytesFromAddrUtf8 #-} -- don't dump every literal with this code
-
-pattern BytesPat ba s l <- (toArr -> (PrimArray ba,s,l))
-
 -- | Conversion between 'Word8' and 'Char'. Should compile to a no-op.
 --
 w2c :: Word8 -> Char
@@ -345,6 +348,24 @@ w2c (W8# w#) = C# (chr# (word2Int# w#))
 c2w :: Char -> Word8
 c2w (C# c#) = W8# (int2Word# (ord# c#))
 {-# INLINE c2w #-}
+
+bAsc :: Q.QuasiQuoter
+bAsc = Q.QuasiQuoter
+    (asciiLiteral $ \ len addr -> [| bytesFromAddr len $(addr) |])
+    (error "Cannot use bAsc as a pattern")
+    (error "Cannot use bAsc as a type")
+    (error "Cannot use bAsc as a dec")
+
+bytesFromAddr :: Int -> Addr# -> Bytes
+bytesFromAddr l addr# = unsafeDupablePerformIO $ do
+    mba <- newArr l
+    copyMutablePrimArrayFromPtr mba 0 (Ptr addr#) l
+    ba <- unsafeFreezePrimArray mba
+    return (PrimVector ba 0 l)
+{-# NOINLINE bytesFromAddr #-} -- don't dump every literal with this code
+
+pattern BytesPat ba s l <- (toArr -> (PrimArray ba,s,l))
+
 --------------------------------------------------------------------------------
 -- Basic creating
 
