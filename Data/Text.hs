@@ -1,5 +1,6 @@
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE UnliftedFFITypes #-}
 
 module Data.Text where
 
@@ -15,6 +16,7 @@ import Data.Foldable (foldlM)
 import Data.Word
 import Data.Char
 import Data.Bits
+import Foreign.C.Types
 
 -- | 'Text' represented as UTF-8 encoded 'Bytes'
 --
@@ -218,3 +220,7 @@ decodeChar ba# idx#
         !z3# = uncheckedIShiftL# (y3# -# 0x80#) 6#
         !z4# = y4# -# 0x80#
     {-# INLINE chr4 #-}
+
+
+foreign import ccall unsafe "utf16toutf8"
+    utf8rewind_utf16toutf8 :: ByteArray# -> CSize -> ByteArray# -> CSize -> IO CInt

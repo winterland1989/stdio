@@ -117,7 +117,7 @@ import Foreign.C.Types
 import Foreign.Storable (peekElemOff)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as Q
-import Data.Array.LiteralQ as Q
+import Data.Primitive.PrimArrayQ as Q
 
 import Prelude hiding (reverse,head,tail,last,init,null
     ,length,map,lines,foldl,foldr,unlines
@@ -617,34 +617,26 @@ init (VecPat ba s l)
 --------------------------------------------------------------------------------
 
 map :: forall u v a b. (Vec u a, Vec v b) => (a -> b) -> u a -> v b
-map f = \ (VecPat ba s l) -> create l (go ba (l+s) s 0)
+map f = \ (VecPat ba s l) -> create l (go ba l s 0)
   where
     go :: IArray u a -> Int -> Int -> Int -> MArray v s b -> ST s ()
-    go !ba !sl !i !j !mba  | i >= sl = return ()
-                           | otherwise = do x <- indexArrM ba i
-                                            writeArr mba j (f x)
-                                            go ba sl (i+1) (j+1) mba
+    go !ba !l !i !j !mba | j >= l = return ()
+                         | otherwise = do x <- indexArrM ba i
+                                          writeArr mba j (f x)
+                                          go ba l (i+1) (j+1) mba
 {-# INLINE map #-}
 
 -- | /O(n)/ 'reverse' @xs@ efficiently returns the elements of @xs@ in reverse order.
 --
 reverse :: forall v a. (Vec v a) => v a -> v a
-reverse (VecPat ba s l) = create l (go s)
+reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
   where
-    !sl = s + l -1
-    go :: Int -> MArray v s a -> ST s ()
-    go !i !mba | i > sl = return ()
-               | otherwise = do let x = indexArr ba i
-                                writeArr mba (sl-i) x
-                                go (i+1) mba
-{-# INLINE [1] reverse #-}
-{-# RULES "reverse/Bytes" reverse = reverseBytes #-}
-
-reverseBytes :: Bytes -> Bytes
-reverseBytes (PrimVector (PrimArray (ByteArray ba#)) s l) =
-    create l (\ (MutablePrimArray (MutableByteArray mba#)) ->
-        unsafeIOToST (c_reverse mba# ba# (fromIntegral (s + l))))
-{-# INLINE reverseBytes #-}
+    go :: IArray v a -> Int -> Int -> MArray v s a -> ST s ()
+    go ba !i !j !mba | j <= 0 = return ()
+                     | otherwise = do x <- indexArrM ba i
+                                      writeArr mba j x
+                                      go ba (i+1) (j-1) mba
+{-# INLINE reverse #-}
 
 -- | /O(n)/ The 'intersperse' function takes a 'Word8' and a
 -- 'PrimVector' and \`intersperses\' that byte between the elements of

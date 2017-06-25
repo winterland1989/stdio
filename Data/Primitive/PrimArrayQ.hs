@@ -3,9 +3,9 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE BangPatterns #-}
 
-
-module Data.Array.LiteralQ where
+module Data.Primitive.PrimArrayQ where
 
 #include "MachDeps.h"
 
@@ -128,7 +128,7 @@ word32ArrayFromAddr l addr# = unsafeDupablePerformIO $ do
     go l (Ptr addr#) mba 0
     unsafeFreezePrimArray mba :: IO (PrimArray Word32)
   where
-    go l ptr mba idx = do
+    go l ptr mba !idx = do
 #ifdef WORDS_BIGENDIAN
         when (idx < l) $ do
             w1 <- peekElemOff ptr (idx*4) :: IO Word8
@@ -141,6 +141,6 @@ word32ArrayFromAddr l addr# = unsafeDupablePerformIO $ do
                                 .|. fromIntegral w1 :: Word32)
             go l ptr mba (idx+1)
 #else
-        copyMutablePrimArrayFromPtr mba 0 ptr l
+        copyMutablePrimArrayFromPtr mba 0 ptr l  -- alright, we don't support mix endianess
 #endif
 {-# NOINLINE word32ArrayFromAddr #-}
