@@ -148,6 +148,7 @@ foldl' =
     [ bench "bytestring/foldl'" $ nf (\ x -> B.foldl' (+) wordZ x) bytestring1000
     , bench "vector/foldl'"     $ nf (VU.foldl' (+) wordZ) vector1000
     , bench "bytes/foldl'"      $ nf (V.foldl' (+) wordZ) bytes1000
+    , bench "bytes/foldl'"      $ nf (List.foldl' (+) wordZ . V.unpack) bytes1000
     ]
 
 foldl :: [Benchmark]

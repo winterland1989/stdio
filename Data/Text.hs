@@ -1,6 +1,7 @@
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE UnliftedFFITypes #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 module Data.Text where
 
@@ -12,6 +13,7 @@ import Data.Primitive.ByteArray
 import qualified Data.Vector as V
 import qualified Data.Array as A
 import Control.Monad.ST
+import Control.Exception
 import Data.Foldable (foldlM)
 import Data.Word
 import Data.Char
@@ -25,9 +27,22 @@ newtype Text = Text V.Bytes
 instance Show Text where
     showsPrec p t = showsPrec p (unpack t)
 
-{-
-validateUTF8 :: Bytes -> (Bool, Int)
+data UTF8DecodeResult
+    = InvalidSequence !Text !Bytes !Bytes
+    | PartialBytes !Text !Bytes
+    | Success !Text
+  deriving (Show, Typeable)
 
+validateUTF8 :: Bytes -> UTF8DecodeResult
+validateUTF8 ::
+
+validateUTF8_ :: Bytes -> (Text, Bytes)
+validateUTF8_ ::
+
+repairUTF8 :: Bytes -> (Text, Bytes)
+repairUTF8 ::
+
+{-
 fromUTF8 :: Bytes -> (Text, Bytes)
 fromUTF8Lenient :: Bytes -> (Text, Bytes)
 toUTF8 :: Text -> Bytes
@@ -220,7 +235,3 @@ decodeChar ba# idx#
         !z3# = uncheckedIShiftL# (y3# -# 0x80#) 6#
         !z4# = y4# -# 0x80#
     {-# INLINE chr4 #-}
-
-
-foreign import ccall unsafe "utf16toutf8"
-    utf8rewind_utf16toutf8 :: ByteArray# -> CSize -> ByteArray# -> CSize -> IO CInt

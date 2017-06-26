@@ -464,6 +464,8 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
                 !mba' <- resizeMutableArr mba n'
                 writeArr mba' i x
                 return (SP3 i' n' mba')
+
+data SP3 a = SP3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int a
 {-# INLINE packN #-}
 
 -- | /O(n)/
@@ -497,7 +499,6 @@ packRN n0 = \ ws0 -> runST (do mba <- newArr n0
                 !mba' <- newArr n'
                 copyMutableArr mba' n mba 0 n
                 return (SP3 n'' n' mba')
-data SP3 a = SP3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int a
 {-# INLINE packRN #-}
 
 -- | /O(n)/ Convert vector to a list.
