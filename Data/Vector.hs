@@ -445,7 +445,7 @@ chunkOverhead = 2 * sizeOf (undefined :: Int)
 --
 packN :: forall v a. Vec v a => Int -> [a] -> v a
 packN n0 = \ ws0 -> runST (do mba <- newArr n0
-                              (SP3 i _ mba') <- foldlM go (SP3 0 n0 mba) ws0
+                              (SP2 i mba') <- foldlM go (SP2 0 mba) ws0
                               shrinkMutableArr mba' i
                               ba <- unsafeFreezeArr mba'
                               return $! fromArr ba 0 i
@@ -453,19 +453,20 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
   where
     -- It's critical that this function get specialized and unboxed
     -- Keep an eye on its core!
-    go :: SP3 (MArray v s a) -> a -> ST s (SP3 (MArray v s a))
-    go (SP3 i n mba) !x =
+    go :: SP2 (MArray v s a) -> a -> ST s (SP2 (MArray v s a))
+    go (SP2 i mba) !x = do
+        n <- sizeofMutableArr mba
         if i < n
         then do writeArr mba i x
                 let !i' = i+1
-                return (SP3 i' n mba)
+                return (SP2 i' mba)
         else do let !n' = (n + chunkOverhead) `shiftL` 1 - chunkOverhead
                     !i' = i+1
                 !mba' <- resizeMutableArr mba n'
-                writeArr mba' i x
-                return (SP3 i' n' mba')
+                writeArr mba i x
+                return (SP2 i' mba')
 
-data SP3 a = SP3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int a
+data SP2 a = SP2 {-# UNPACK #-}!Int a
 {-# INLINE packN #-}
 
 -- | /O(n)/
@@ -483,22 +484,24 @@ packR = packRN 16
 packRN :: forall v a. Vec v a => Int -> [a] -> v a
 packRN n0 = \ ws0 -> runST (do mba <- newArr n0
                                let !n0' = n0-1
-                               (SP3 i n mba') <- foldlM go (SP3 n0' n0 mba) ws0
+                               (SP2 i mba') <- foldlM go (SP2 n0' mba) ws0
                                ba <- unsafeFreezeArr mba'
+                               let n = sizeofArr ba
                                return $! fromArr ba i (n-i)
                            )
   where
-    go :: SP3 (MArray v s a) -> a -> ST s (SP3 (MArray v s a))
-    go (SP3 i n mba) !x =
+    go :: SP2 (MArray v s a) -> a -> ST s (SP2 (MArray v s a))
+    go (SP2 i mba) !x = do
+        n <- sizeofMutableArr mba
         if i >= 0
         then do writeArr mba i x
                 let !i' = i-1
-                return (SP3 i' n mba)
+                return (SP2 i' mba)
         else do let !n' = n `shiftL` 1
                     !n'' = n-1
                 !mba' <- newArr n'
                 copyMutableArr mba' n mba 0 n
-                return (SP3 n'' n' mba')
+                return (SP2 n'' mba')
 {-# INLINE packRN #-}
 
 -- | /O(n)/ Convert vector to a list.

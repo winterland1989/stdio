@@ -32,7 +32,7 @@ bytes20000 :: V.Bytes
 bytes20000 = V.replicate 20000 0
 
 builder :: [Benchmark]
-builder = reverse
+builder =
     [ bgroup "word8 100000000" word8_100000000
     , bgroup "word8 10000" word8_10000
     , bgroup "word8 32" word8_32

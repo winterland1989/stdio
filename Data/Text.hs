@@ -11,9 +11,10 @@ import GHC.CString
 import GHC.Exts (IsString(..))
 import Data.Primitive.ByteArray
 import qualified Data.Vector as V
-import qualified Data.Array as A
+import Data.Array
 import Control.Monad.ST
 import Control.Exception
+import Control.DeepSeq (NFData(..))
 import Data.Foldable (foldlM)
 import Data.Word
 import Data.Char
@@ -26,21 +27,23 @@ newtype Text = Text V.Bytes
 
 instance Show Text where
     showsPrec p t = showsPrec p (unpack t)
+instance NFData Text where
+    rnf (Text bs) = rnf bs
 
 data UTF8DecodeResult
-    = InvalidSequence !Text !Bytes !Bytes
-    | PartialBytes !Text !Bytes
+    = InvalidSequence !Text !V.Bytes !V.Bytes
+    | PartialBytes !Text !V.Bytes
     | Success !Text
-  deriving (Show, Typeable)
+  deriving Show
 
-validateUTF8 :: Bytes -> UTF8DecodeResult
-validateUTF8 ::
+validateUTF8 :: V.Bytes -> UTF8DecodeResult
+validateUTF8 = undefined
 
-validateUTF8_ :: Bytes -> (Text, Bytes)
-validateUTF8_ ::
+validateUTF8_ :: V.Bytes -> (Text, V.Bytes)
+validateUTF8_ = undefined
 
-repairUTF8 :: Bytes -> (Text, Bytes)
-repairUTF8 ::
+repairUTF8 :: V.Bytes -> (Text, V.Bytes)
+repairUTF8 = undefined
 
 {-
 fromUTF8 :: Bytes -> (Text, Bytes)
@@ -58,7 +61,7 @@ packN =
 
 pack :: String -> Text
 pack = packN V.defaultInitSize
-{-# INLINE [1] pack #-}
+{-# INLINE pack #-}
 
 -- | /O(n)/ Convert a list into a text with an approximate size(in bytes, not codepoints).
 --
@@ -68,68 +71,34 @@ pack = packN V.defaultInitSize
 -- This function is a /good consumer/ in the sense of build/foldr fusion.
 --
 packN :: Int -> String -> Text
-packN n0 = \ ws0 -> runST (do mba <- A.newArr n0
-                              (SP3 i _ mba') <- foldlM go (SP3 0 n0 mba) ws0
-                              A.shrinkMutableArr mba' i
-                              ba <- A.unsafeFreezeArr mba'
+{-# INLINE packN #-}
+packN n0 = \ ws0 -> runST (do mba <- newArr n0
+                              (SP2 i mba') <- foldlM go (SP2 0 mba) ws0
+                              shrinkMutableArr mba' i
+                              ba <- unsafeFreezeArr mba'
                               return (Text (V.fromArr ba 0 i))
                           )
   where
     -- It's critical that this function get specialized and unboxed
     -- Keep an eye on its core!
-    go :: SP3 s -> Char -> ST s (SP3 s)
-    go (SP3 i siz mba) !c =
+    go :: SP2 s -> Char -> ST s (SP2 s)
+    go (SP2 i mba) !c = do
+        siz <- sizeofMutableArr mba
         if i < siz - 3  -- we need at least 4 bytes for safety
-        then case ord c of
-            n
-                | n <= 0x0000007F -> do
-                    A.writeArr mba i (fromIntegral n)
-                    return (SP3 (i+1) siz mba)
-                | n <= 0x000007FF -> do
-                    A.writeArr mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
-                    A.writeArr mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-                    return (SP3 (i+2) siz mba)
-                | n <= 0x0000FFFF -> do
-                    A.writeArr mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
-                    A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                    A.writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-                    return (SP3 (i+3) siz mba)
-                | n <= 0x0010FFFF -> do
-                    A.writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
-                    A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
-                    A.writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                    A.writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-                    return (SP3 (i+4) siz mba)
+        then do
+            i' <- encodeChar mba i c
+            return (SP2 i' mba)
         else do
             let !siz' = (siz + V.chunkOverhead) `shiftL` 1 - V.chunkOverhead
-                !i' = i+1
-            !mba' <- A.resizeMutableArr mba siz'
-            case ord c of
-                n
-                    | n <= 0x0000007F -> do
-                        A.writeArr mba i (fromIntegral n)
-                        return (SP3 (i+1) siz' mba)
-                    | n <= 0x000007FF -> do
-                        A.writeArr mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
-                        A.writeArr mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-                        return (SP3 (i+2) siz' mba)
-                    | n <= 0x0000FFFF -> do
-                        A.writeArr mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
-                        A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                        A.writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-                        return (SP3 (i+3) siz' mba)
-                    | n <= 0x0010FFFF -> do
-                        A.writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
-                        A.writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
-                        A.writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-                        A.writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-                        return (SP3 (i+4) siz' mba)
+            !mba' <- resizeMutableArr mba siz'
+            i' <- encodeChar mba' i c
+            return (SP2 i' mba')
 
-data SP3 s = SP3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(A.MutablePrimArray s Word8)
-{-# INLINE packN #-}
+data SP2 s = SP2 {-# UNPACK #-}!Int {-# UNPACK #-}!(MutablePrimArray s Word8)
 
 
 unpack :: Text -> String
+{-# INLINE unpack #-}
 unpack (Text (V.BytesPat (ByteArray ba#) (I# s#) (I# l#))) = go s#
   where
     !sl# = s# +# l#
@@ -139,7 +108,6 @@ unpack (Text (V.BytesPat (ByteArray ba#) (I# s#) (I# l#))) = go s#
         in case (idx'# <=# sl#) of
             1# -> C# chr# : go idx'#
             _  -> []
-{-# INLINE unpack #-}
 
 
 --------------------------------------------------------------------------------
@@ -152,32 +120,29 @@ utf8CharLength n
     | n <= '\x00FFFF' = 3
     | n <= '\x10FFFF' = 4
 
-ord2 :: Char -> (Word8,Word8)
-{-# INLINE ord2 #-}
-ord2 c = (x1,x2)
+encodeChar :: MutablePrimArray s Word8 -> Int -> Char -> ST s Int
+{-# INLINE encodeChar #-}
+encodeChar !mba !i !c
+    | n <= 0x0000007F = do
+        writeArr mba i (fromIntegral n)
+        return $! i+1
+    | n <= 0x000007FF = do
+        writeArr mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
+        writeArr mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+        return $! i+2
+    | n <= 0x0000FFFF = do
+        writeArr mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
+        writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
+        writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+        return $! i+3
+    | n <= 0x0010FFFF = do
+        writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
+        writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
+        writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
+        writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
+        return $! i+4
   where
-    n  = ord c
-    x1 = fromIntegral $ (n `shiftR` 6) + 0xC0
-    x2 = fromIntegral $ (n .&. 0x3F)   + 0x80
-
-ord3 :: Char -> (Word8,Word8,Word8)
-{-# INLINE ord3 #-}
-ord3 c = (x1,x2,x3)
-  where
-    n  = ord c
-    x1 = fromIntegral $ (n `shiftR` 12) + 0xE0
-    x2 = fromIntegral $ ((n `shiftR` 6) .&. 0x3F) + 0x80
-    x3 = fromIntegral $ (n .&. 0x3F) + 0x80
-
-ord4 :: Char -> (Word8,Word8,Word8,Word8)
-{-# INLINE ord4 #-}
-ord4 c = (x1,x2,x3,x4)
-  where
-    n  = ord c
-    x1 = fromIntegral $ (n `shiftR` 18) + 0xF0
-    x2 = fromIntegral $ ((n `shiftR` 12) .&. 0x3F) + 0x80
-    x3 = fromIntegral $ ((n `shiftR` 6) .&. 0x3F) + 0x80
-    x4 = fromIntegral $ (n .&. 0x3F) + 0x80
+    !n = ord c
 
 decodeChar :: ByteArray# -> Int# -> (# Char#, Int# #)
 {-# INLINE decodeChar #-}
@@ -197,41 +162,190 @@ decodeChar ba# idx#
         in (# chr4 w1# w2# w3# w4#, 4# #)
   where
     w1# = indexWord8Array# ba# idx#
-    chr1 :: Word# -> Char#
-    chr1 x1# = chr# y1#
-      where
-        !y1# = word2Int# x1#
-    {-# INLINE chr1 #-}
 
-    chr2 :: Word# -> Word# -> Char#
-    chr2 x1# x2# = chr# (z1# +# z2#)
-      where
-        !y1# = word2Int# x1#
-        !y2# = word2Int# x2#
-        !z1# = uncheckedIShiftL# (y1# -# 0xC0#) 6#
-        !z2# = y2# -# 0x80#
-    {-# INLINE chr2 #-}
+-- reference: https://howardhinnant.github.io/utf_summary.html
+--
+repairChar :: ByteArray# -> Int# -> Int# -> (# Char#, Int# #)
+{-# INLINE repairChar #-}
+repairChar ba# idx# end# =
+    case end# -# idx# of
+        1#
+            | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
+            | otherwise -> (# rChar#, -1# #)
+        2#
+            | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
+            | isTrue# (w1# `leWord#` 0xC1##) -> (# rChar#, 1# #)
+            | isTrue# (w1# `leWord#` 0xDF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                in if between# w2# 0x80## 0xBF##
+                then (# chr2 w1# w2#, 2# #)
+                else (# rChar#, 2# #)
+            | otherwise -> (# rChar#, -1# #)
+        3#
+            | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
+            | isTrue# (w1# `leWord#` 0xC1##) -> (# rChar#, 1# #)
+            | isTrue# (w1# `leWord#` 0xDF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                in if between# w2# 0x80## 0xBF##
+                then (# chr2 w1# w2#, 2# #)
+                else (# rChar#, 2# #)
 
-    chr3 :: Word# -> Word# -> Word# -> Char#
-    chr3 x1# x2# x3# = chr# (z1# +# z2# +# z3#)
-      where
-        !y1# = word2Int# x1#
-        !y2# = word2Int# x2#
-        !y3# = word2Int# x3#
-        !z1# = uncheckedIShiftL# (y1# -# 0xE0#) 12#
-        !z2# = uncheckedIShiftL# (y2# -# 0x80#) 6#
-        !z3# = y3# -# 0x80#
-    {-# INLINE chr3 #-}
+            | isTrue# (w1# `eqWord#` 0xE0##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0xA0## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
 
-    chr4 :: Word# -> Word# -> Word# -> Word# -> Char#
-    chr4 x1# x2# x3# x4# = chr# (z1# +# z2# +# z3# +# z4#)
-      where
-        !y1# = word2Int# x1#
-        !y2# = word2Int# x2#
-        !y3# = word2Int# x3#
-        !y4# = word2Int# x4#
-        !z1# = uncheckedIShiftL# (y1# -# 0xF0#) 18#
-        !z2# = uncheckedIShiftL# (y2# -# 0x80#) 12#
-        !z3# = uncheckedIShiftL# (y3# -# 0x80#) 6#
-        !z4# = y4# -# 0x80#
-    {-# INLINE chr4 #-}
+            | isTrue# (w1# `leWord#` 0xEC##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+
+            | isTrue# (w1# `eqWord#` 0xED##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0x9F##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+            | isTrue# (w1# `eqWord#` 0xEF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+
+            | otherwise -> (# rChar#, -1# #)
+
+        _
+            | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
+            | isTrue# (w1# `leWord#` 0xC1##) -> (# rChar#, 1# #)
+            | isTrue# (w1# `leWord#` 0xDF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                in if between# w2# 0x80## 0xBF##
+                then (# chr2 w1# w2#, 2# #)
+                else (# rChar#, 2# #)
+
+            | isTrue# (w1# `eqWord#` 0xE0##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0xA0## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+
+            | isTrue# (w1# `leWord#` 0xEC##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+
+            | isTrue# (w1# `eqWord#` 0xED##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0x9F##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+            | isTrue# (w1# `eqWord#` 0xEF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then  (# chr3 w1# w2# w3#, 3# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+
+            | isTrue# (w1# `eqWord#` 0xF0##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                    w4# = indexWord8Array# ba# (idx# +# 3#)
+                in if between# w2# 0x90## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then if between# w4# 0x80## 0xBF##
+                        then (# chr4 w1# w2# w3# w4#, 4# #)
+                        else (# rChar#, 4# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+
+            | isTrue# (w1# `leWord#` 0xF3##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                    w4# = indexWord8Array# ba# (idx# +# 3#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then if between# w4# 0x80## 0xBF##
+                        then (# chr4 w1# w2# w3# w4#, 4# #)
+                        else (# rChar#, 4# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+
+            | isTrue# (w1# `eqWord#` 0xF4##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                    w4# = indexWord8Array# ba# (idx# +# 3#)
+                in if between# w2# 0x80## 0x8F##
+                then if between# w3# 0x80## 0xBF##
+                    then if between# w4# 0x80## 0xBF##
+                        then (# chr4 w1# w2# w3# w4#, 4# #)
+                        else (# rChar#, 4# #)
+                    else (# rChar#, 3# #)
+                else (# rChar#, 2# #)
+  where
+    w1# = indexWord8Array# ba# idx#
+    between# w# l# h# = isTrue# (w# `geWord#` l#) && isTrue# (w# `leWord#` h#)
+    rChar# = '\xFFFD'#
+
+chr1 :: Word# -> Char#
+chr1 x1# = chr# y1#
+  where
+    !y1# = word2Int# x1#
+{-# INLINE chr1 #-}
+
+chr2 :: Word# -> Word# -> Char#
+chr2 x1# x2# = chr# (z1# +# z2#)
+  where
+    !y1# = word2Int# x1#
+    !y2# = word2Int# x2#
+    !z1# = uncheckedIShiftL# (y1# -# 0xC0#) 6#
+    !z2# = y2# -# 0x80#
+{-# INLINE chr2 #-}
+
+chr3 :: Word# -> Word# -> Word# -> Char#
+chr3 x1# x2# x3# = chr# (z1# +# z2# +# z3#)
+  where
+    !y1# = word2Int# x1#
+    !y2# = word2Int# x2#
+    !y3# = word2Int# x3#
+    !z1# = uncheckedIShiftL# (y1# -# 0xE0#) 12#
+    !z2# = uncheckedIShiftL# (y2# -# 0x80#) 6#
+    !z3# = y3# -# 0x80#
+{-# INLINE chr3 #-}
+
+chr4 :: Word# -> Word# -> Word# -> Word# -> Char#
+chr4 x1# x2# x3# x4# = chr# (z1# +# z2# +# z3# +# z4#)
+  where
+    !y1# = word2Int# x1#
+    !y2# = word2Int# x2#
+    !y3# = word2Int# x3#
+    !y4# = word2Int# x4#
+    !z1# = uncheckedIShiftL# (y1# -# 0xF0#) 18#
+    !z2# = uncheckedIShiftL# (y2# -# 0x80#) 12#
+    !z3# = uncheckedIShiftL# (y3# -# 0x80#) 6#
+    !z4# = y4# -# 0x80#
+{-# INLINE chr4 #-}

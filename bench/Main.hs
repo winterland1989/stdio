@@ -15,10 +15,12 @@ import Data.Word
 import Control.DeepSeq
 import Builder
 import Bytes
+import Text
 
 
 main :: IO ()
-main = defaultMain -- $ List.reverse
+main = defaultMain $ List.reverse
     [ bgroup "Bytes" bytes
     , bgroup "Builder" builder
+    , bgroup "Text" text
     ]
