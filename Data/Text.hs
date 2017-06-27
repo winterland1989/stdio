@@ -19,6 +19,7 @@ import Data.Foldable (foldlM)
 import Data.Word
 import Data.Char
 import Data.Bits
+import Data.Typeable
 import Foreign.C.Types
 
 -- | 'Text' represented as UTF-8 encoded 'Bytes'
@@ -35,6 +36,13 @@ data UTF8DecodeResult
     | PartialBytes !Text !V.Bytes
     | Success !Text
   deriving Show
+
+data UTF8EncodeError = UTF8EncodeError !Char deriving (Show, Typeable)
+instance Exception UTF8EncodeError
+
+data UTF8DecodeError = UTF8DecodeError !V.Bytes deriving (Show, Typeable)
+instance Exception UTF8DecodeError
+
 
 validateUTF8 :: V.Bytes -> UTF8DecodeResult
 validateUTF8 = undefined
@@ -120,6 +128,8 @@ utf8CharLength n
     | n <= '\x00FFFF' = 3
     | n <= '\x10FFFF' = 4
 
+-- | Encode a 'Char' into bytes, throw 'UTF8EncodeError' for invalid unicode codepoint.
+--
 encodeChar :: MutablePrimArray s Word8 -> Int -> Char -> ST s Int
 {-# INLINE encodeChar #-}
 encodeChar !mba !i !c
@@ -130,17 +140,20 @@ encodeChar !mba !i !c
         writeArr mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
         writeArr mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
         return $! i+2
-    | n <= 0x0000FFFF = do
+    | n <= 0x0000D7FF = do
         writeArr mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
         writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
         writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
         return $! i+3
+    | n <= 0x0000DFFF = throw (UTF8EncodeError c)
+
     | n <= 0x0010FFFF = do
         writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
         writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
         writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
         writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
         return $! i+4
+    | otherwise = throw (UTF8EncodeError c)
   where
     !n = ord c
 
@@ -163,6 +176,154 @@ decodeChar ba# idx#
   where
     w1# = indexWord8Array# ba# idx#
 
+between# :: Word# -> Word# -> Word# -> Bool
+{-# INLINE between# #-}
+between# w# l# h# = isTrue# (w# `geWord#` l#) && isTrue# (w# `leWord#` h#)
+
+validateChar :: ByteArray# -> Int# -> Int# -> Int#
+{-# INLINE validateChar #-}
+validateChar ba# idx# end# =
+    case end# -# idx# of
+        1#
+            | isTrue# (w1# `leWord#` 0x7F##) -> 1#
+            | otherwise -> 0#
+        2#
+            | isTrue# (w1# `leWord#` 0x7F##) -> 1#
+            | isTrue# (w1# `leWord#` 0xC1##) -> -1#
+            | isTrue# (w1# `leWord#` 0xDF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                in if between# w2# 0x80## 0xBF##
+                then 2#
+                else -2#
+            | otherwise -> 0#
+        3#
+            | isTrue# (w1# `leWord#` 0x7F##) -> 1#
+            | isTrue# (w1# `leWord#` 0xC1##) -> -1#
+            | isTrue# (w1# `leWord#` 0xDF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                in if between# w2# 0x80## 0xBF##
+                then 2#
+                else -2#
+
+            | isTrue# (w1# `eqWord#` 0xE0##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0xA0## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+
+            | isTrue# (w1# `leWord#` 0xEC##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+
+            | isTrue# (w1# `eqWord#` 0xED##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0x9F##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+            | isTrue# (w1# `eqWord#` 0xEF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+
+            | otherwise -> 0#
+
+        _
+            | isTrue# (w1# `leWord#` 0x7F##) -> 1#
+            | isTrue# (w1# `leWord#` 0xC1##) -> -1#
+            | isTrue# (w1# `leWord#` 0xDF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                in if between# w2# 0x80## 0xBF##
+                then 2#
+                else -2#
+
+            | isTrue# (w1# `eqWord#` 0xE0##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0xA0## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+
+            | isTrue# (w1# `leWord#` 0xEC##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+
+            | isTrue# (w1# `eqWord#` 0xED##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0x9F##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+            | isTrue# (w1# `eqWord#` 0xEF##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then 3#
+                    else -3#
+                else -2#
+
+            | isTrue# (w1# `eqWord#` 0xF0##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                    w4# = indexWord8Array# ba# (idx# +# 3#)
+                in if between# w2# 0x90## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then if between# w4# 0x80## 0xBF##
+                        then 4#
+                        else -4#
+                    else -3#
+                else -2#
+
+            | isTrue# (w1# `leWord#` 0xF3##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                    w4# = indexWord8Array# ba# (idx# +# 3#)
+                in if between# w2# 0x80## 0xBF##
+                then if between# w3# 0x80## 0xBF##
+                    then if between# w4# 0x80## 0xBF##
+                        then 4#
+                        else -4#
+                    else -3#
+                else -2#
+
+            | isTrue# (w1# `eqWord#` 0xF4##) ->
+                let w2# = indexWord8Array# ba# (idx# +# 1#)
+                    w3# = indexWord8Array# ba# (idx# +# 2#)
+                    w4# = indexWord8Array# ba# (idx# +# 3#)
+                in if between# w2# 0x80## 0x8F##
+                then if between# w3# 0x80## 0xBF##
+                    then if between# w4# 0x80## 0xBF##
+                        then 4#
+                        else -4#
+                    else -3#
+                else -2#
+  where
+    w1# = indexWord8Array# ba# idx#
+
 -- reference: https://howardhinnant.github.io/utf_summary.html
 --
 repairChar :: ByteArray# -> Int# -> Int# -> (# Char#, Int# #)
@@ -171,7 +332,7 @@ repairChar ba# idx# end# =
     case end# -# idx# of
         1#
             | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
-            | otherwise -> (# rChar#, -1# #)
+            | otherwise -> (# rChar#, 0# #)
         2#
             | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
             | isTrue# (w1# `leWord#` 0xC1##) -> (# rChar#, 1# #)
@@ -180,7 +341,7 @@ repairChar ba# idx# end# =
                 in if between# w2# 0x80## 0xBF##
                 then (# chr2 w1# w2#, 2# #)
                 else (# rChar#, 2# #)
-            | otherwise -> (# rChar#, -1# #)
+            | otherwise -> (# rChar#, 0# #)
         3#
             | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
             | isTrue# (w1# `leWord#` 0xC1##) -> (# rChar#, 1# #)
@@ -225,7 +386,7 @@ repairChar ba# idx# end# =
                     else (# rChar#, 3# #)
                 else (# rChar#, 2# #)
 
-            | otherwise -> (# rChar#, -1# #)
+            | otherwise -> (# rChar#, 0# #)
 
         _
             | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1 w1#, 1# #)
@@ -308,7 +469,6 @@ repairChar ba# idx# end# =
                 else (# rChar#, 2# #)
   where
     w1# = indexWord8Array# ba# idx#
-    between# w# l# h# = isTrue# (w# `geWord#` l#) && isTrue# (w# `leWord#` h#)
     rChar# = '\xFFFD'#
 
 chr1 :: Word# -> Char#
