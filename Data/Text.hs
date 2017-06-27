@@ -129,15 +129,14 @@ data SP2 s = SP2 {-# UNPACK #-}!Int {-# UNPACK #-}!(MutablePrimArray s Word8)
 
 unpack :: Text -> String
 {-# INLINE unpack #-}
-unpack (Text (V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#))) = go s#
+unpack (Text v) = go s#
   where
+    !(V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#)) = v
     !sl# = s# +# l#
     go idx# =
-        let (# chr#, l# #) = decodeChar# ba# idx#
+        let (# c#, l# #) = decodeChar# ba# idx#
             idx'# = idx# +# l#
-        in case (idx'# <=# sl#) of
-            1# -> C# chr# : go idx'#
-            _  -> []
+        in if isTrue# (idx'# <=# sl#) then C# c# : go idx'# else []
 
 singleton :: Char -> Text
 {-# INLINABLE singleton #-}
@@ -172,10 +171,16 @@ append t1@(Text (V.PrimVector ba1 s1 l1)) t2@(Text (V.PrimVector ba2 s2 l2))
         copyArr mba 0 ba1 s1 l1
         copyArr mba l1 ba2 s2 l2
 
-{-
 uncons :: Text -> Maybe (Char, Text)
-uncons (Text (V.PrimVector ba s l)) =
-
+{-# INLINABLE uncons #-}
+uncons (Text v)
+    | l == 0  = Nothing
+    | otherwise =
+        let (# c#, i# #) = decodeChar# ba# s#
+        in Just (C# c#, Text (V.PrimVector ba (I# (s# +# i#)) (I# (l# -# i#))))
+  where
+    !(V.PrimVector ba@(PrimArray (ByteArray ba#)) (I# s#) l@(I# l#)) = v
+{-
 head
 last
 tail
