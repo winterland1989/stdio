@@ -380,16 +380,21 @@ creating l fill = runST (do
 
 -- | Create a vector up to a specific length.
 --
+-- If the initialization function return a length larger than initial size,
+-- an error will be raised.
+--
 createN :: Vec v a
         => Int  -- length's upper bound
         -> (forall s. MArray v s a -> ST s Int)  -- initialization function which return the actual length
-                                                         -- (must be smaller than upper bound)
         -> v a
 createN l fill = runST (do
         mba <- newArr l
         l' <- fill mba
+        shrinkMutableArr mba l'
         ba <- unsafeFreezeArr mba
-        assert (l' <= l) (return $! fromArr ba 0 l')
+        if l' <= l
+        then return $! fromArr ba 0 l'
+        else error $ moduleErrorMsg "createN" "return size exceeds initial size"
     )
 {-# INLINE createN #-}
 

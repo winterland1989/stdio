@@ -38,7 +38,7 @@ instance NFData Text where
 data UTF8DecodeResult
     = Success !Text
     | PartialBytes !Text !V.Bytes
-    | InvalidSequence !V.Bytes
+    | InvalidBytes !V.Bytes
   deriving (Show, Eq)
 
 data UTF8EncodeError = UTF8EncodeError !Char deriving (Show, Typeable)
@@ -61,7 +61,9 @@ validateUTF8 bs@(V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#)) = go 
                     PartialBytes
                         (Text (V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# (i# -# s#))))
                         (V.PrimVector (PrimArray (ByteArray ba#)) (I# i#) (I# (end# -# i#)))
-                | otherwise -> InvalidSequence (V.PrimVector (PrimArray (ByteArray ba#)) (I# i#) (I# (negateInt# r#)))
+                | otherwise ->
+                    InvalidBytes
+                        (V.PrimVector (PrimArray (ByteArray ba#)) (I# i#) (I# (negateInt# r#)))
         | otherwise = Success (Text bs)
 {-# INLINE validateUTF8 #-}
 
@@ -83,10 +85,9 @@ fromUTF16 :: Bytes -> (Text, Bytes)
 fromUTF16Lenient :: Bytes -> (Text, Bytes)
 toUTF16 :: Text -> Bytes
 
-
-packN :: String -> Text
-packN =
 -}
+
+--------------------------------------------------------------------------------
 
 pack :: String -> Text
 pack = packN V.defaultInitSize
@@ -94,7 +95,7 @@ pack = packN V.defaultInitSize
 
 -- | /O(n)/ Convert a list into a text with an approximate size(in bytes, not codepoints).
 --
--- If the list's length is large than the size given, we simply double the buffer size
+-- If the encoded bytes length is larger than the size given, we simply double the buffer size
 -- and continue building.
 --
 -- This function is a /good consumer/ in the sense of build/foldr fusion.
@@ -138,7 +139,51 @@ unpack (Text (V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#))) = go s#
             1# -> C# chr# : go idx'#
             _  -> []
 
+singleton :: Char -> Text
+{-# INLINABLE singleton #-}
+singleton c = Text $ V.createN 4 $ \ mba -> encodeChar mba 0 c
 
+empty :: Text
+{-# INLINABLE empty #-}
+empty = Text V.empty
+
+--------------------------------------------------------------------------------
+-- * Basic interface
+
+cons :: Char -> Text -> Text
+{-# INLINABLE cons #-}
+cons c (Text (V.PrimVector ba s l)) = Text $ V.createN (4 + l) $ \ mba -> do
+        i <- encodeChar mba 0 c
+        copyArr mba i ba s l
+        return $! i + l
+
+snoc :: Text -> Char -> Text
+{-# INLINABLE snoc #-}
+snoc (Text (V.PrimVector ba s l)) c = Text $ V.createN (4 + l) $ \ mba -> do
+    copyArr mba 0 ba s l
+    encodeChar mba l c
+
+append :: Text -> Text -> Text
+{-# INLINABLE append #-}
+append t1@(Text (V.PrimVector ba1 s1 l1)) t2@(Text (V.PrimVector ba2 s2 l2))
+    | l1 == 0   = t2
+    | l2 == 0   = t1
+    | otherwise = Text $ V.create (l1 + l2) $ \ mba -> do
+        copyArr mba 0 ba1 s1 l1
+        copyArr mba l1 ba2 s2 l2
+
+{-
+uncons :: Text -> Maybe (Char, Text)
+uncons (Text (V.PrimVector ba s l)) =
+
+head
+last
+tail
+init
+null
+length
+compareLength
+-}
 --------------------------------------------------------------------------------
 
 utf8CharLength :: Char -> Int
