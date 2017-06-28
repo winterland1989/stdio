@@ -332,7 +332,7 @@ encodeChar !mba !i !c
     !n = ord c
 
 decodeChar# :: ByteArray# -> Int# -> (# Char#, Int# #)
-{-# INLINE decodeChar# #-}
+{-# NOINLINE decodeChar# #-}
 decodeChar# ba# idx#
     | isTrue# (w1# `leWord#` 0x7F##) = (# chr1# w1#, 1# #)
     | isTrue# (w1# `leWord#` 0xDF##) =
@@ -351,7 +351,7 @@ decodeChar# ba# idx#
     w1# = indexWord8Array# ba# idx#
 
 decodeCharReverse# :: ByteArray# -> Int# -> (# Char#, Int# #)
-{-# INLINE decodeCharReverse# #-}
+{-# NOINLINE decodeCharReverse# #-}
 decodeCharReverse# ba# idx# =
     let w1# = indexWord8Array# ba# idx#
     in if isContinueByte w1#
