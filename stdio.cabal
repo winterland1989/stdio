@@ -22,6 +22,7 @@ library
                             Data.Array
                             Data.Array.Checked
                             Data.Text
+                            Data.Text.UTF8Codec
 
                             Data.Binary
                             Data.Builder
