@@ -12,7 +12,7 @@ import GHC.Exts (IsString(..), build)
 import Data.Primitive.ByteArray
 import qualified Data.Vector as V
 import Data.Array
-import Control.Monad.ST
+import GHC.ST
 import Control.Exception
 import Control.DeepSeq (NFData(..))
 import Data.Foldable (foldlM)
@@ -299,40 +299,44 @@ utf8CharLength n
 --
 encodeChar :: MutablePrimArray s Word8 -> Int -> Char -> ST s Int
 {-# INLINE encodeChar #-}
-encodeChar !mba !i !c
-    | n <= 0x0000007F = do
-        writeArr mba i (fromIntegral n)
-        return $! i+1
-    | n <= 0x000007FF = do
-        writeArr mba i     (fromIntegral (0xC0 .|. (n `shiftR` 6)))
-        writeArr mba (i+1) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-        return $! i+2
-    | n <= 0x0000D7FF = do
-        writeArr mba i     (fromIntegral (0xE0 .|. (n `shiftR` 12)))
-        writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-        writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-        return $! i+3
-    | n <= 0x0000DFFF = do -- write replacement char \U+FFFD
-        writeArr mba i     0xEF
-        writeArr mba (i+1) 0xBF
-        writeArr mba (i+2) 0xBD
-        return $! i+3
-    | n <= 0x0010FFFF = do
-        writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
-        writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
-        writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
-        writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
-        return $! i+4
-    | otherwise = do -- write replacement char \U+FFFD
-        writeArr mba i     0xEF
-        writeArr mba (i+1) 0xBF
-        writeArr mba (i+2) 0xBD
-        return $! i+3
-  where
-    !n = ord c
+encodeChar (MutablePrimArray (MutableByteArray mba#)) (I# i#) (C# c#) = ST (\ s# ->
+    let (# s1#, j# #) = encodeChar# mba# i# c# s# in (# s1#, (I# j#) #))
+
+encodeChar# :: MutableByteArray# s -> Int# -> Char# -> State# s -> (# State# s, Int# #)
+{-# NOINLINE encodeChar# #-} -- This branchy code bloat code size, so don't inline it
+encodeChar# mba# i# c# = case ord# c# of
+    n#
+        | isTrue# (n# <=# 0x0000007F#) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (int2Word# n#) s#
+            in (# s1#, i# +# 1# #)
+        | isTrue# (n# <=# 0x000007FF#) -> \ s# ->
+            let s1# = writeWord8Array# mba# i#  (int2Word# (0xC0# `orI#` (n# `uncheckedIShiftRA#` 6#))) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (int2Word# (0x80# `orI#` (n# `andI#` 0x3F#))) s1#
+            in (# s2#, i# +# 2# #)
+        | isTrue# (n# <=# 0x0000D7FF#) -> \ s# ->
+            let s1# = writeWord8Array# mba# i#  (int2Word# (0xE0# `orI#` (n# `uncheckedIShiftRA#` 12#))) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (int2Word# (0x80# `orI#` ((n# `uncheckedIShiftRA#` 6#) `andI#` 0x3F#))) s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) (int2Word# (0x80# `orI#` (n# `andI#` 0x3F#))) s2#
+            in (# s3#, i# +# 3# #)
+        | isTrue# (n# <=# 0x0000DFFF#) -> \ s# -> -- write replacement char \U+FFFD
+            let s1# = writeWord8Array# mba# i#  0xEF## s#
+                s2# = writeWord8Array# mba# (i# +# 1#) 0xBF## s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) 0xBD## s2#
+            in (# s3#, i# +# 3# #)
+        | isTrue# (n# <=# 0x0010FFFF#) -> \ s# ->
+            let s1# = writeWord8Array# mba# i#     (int2Word# (0xF0# `orI#` (n# `uncheckedIShiftRA#` 18#))) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (int2Word# (0x80# `orI#` ((n# `uncheckedIShiftRA#` 12#) `andI#` 0x3F#))) s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) (int2Word# (0x80# `orI#` ((n# `uncheckedIShiftRA#` 6#) `andI#` 0x3F#))) s2#
+                s4# = writeWord8Array# mba# (i# +# 3#) (int2Word# (0x80# `orI#` (n# `andI#` 0x3F#))) s3#
+            in (# s4#, i# +# 4# #)
+        | otherwise -> \ s# -> -- write replacement char \U+FFFD
+            let s1# = writeWord8Array# mba# i#  0xEF## s#
+                s2# = writeWord8Array# mba# (i# +# 1#) 0xBF## s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) 0xBD## s2#
+            in (# s3#, i# +# 3# #)
 
 decodeChar# :: ByteArray# -> Int# -> (# Char#, Int# #)
-{-# INLINE decodeChar# #-}
+{-# NOINLINE decodeChar# #-} -- This branchy code make GHC impossible to fuse, so don't inline
 decodeChar# ba# idx#
     | isTrue# (w1# `leWord#` 0x7F##) = (# chr1# w1#, 1# #)
     | isTrue# (w1# `leWord#` 0xDF##) =
@@ -351,7 +355,7 @@ decodeChar# ba# idx#
     w1# = indexWord8Array# ba# idx#
 
 decodeCharReverse# :: ByteArray# -> Int# -> (# Char#, Int# #)
-{-# INLINE decodeCharReverse# #-}
+{-# NOINLINE decodeCharReverse# #-} -- This branchy code make GHC impossible to fuse, so don't inline
 decodeCharReverse# ba# idx# =
     let w1# = indexWord8Array# ba# idx#
     in if isContinueByte w1#
