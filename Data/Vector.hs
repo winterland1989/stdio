@@ -380,8 +380,7 @@ creating l fill = runST (do
 
 -- | Create a vector up to a specific length.
 --
--- If the initialization function return a length larger than initial size,
--- an error will be raised.
+-- If the initialization function return a length larger than initial size, an error will be raised.
 --
 createN :: Vec v a
         => Int  -- length's upper bound
@@ -394,7 +393,7 @@ createN l fill = runST (do
         ba <- unsafeFreezeArr mba
         if l' <= l
         then return $! fromArr ba 0 l'
-        else error $ moduleErrorMsg "createN" "return size exceeds initial size"
+        else error "Data.PrimVector.createN: return size exceeds initial size"
     )
 {-# INLINE createN #-}
 
@@ -1032,11 +1031,8 @@ splitAt s' (VecPat arr s l) = let v1 = fromArr arr s'' (s''-s)
 -- Common up near identical calls to `error' to reduce the number
 -- constant strings created when compiled:
 errorEmptyVector :: String -> a
-errorEmptyVector fun = error (moduleErrorMsg fun "empty PrimVector")
+errorEmptyVector fun = error ("Data.PrimVector." ++ fun ++ ": empty PrimVector")
 {-# NOINLINE errorEmptyVector #-}
-
-moduleErrorMsg :: String -> String -> String
-moduleErrorMsg fun msg = "Data.PrimVector." ++ fun ++ ':':' ':msg
 
 rangeCut :: Int -> Int -> Int -> Int
 rangeCut !r !min !max | r < min = min

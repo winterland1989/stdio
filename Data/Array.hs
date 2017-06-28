@@ -7,6 +7,11 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE BangPatterns #-}
 
+-- | Unified unboxed and boxed array operations using functional dependencies.
+--
+-- All operations are NOT bound checked, if you need checked operations please use "Data.Array.Checked".
+-- It exports exactly same APIs so that you can switch between without pain.
+--
 module Data.Array (
   -- * Arr typeclass
     Arr(..)
@@ -23,10 +28,13 @@ module Data.Array (
   , primArrayContents, mutablePrimArrayContents
   , isPrimArrayPinned, isMutablePrimArrayPinned
   , copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr
+  -- * The 'ArrayException' type
+  , ArrayException(..)
   ) where
 
 import Data.Primitive.Types
 import Control.Monad.Primitive
+import Control.Exception (ArrayException(..), throw)
 import Data.Primitive.PrimArray
 import Data.Primitive.Array
 import Data.Primitive.SmallArray
@@ -34,11 +42,11 @@ import GHC.ST
 import GHC.Prim
 import GHC.Types (isTrue#)
 
--- | Bottom value (@error "Data.Array: uninitialized element accessed"@)
--- for initialize a new boxed array('Array', 'SmallArray'..).
+-- | Bottom value (@throw ('UndefinedElement' "Data.Array.uninitialized")@)
+-- for initialize new boxed array('Array', 'SmallArray'..).
 --
 uninitialized :: a
-uninitialized = error "Data.Array: uninitialized element accessed"
+uninitialized = throw (UndefinedElement "Data.Array.uninitialized")
 
 -- | A typeclass to unify box & unboxed, mutable & immutable array operations.
 --
@@ -50,9 +58,6 @@ uninitialized = error "Data.Array: uninitialized element accessed"
 --
 -- It's reasonable to trust GHC with specializing & inlining these polymorphric functions.
 -- They are used across this package and perform identical to their monomophric counterpart.
---
--- All operations are NOT bound checked, if you need checked operations please use "Data.Array.Checked".
--- It exports exactly same APIs so that you can switch them without too much trouble.
 --
 class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr where
     -- | Test

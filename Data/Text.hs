@@ -8,7 +8,7 @@ module Data.Text where
 import GHC.Prim
 import GHC.Types
 import GHC.CString
-import GHC.Exts (IsString(..))
+import GHC.Exts (IsString(..), build)
 import Data.Primitive.ByteArray
 import qualified Data.Vector as V
 import Data.Array
@@ -19,8 +19,20 @@ import Data.Foldable (foldlM)
 import Data.Word
 import Data.Char
 import Data.Bits
+import qualified Data.List as List
 import Data.Typeable
 import Foreign.C.Types
+
+import Prelude hiding (reverse,head,tail,last,init,null
+    ,length,map,lines,foldl,foldr,unlines
+    ,concat,any,take,drop,splitAt,takeWhile
+    ,dropWhile,span,break,elem,filter,maximum
+    ,minimum,all,concatMap,foldl1,foldr1
+    ,scanl,scanl1,scanr,scanr1
+    ,readFile,writeFile,appendFile,replicate
+    ,getContents,getLine,putStr,putStrLn,interact
+    ,zip,zipWith,unzip,notElem
+    )
 
 -- | 'Text' represented as UTF-8 encoded 'Bytes'
 --
@@ -41,14 +53,8 @@ data UTF8DecodeResult
     | InvalidBytes !V.Bytes
   deriving (Show, Eq)
 
-data UTF8EncodeError = UTF8EncodeError !Char deriving (Show, Typeable)
-instance Exception UTF8EncodeError
-
-data UTF8DecodeError = UTF8DecodeError !V.Bytes deriving (Show, Typeable)
-instance Exception UTF8DecodeError
-
-
 validateUTF8 :: V.Bytes -> UTF8DecodeResult
+{-# INLINE validateUTF8 #-}
 validateUTF8 bs@(V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#)) = go s#
   where
     end# = s# +# l#
@@ -65,7 +71,6 @@ validateUTF8 bs@(V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#)) = go 
                     InvalidBytes
                         (V.PrimVector (PrimArray (ByteArray ba#)) (I# i#) (I# (negateInt# r#)))
         | otherwise = Success (Text bs)
-{-# INLINE validateUTF8 #-}
 
 validateUTF8_ :: V.Bytes -> (Text, V.Bytes)
 validateUTF8_ = undefined
@@ -128,7 +133,7 @@ data SP2 s = SP2 {-# UNPACK #-}!Int {-# UNPACK #-}!(MutablePrimArray s Word8)
 
 
 unpack :: Text -> String
-{-# INLINE unpack #-}
+{-# NOINLINE [1] unpack #-}
 unpack (Text v) = go s#
   where
     !(V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#)) = v
@@ -137,6 +142,23 @@ unpack (Text v) = go s#
         let (# c#, l# #) = decodeChar# ba# idx#
             idx'# = idx# +# l#
         in if isTrue# (idx'# <=# sl#) then C# c# : go idx'# else []
+
+unpackFB :: Text -> (Char -> a -> a) -> a -> a
+{-# INLINE [0] unpackFB #-}
+unpackFB (Text v) k z = go s#
+  where
+    !(V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#)) = v
+    !sl# = s# +# l#
+    go idx# =
+        let (# c#, l# #) = decodeChar# ba# idx#
+            idx'# = idx# +# l#
+        in if isTrue# (idx'# <=# sl#) then C# c# `k` go idx'# else z
+
+{-# RULES
+"unpack" [~1] forall t . unpack t = build (\ k z -> unpackFB t k z)
+"unpackFB" [1] forall t . unpackFB t (:) [] = unpack t
+ #-}
+
 
 singleton :: Char -> Text
 {-# INLINABLE singleton #-}
@@ -172,23 +194,96 @@ append t1@(Text (V.PrimVector ba1 s1 l1)) t2@(Text (V.PrimVector ba2 s2 l2))
         copyArr mba l1 ba2 s2 l2
 
 uncons :: Text -> Maybe (Char, Text)
-{-# INLINABLE uncons #-}
+{-# INLINE uncons #-}
 uncons (Text v)
     | l == 0  = Nothing
     | otherwise =
         let (# c#, i# #) = decodeChar# ba# s#
-        in Just (C# c#, Text (V.PrimVector ba (I# (s# +# i#)) (I# (l# -# i#))))
+            i = I# i#
+        in Just (C# c#, Text (V.PrimVector ba (s+i) (l-i)))
   where
-    !(V.PrimVector ba@(PrimArray (ByteArray ba#)) (I# s#) l@(I# l#)) = v
+    !(V.PrimVector ba@(PrimArray (ByteArray ba#)) s@(I# s#) l@(I# l#)) = v
+
+unsnoc :: Text -> Maybe (Text, Char)
+{-# INLINE unsnoc #-}
+unsnoc (Text v)
+    | l == 0  = Nothing
+    | otherwise =
+        let (# c#, i# #) = decodeCharReverse# ba# (s# +# l# -# 1#)
+            i = I# i#
+        in Just (Text (V.PrimVector ba s (l-i)), C# c#)
+  where
+    !(V.PrimVector ba@(PrimArray (ByteArray ba#)) s@(I# s#) l@(I# l#)) = v
+
+head :: Text -> Char
+{-# INLINABLE head #-}
+head t = case uncons t of { Nothing -> errorEmptyText "head"; Just (c, _) -> c }
+
+tail :: Text -> Text
+{-# INLINABLE tail #-}
+tail t = case uncons t of { Nothing -> empty; Just (_, t) -> t }
+
+last :: Text -> Char
+{-# INLINABLE last #-}
+last t = case unsnoc t of { Nothing -> errorEmptyText "last"; Just (_, c) -> c }
+
+init :: Text -> Text
+{-# INLINABLE init #-}
+init t = case unsnoc t of { Nothing -> empty; Just (t, _) -> t }
+
+null :: Text -> Bool
+{-# INLINABLE null #-}
+null (Text bs) = V.null bs
+
+length :: Text -> Int
+{-# INLINABLE length #-}
+length (Text v) = I# (go# s#)
+  where
+    !sl# = s# +# l#
+    go# :: Int# -> Int#
+    go# i# | isTrue# (i# >=# sl#) = 0#
+           | otherwise = let (# _, j# #) = decodeChar# ba# i#
+                         in 1# +# go# (i# +# j#)
+    !(V.PrimVector ba@(PrimArray (ByteArray ba#)) s@(I# s#) l@(I# l#)) = v
+
+--------------------------------------------------------------------------------
+-- * Transformations
+--
+-- | /O(n)/ 'map' @f@ @t@ is the 'Text' obtained by applying @f@ to
+-- each element of @t@. Performs replacement on invalid scalar values.
+--
+map :: (Char -> Char) -> Text -> Text
+map f = \ t@(Text v) -> packN (V.length v `unsafeShiftL` 1) (List.map f (unpack t))
+{-# INLINE map #-}
+
 {-
-head
-last
-tail
-init
-null
-length
-compareLength
+-- | /O(n)/ The 'intercalate' function takes a 'Text' and a list of
+-- 'Text's and concatenates the list after interspersing the first
+-- argument between each element of the list.
+intercalate :: Text -> [Text] -> Text
+intercalate t = concat . (F.intersperse t)
+{-# INLINE intercalate #-}
+
+-- | /O(n)/ The 'intersperse' function takes a character and places it
+-- between the characters of a 'Text'.  Subject to fusion.  Performs
+-- replacement on invalid scalar values.
+intersperse     :: Char -> Text -> Text
+intersperse c t = unstream (S.intersperse (safe c) (stream t))
+{-# INLINE intersperse #-}
+
+-- | /O(n)/ Reverse the characters of a string. Subject to fusion.
+reverse :: Text -> Text
+reverse t = S.reverse (stream t)
+{-# INLINE reverse #-}
+
 -}
+
+--------------------------------------------------------------------------------
+
+errorEmptyText :: String -> a
+{-# NOINLINE errorEmptyText #-}
+errorEmptyText fun = error ("Data.Text." ++ fun ++ ": empty Text")
+
 --------------------------------------------------------------------------------
 
 utf8CharLength :: Char -> Int
@@ -199,7 +294,8 @@ utf8CharLength n
     | n <= '\x00FFFF' = 3
     | n <= '\x10FFFF' = 4
 
--- | Encode a 'Char' into bytes, throw 'UTF8EncodeError' for invalid unicode codepoint.
+-- | Encode a 'Char' into bytes, write @\U+FFFD@ (encoded as @EF BF BD@ 3 bytes)
+-- for invalid unicode codepoint.
 --
 encodeChar :: MutablePrimArray s Word8 -> Int -> Char -> ST s Int
 {-# INLINE encodeChar #-}
@@ -216,15 +312,22 @@ encodeChar !mba !i !c
         writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
         writeArr mba (i+2) (fromIntegral (0x80 .|. (n .&. 0x3F)))
         return $! i+3
-    | n <= 0x0000DFFF = throw (UTF8EncodeError c)
-
+    | n <= 0x0000DFFF = do -- write replacement char \U+FFFD
+        writeArr mba i     0xEF
+        writeArr mba (i+1) 0xBF
+        writeArr mba (i+2) 0xBD
+        return $! i+3
     | n <= 0x0010FFFF = do
         writeArr mba i     (fromIntegral (0xF0 .|. (n `shiftR` 18)))
         writeArr mba (i+1) (fromIntegral (0x80 .|. ((n `shiftR` 12) .&. 0x3F)))
         writeArr mba (i+2) (fromIntegral (0x80 .|. ((n `shiftR` 6) .&. 0x3F)))
         writeArr mba (i+3) (fromIntegral (0x80 .|. (n .&. 0x3F)))
         return $! i+4
-    | otherwise = throw (UTF8EncodeError c)
+    | otherwise = do -- write replacement char \U+FFFD
+        writeArr mba i     0xEF
+        writeArr mba (i+1) 0xBF
+        writeArr mba (i+2) 0xBD
+        return $! i+3
   where
     !n = ord c
 
@@ -246,6 +349,26 @@ decodeChar# ba# idx#
         in (# chr4# w1# w2# w3# w4#, 4# #)
   where
     w1# = indexWord8Array# ba# idx#
+
+decodeCharReverse# :: ByteArray# -> Int# -> (# Char#, Int# #)
+{-# INLINE decodeCharReverse# #-}
+decodeCharReverse# ba# idx# =
+    let w1# = indexWord8Array# ba# idx#
+    in if isContinueByte w1#
+        then
+        let w2# = indexWord8Array# ba# (idx# -# 1#)
+        in if isContinueByte w2#
+        then
+            let w3# = indexWord8Array# ba# (idx# -# 2#)
+            in if isContinueByte w3#
+            then
+                let w4# = indexWord8Array# ba# (idx# -# 3#)
+                in (# chr4# w4# w3# w2# w1#, 4# #)
+            else (# chr3# w3# w2# w1#, 3# #)
+        else  (# chr2# w2# w1#, 2# #)
+    else (# chr1# w1#, 1# #)
+  where
+    isContinueByte w# = isTrue# (and# w# 0xC0## `eqWord#` 0x80##)
 
 between# :: Word# -> Word# -> Word# -> Bool
 {-# INLINE between# #-}

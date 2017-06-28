@@ -1,9 +1,16 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Bound checked array operations.
+--
+-- This module provides exactly the same API with "Data.Array", but will throw an 'IndexOutOfBounds' 'ArrayException'
+-- on bound check failure.
+--
 module Data.Array.Checked
-  ( -- * Bound checked array operations
-    newArr
+  ( -- * Arr typeclass re-export
+    A.Arr
+    -- * Bound checked array operations
+  , newArr
   , newArrWith
   , readArr
   , writeArr
@@ -39,22 +46,20 @@ module Data.Array.Checked
   , A.newPinnedPrimArray, A.newAlignedPinnedPrimArray
   , A.primArrayContents, A.mutablePrimArrayContents
   , A.isPrimArrayPinned, A.isMutablePrimArrayPinned
+  -- * The 'ArrayException' type
+  , ArrayException(..)
   ) where
 
 import qualified Data.Array as A
-import Control.Exception (Exception(..), throw)
+import Control.Exception (Exception(..), throw, ArrayException(..))
 import Data.Typeable
 import Control.Monad.Primitive
 import Data.Primitive.Types
 import GHC.Ptr (Ptr(..))
 
--- |
-data OutOfBoundsException = OutOfBoundsException String deriving (Show, Typeable)
-instance Exception OutOfBoundsException
-
 check :: String -> Bool -> a -> a
 check _      True  x = x
-check errMsg False _ = throw (OutOfBoundsException $ "Data.Array.Checked." ++ errMsg)
+check errMsg False _ = throw (IndexOutOfBounds $ "Data.Array.Checked." ++ errMsg)
 {-# INLINE check #-}
 
 newArr :: (A.Arr marr arr a, PrimMonad m, PrimState m ~ s) => Int -> m (marr s a)
