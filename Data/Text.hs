@@ -253,8 +253,8 @@ length (Text v) = I# (go# s#)
 -- each element of @t@. Performs replacement on invalid scalar values.
 --
 map :: (Char -> Char) -> Text -> Text
-map f = \ t@(Text v) -> packN (V.length v `unsafeShiftL` 1) (List.map f (unpack t))
-{-# INLINE map #-}
+map f = \ t@(Text v) -> packN (V.length v + 3) (List.map f (unpack t)) -- the 3 bytes buffer is here for optimizing ascii mapping
+{-# INLINE map #-}                                                     -- because we do resize if less than 3 bytes left when building
 
 {-
 -- | /O(n)/ The 'intercalate' function takes a 'Text' and a list of
@@ -303,31 +303,31 @@ encodeChar (MutablePrimArray (MutableByteArray mba#)) (I# i#) (C# c#) = ST (\ s#
     let (# s1#, j# #) = encodeChar# mba# i# c# s# in (# s1#, (I# j#) #))
 
 encodeChar# :: MutableByteArray# s -> Int# -> Char# -> State# s -> (# State# s, Int# #)
-{-# NOINLINE encodeChar# #-} -- This branchy code bloat code size, so don't inline it
-encodeChar# mba# i# c# = case ord# c# of
+{-# NOINLINE encodeChar# #-} -- codesize vs speed choice here
+encodeChar# mba# i# c# = case (int2Word# (ord# c#)) of
     n#
-        | isTrue# (n# <=# 0x0000007F#) -> \ s# ->
-            let s1# = writeWord8Array# mba# i# (int2Word# n#) s#
+        | isTrue# (n# `leWord#` 0x0000007F##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# n# s#
             in (# s1#, i# +# 1# #)
-        | isTrue# (n# <=# 0x000007FF#) -> \ s# ->
-            let s1# = writeWord8Array# mba# i#  (int2Word# (0xC0# `orI#` (n# `uncheckedIShiftRA#` 6#))) s#
-                s2# = writeWord8Array# mba# (i# +# 1#) (int2Word# (0x80# `orI#` (n# `andI#` 0x3F#))) s1#
+        | isTrue# (n# `leWord#` 0x000007FF##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (0xC0## `or#` (n# `uncheckedShiftRL#` 6#)) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (0x80## `or#` (n# `and#` 0x3F##)) s1#
             in (# s2#, i# +# 2# #)
-        | isTrue# (n# <=# 0x0000D7FF#) -> \ s# ->
-            let s1# = writeWord8Array# mba# i#  (int2Word# (0xE0# `orI#` (n# `uncheckedIShiftRA#` 12#))) s#
-                s2# = writeWord8Array# mba# (i# +# 1#) (int2Word# (0x80# `orI#` ((n# `uncheckedIShiftRA#` 6#) `andI#` 0x3F#))) s1#
-                s3# = writeWord8Array# mba# (i# +# 2#) (int2Word# (0x80# `orI#` (n# `andI#` 0x3F#))) s2#
+        | isTrue# (n# `leWord#` 0x0000D7FF##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (0xE0## `or#` (n# `uncheckedShiftRL#` 12#)) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (0x80## `or#` ((n# `uncheckedShiftRL#` 6#) `and#` 0x3F##)) s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) (0x80## `or#` (n# `and#` 0x3F##)) s2#
             in (# s3#, i# +# 3# #)
-        | isTrue# (n# <=# 0x0000DFFF#) -> \ s# -> -- write replacement char \U+FFFD
-            let s1# = writeWord8Array# mba# i#  0xEF## s#
+        | isTrue# (n# `leWord#` 0x0000DFFF##) -> \ s# -> -- write replacement char \U+FFFD
+            let s1# = writeWord8Array# mba# i# 0xEF## s#
                 s2# = writeWord8Array# mba# (i# +# 1#) 0xBF## s1#
                 s3# = writeWord8Array# mba# (i# +# 2#) 0xBD## s2#
             in (# s3#, i# +# 3# #)
-        | isTrue# (n# <=# 0x0010FFFF#) -> \ s# ->
-            let s1# = writeWord8Array# mba# i#     (int2Word# (0xF0# `orI#` (n# `uncheckedIShiftRA#` 18#))) s#
-                s2# = writeWord8Array# mba# (i# +# 1#) (int2Word# (0x80# `orI#` ((n# `uncheckedIShiftRA#` 12#) `andI#` 0x3F#))) s1#
-                s3# = writeWord8Array# mba# (i# +# 2#) (int2Word# (0x80# `orI#` ((n# `uncheckedIShiftRA#` 6#) `andI#` 0x3F#))) s2#
-                s4# = writeWord8Array# mba# (i# +# 3#) (int2Word# (0x80# `orI#` (n# `andI#` 0x3F#))) s3#
+        | isTrue# (n# `leWord#` 0x0010FFFF##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (0xF0## `or#` (n# `uncheckedShiftRL#` 18#)) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (0x80## `or#` ((n# `uncheckedShiftRL#` 12#) `and#` 0x3F##)) s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) (0x80## `or#` ((n# `uncheckedShiftRL#` 6#) `and#` 0x3F##)) s2#
+                s4# = writeWord8Array# mba# (i# +# 3#) (0x80## `or#` (n# `and#` 0x3F##)) s3#
             in (# s4#, i# +# 4# #)
         | otherwise -> \ s# -> -- write replacement char \U+FFFD
             let s1# = writeWord8Array# mba# i#  0xEF## s#
@@ -336,7 +336,7 @@ encodeChar# mba# i# c# = case ord# c# of
             in (# s3#, i# +# 3# #)
 
 decodeChar# :: ByteArray# -> Int# -> (# Char#, Int# #)
-{-# NOINLINE decodeChar# #-} -- This branchy code make GHC impossible to fuse, so don't inline
+{-# NOINLINE decodeChar# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
 decodeChar# ba# idx#
     | isTrue# (w1# `leWord#` 0x7F##) = (# chr1# w1#, 1# #)
     | isTrue# (w1# `leWord#` 0xDF##) =
@@ -355,7 +355,7 @@ decodeChar# ba# idx#
     w1# = indexWord8Array# ba# idx#
 
 decodeCharReverse# :: ByteArray# -> Int# -> (# Char#, Int# #)
-{-# NOINLINE decodeCharReverse# #-} -- This branchy code make GHC impossible to fuse, so don't inline
+{-# NOINLINE decodeCharReverse# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
 decodeCharReverse# ba# idx# =
     let w1# = indexWord8Array# ba# idx#
     in if isContinueByte w1#
