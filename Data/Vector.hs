@@ -547,9 +547,9 @@ unpackR :: Vec v a => v a -> [a]
 unpackR (VecPat ba s l) = go (s + l - 1)
   where
     go !idx
-        | idx >= s =
+        | idx < s = []
+        | otherwise =
             let !x = indexArr ba idx in x : go (idx-1)
-        | otherwise = []
 {-# INLINE [1] unpackR #-}
 
 unpackRFB :: Vec v a => v a -> (a -> r -> r) -> r -> r
@@ -557,10 +557,9 @@ unpackRFB :: Vec v a => v a -> (a -> r -> r) -> r -> r
 unpackRFB (VecPat ba s l) k z = go (s + l - 1)
   where
     go !idx
-        | idx >= s =
+        | idx < s = z
+        | otherwise =
             let !x = indexArr ba idx in x `k` go (idx-1)
-        | otherwise = z
-
 {-# RULES
 "unpackR" [~1] forall v . unpackR v = build (\ k z -> unpackRFB v k z)
 "unpackRFB" [1] forall v . unpackRFB v (:) [] = unpackR v

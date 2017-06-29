@@ -139,9 +139,9 @@ unpack (Text (V.PrimVector ba s l)) = go s
   where
     !sl = s + l
     go !idx
-        | idx >= sl = []
-        | otherwise =
+        | idx < sl =
             let (# c, i #) = decodeChar ba idx in c : go (idx + i)
+        | otherwise = []
 
 unpackFB :: Text -> (Char -> a -> a) -> a -> a
 {-# INLINE [0] unpackFB #-}
@@ -149,9 +149,9 @@ unpackFB (Text (V.PrimVector ba s l)) k z = go s
   where
     !sl = s + l
     go !idx
-        | idx >= sl = z
-        | otherwise =
+        | idx < sl =
             let (# c, i #) = decodeChar ba idx in c `k` go (idx + i)
+        | otherwise = z
 
 {-# RULES
 "unpack" [~1] forall t . unpack t = build (\ k z -> unpackFB t k z)
@@ -253,9 +253,9 @@ length :: Text -> Int
 length (Text (V.PrimVector ba s l)) = go s 0
   where
     !sl = s + l
-    go !i !acc | i >= sl = acc
-               | otherwise = let (# _, j #) = decodeChar ba i
-                             in go (i+j) (1+acc)
+    go !i !acc | i < sl = let (# _, j #) = decodeChar ba i
+                          in go (i+j) (1+acc)
+               | otherwise = acc
 
 --------------------------------------------------------------------------------
 -- * Transformations
