@@ -125,7 +125,7 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
             i' <- encodeChar mba i c
             return (SP2 i' mba)
         else do
-            let !siz' = (siz + V.chunkOverhead) `shiftL` 1 - V.chunkOverhead
+            let !siz' = siz `shiftL` 1
             !mba' <- resizeMutableArr mba siz'
             i' <- encodeChar mba' i c
             return (SP2 i' mba')
@@ -134,30 +134,50 @@ data SP2 s = SP2 {-# UNPACK #-}!Int {-# UNPACK #-}!(MutablePrimArray s Word8)
 
 
 unpack :: Text -> String
-{-# NOINLINE [1] unpack #-}
+{-# INLINE [1] unpack #-}
 unpack (Text (V.PrimVector ba s l)) = go s
   where
     !sl = s + l
-    go !idx =
-        let (c, l) = decodeChar ba idx
-            !idx' = idx + l
-        in if (idx' < sl) then c : go idx' else []
+    go !idx
+        | idx >= sl = []
+        | otherwise =
+            let (# c, i #) = decodeChar ba idx in c : go (idx + i)
 
 unpackFB :: Text -> (Char -> a -> a) -> a -> a
 {-# INLINE [0] unpackFB #-}
 unpackFB (Text (V.PrimVector ba s l)) k z = go s
   where
     !sl = s + l
-    go !idx =
-        let (c, l) = decodeChar ba idx
-            !idx' = idx + l
-        in if (idx' < sl) then c `k` go idx' else z
+    go !idx
+        | idx >= sl = z
+        | otherwise =
+            let (# c, i #) = decodeChar ba idx in c `k` go (idx + i)
 
 {-# RULES
 "unpack" [~1] forall t . unpack t = build (\ k z -> unpackFB t k z)
 "unpackFB" [1] forall t . unpackFB t (:) [] = unpack t
  #-}
 
+unpackR :: Text -> String
+{-# INLINE [1] unpackR #-}
+unpackR (Text (V.PrimVector ba s l)) = go (s+l-1)
+  where
+    go !idx
+        | idx < s = []
+        | otherwise = let (# c, i #) = decodeCharReverse ba idx in c : go (idx - i)
+
+unpackRFB :: Text -> (Char -> a -> a) -> a -> a
+{-# INLINE [0] unpackRFB #-}
+unpackRFB (Text (V.PrimVector ba s l)) k z = go (s+l-1)
+  where
+    go !idx
+        | idx < s = z
+        | otherwise = let (# c, i #) = decodeCharReverse ba idx in c `k` go (idx - i)
+
+{-# RULES
+"unpackR" [~1] forall t . unpackR t = build (\ k z -> unpackRFB t k z)
+"unpackRFB" [1] forall t . unpackRFB t (:) [] = unpackR t
+ #-}
 
 singleton :: Char -> Text
 {-# INLINABLE singleton #-}
@@ -197,7 +217,7 @@ uncons :: Text -> Maybe (Char, Text)
 uncons (Text (V.PrimVector ba s l))
     | l == 0  = Nothing
     | otherwise =
-        let (c, i) = decodeChar ba s
+        let (# c, i #) = decodeChar ba s
         in Just (c, Text (V.PrimVector ba (s+i) (l-i)))
 
 unsnoc :: Text -> Maybe (Text, Char)
@@ -205,7 +225,7 @@ unsnoc :: Text -> Maybe (Text, Char)
 unsnoc (Text (V.PrimVector ba s l))
     | l == 0  = Nothing
     | otherwise =
-        let (c, i) = decodeCharReverse ba (s + l - 1)
+        let (# c, i #) = decodeCharReverse ba (s + l - 1)
         in Just (Text (V.PrimVector ba s (l-i)), c)
 
 head :: Text -> Char
@@ -230,11 +250,12 @@ null (Text bs) = V.null bs
 
 length :: Text -> Int
 {-# INLINABLE length #-}
-length (Text (V.PrimVector ba s l)) = go s
+length (Text (V.PrimVector ba s l)) = go s 0
   where
     !sl = s + l
-    go !i | i >= sl = 0
-          | otherwise = let (_, j) = decodeChar ba i in 1 + go (i+j)
+    go !i !acc | i >= sl = acc
+               | otherwise = let (# _, j #) = decodeChar ba i
+                             in go (i+j) (1+acc)
 
 --------------------------------------------------------------------------------
 -- * Transformations

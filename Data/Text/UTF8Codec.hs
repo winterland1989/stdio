@@ -57,11 +57,22 @@ encodeChar# mba# i# c# = case (int2Word# (ord# c#)) of
                 s3# = writeWord8Array# mba# (i# +# 2#) 0xBD## s2#
             in (# s3#, i# +# 3# #)
 
-decodeChar :: PrimArray Word8 -> Int -> (Char, Int)
+-- | Decode a 'Char' from bytes
+--
+-- This function assumed all bytes are UTF-8 encoded, and the index param point to the
+-- beginning of a codepoint, the decoded character and the advancing offset are returned.
+--
+-- It's annoying to use unboxed tuple here but we really want GHC to optimize it away.
+--
+decodeChar :: PrimArray Word8 -> Int -> (# Char, Int #)
 {-# INLINE decodeChar #-}
 decodeChar (PrimArray (ByteArray ba#)) (I# idx#) =
-    let (# c#, i# #) = decodeChar# ba# idx# in (C# c#, I# i#)
+    let (# c#, i# #) = decodeChar# ba# idx# in (# C# c#, I# i# #)
 
+-- | The unboxed version of 'decodeChar'
+--
+-- This function is marked as @NOINLINE@ to reduce code size.
+--
 decodeChar# :: ByteArray# -> Int# -> (# Char#, Int# #)
 {-# NOINLINE decodeChar# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
 decodeChar# ba# idx#
@@ -81,11 +92,20 @@ decodeChar# ba# idx#
   where
     w1# = indexWord8Array# ba# idx#
 
-decodeCharReverse :: PrimArray Word8 -> Int -> (Char, Int)
+-- | Decode a 'Char' from bytes in rerverse order.
+--
+-- This function assumed all bytes are UTF-8 encoded, and the index param point to the end
+-- of a codepoint, the decoded character and the backward advancing offset are returned.
+--
+decodeCharReverse :: PrimArray Word8 -> Int -> (# Char, Int #)
 {-# INLINE decodeCharReverse #-}
 decodeCharReverse (PrimArray (ByteArray ba#)) (I# idx#) =
-    let (# c#, i# #) = decodeCharReverse# ba# idx# in (C# c#, I# i#)
+    let (# c#, i# #) = decodeCharReverse# ba# idx# in (# C# c#, I# i# #)
 
+-- | The unboxed version of 'decodeCharReverse'
+--
+-- This function is marked as @NOINLINE@ to reduce code size.
+--
 decodeCharReverse# :: ByteArray# -> Int# -> (# Char#, Int# #)
 {-# NOINLINE decodeCharReverse# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
 decodeCharReverse# ba# idx# =
@@ -112,7 +132,7 @@ decodeCharReverse# ba# idx# =
 -- reference: https://howardhinnant.github.io/utf_summary.html
 --
 validateChar# :: ByteArray# -> Int# -> Int# -> Int#
-{-# INLINE validateChar# #-}
+{-# NOINLINE validateChar# #-}
 validateChar# ba# idx# end# =
     case end# -# idx# of
         1#

@@ -137,7 +137,7 @@ doubleBuffer :: Int -> BuildStep IO -> BuildStep IO
 doubleBuffer !wantSiz k buffer@(Buffer buf offset) = do
     !siz <- A.sizeofMutableArr buf
     let !siz' = max (offset + wantSiz `shiftL` 1)
-                    ((siz + V.chunkOverhead) `shiftL` 1 - V.chunkOverhead)
+                    (siz `shiftL` 1)
     buf' <- A.resizeMutableArr buf siz'   -- double the buffer
     k (Buffer buf' offset)                 -- continue building
 {-# INLINE doubleBuffer #-}

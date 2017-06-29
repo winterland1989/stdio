@@ -51,10 +51,8 @@ module Data.Vector (
   , intercalateElem
   , transpose
   -- * Reducing primitive vector (folds)
-  , foldl
   , foldl'
   , foldl1'
-  , foldr
   , foldr'
   , foldr1'
     -- ** Special folds
@@ -85,6 +83,7 @@ module Data.Vector (
 
 
   -- * Misc
+  , IPair(..)
   , defaultInitSize
   , chunkOverhead
   , defaultChunkSize
@@ -93,7 +92,7 @@ module Data.Vector (
 
 import Control.DeepSeq
 import Control.Exception (assert)
-import GHC.Exts (IsList(..), IsString(..))
+import GHC.Exts (IsList(..), IsString(..), build)
 import Control.Monad.ST.Unsafe
 import Control.Monad.ST
 import Control.Monad
@@ -118,6 +117,7 @@ import Foreign.Storable (peekElemOff)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as Q
 import Data.Primitive.PrimArrayQ as Q
+import Debug.Trace
 
 import Prelude hiding (reverse,head,tail,last,init,null
     ,length,map,lines,foldl,foldr,unlines
@@ -429,10 +429,10 @@ smallChunkSize :: Int
 smallChunkSize = 4 * 1024 - chunkOverhead
 {-# INLINE smallChunkSize #-}
 
--- | @defaultInitSize = 64 - chunkOverhead@
+-- | @defaultInitSize = 30
 --
 defaultInitSize :: Int
-defaultInitSize = 64 - chunkOverhead
+defaultInitSize = 30
 {-# INLINE defaultInitSize #-}
 
 -- | The memory management overhead. Currently this is tuned for GHC only.
@@ -449,7 +449,7 @@ chunkOverhead = 2 * sizeOf (undefined :: Int)
 --
 packN :: forall v a. Vec v a => Int -> [a] -> v a
 packN n0 = \ ws0 -> runST (do mba <- newArr n0
-                              (SP2 i mba') <- foldlM go (SP2 0 mba) ws0
+                              (IPair i mba') <- foldlM go (IPair 0 mba) ws0
                               shrinkMutableArr mba' i
                               ba <- unsafeFreezeArr mba'
                               return $! fromArr ba 0 i
@@ -457,20 +457,18 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
   where
     -- It's critical that this function get specialized and unboxed
     -- Keep an eye on its core!
-    go :: SP2 (MArray v s a) -> a -> ST s (SP2 (MArray v s a))
-    go (SP2 i mba) !x = do
+    go :: IPair (MArray v s a) -> a -> ST s (IPair (MArray v s a))
+    go (IPair i mba) x = do
         n <- sizeofMutableArr mba
         if i < n
         then do writeArr mba i x
-                let !i' = i+1
-                return (SP2 i' mba)
-        else do let !n' = (n + chunkOverhead) `shiftL` 1 - chunkOverhead
-                    !i' = i+1
+                return (IPair (i+1) mba)
+        else do let !n' = n `shiftL` 1
                 !mba' <- resizeMutableArr mba n'
-                writeArr mba i x
-                return (SP2 i' mba')
+                writeArr mba' i x
+                return (IPair (i+1) mba')
 
-data SP2 a = SP2 {-# UNPACK #-}!Int a
+data IPair a = IPair {-# UNPACK #-}!Int a
 {-# INLINE packN #-}
 
 -- | /O(n)/
@@ -478,7 +476,7 @@ data SP2 a = SP2 {-# UNPACK #-}!Int a
 -- Alias for @'packRN' 16@.
 --
 packR :: Vec v a => [a] -> v a
-packR = packRN 16
+packR = packRN defaultInitSize
 {-# INLINE packR #-}
 
 -- | /O(n)/ 'packN' in reverse order.
@@ -488,24 +486,25 @@ packR = packRN 16
 packRN :: forall v a. Vec v a => Int -> [a] -> v a
 packRN n0 = \ ws0 -> runST (do mba <- newArr n0
                                let !n0' = n0-1
-                               (SP2 i mba') <- foldlM go (SP2 n0' mba) ws0
+                               (IPair i mba') <- foldlM go (IPair n0' mba) ws0
                                ba <- unsafeFreezeArr mba'
                                let n = sizeofArr ba
                                return $! fromArr ba i (n-i)
                            )
   where
-    go :: SP2 (MArray v s a) -> a -> ST s (SP2 (MArray v s a))
-    go (SP2 i mba) !x = do
+    go :: IPair (MArray v s a) -> a -> ST s (IPair (MArray v s a))
+    go (IPair i mba) !x = do
         n <- sizeofMutableArr mba
         if i >= 0
         then do writeArr mba i x
                 let !i' = i-1
-                return (SP2 i' mba)
+                return (IPair i' mba)
         else do let !n' = n `shiftL` 1
-                    !n'' = n-1
+                    !n'' = n' - n
                 !mba' <- newArr n'
-                copyMutableArr mba' n mba 0 n
-                return (SP2 n'' mba')
+                copyMutableArr mba' n'' mba 0 n
+                writeArr mba' n'' x
+                return (IPair (n'' - 1) mba')
 {-# INLINE packRN #-}
 
 -- | /O(n)/ Convert vector to a list.
@@ -515,18 +514,57 @@ packRN n0 = \ ws0 -> runST (do mba <- newArr n0
 -- This function is a /good producer/ in the sense of build/foldr fusion.
 --
 unpack :: Vec v a => v a -> [a]
-unpack (VecPat ba s l) = List.map (indexArr ba) [s..s+l-1]
-{-# INLINE unpack #-}
+{-# INLINE [1] unpack #-}
+unpack (VecPat ba s l) = go s
+  where
+    !sl = s + l
+    go !idx
+        | idx < sl =
+            let !x = indexArr ba idx in x : go (idx+1)
+        | otherwise = []
+
+unpackFB :: Vec v a => v a -> (a -> r -> r) -> r -> r
+{-# INLINE [0] unpackFB #-}
+unpackFB (VecPat ba s l) k z = go s
+  where
+    !sl = s + l
+    go !idx
+        | idx < sl =
+            let !x = indexArr ba idx in x `k` go (idx+1)
+        | otherwise = z
+
+{-# RULES
+"unpack" [~1] forall v . unpack v = build (\ k z -> unpackFB v k z)
+"unpackFB" [1] forall v . unpackFB v (:) [] = unpack v
+ #-}
+
 
 -- | /O(n)/ Convert vector to a list in reverse order.
 --
 -- This function is a /good producer/ in the sense of build/foldr fusion.
 --
 unpackR :: Vec v a => v a -> [a]
-unpackR (VecPat ba s l) =
-    let !sl = s + l
-    in List.map (\ i -> indexArr ba (sl-i)) [1..l]
-{-# INLINE unpackR #-}
+unpackR (VecPat ba s l) = go (s + l - 1)
+  where
+    go !idx
+        | idx >= s =
+            let !x = indexArr ba idx in x : go (idx-1)
+        | otherwise = []
+{-# INLINE [1] unpackR #-}
+
+unpackRFB :: Vec v a => v a -> (a -> r -> r) -> r -> r
+{-# INLINE [0] unpackRFB #-}
+unpackRFB (VecPat ba s l) k z = go (s + l - 1)
+  where
+    go !idx
+        | idx >= s =
+            let !x = indexArr ba idx in x `k` go (idx-1)
+        | otherwise = z
+
+{-# RULES
+"unpackR" [~1] forall v . unpackR v = build (\ k z -> unpackRFB v k z)
+"unpackRFB" [1] forall v . unpackRFB v (:) [] = unpackR v
+ #-}
 
 --------------------------------------------------------------------------------
 -- Basic interface
@@ -640,9 +678,14 @@ reverse :: forall v a. (Vec v a) => v a -> v a
 reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
   where
     go :: IArray v a -> Int -> Int -> MArray v s a -> ST s ()
-    go ba !i !j !mba | j <= 0 = return ()
-                     | otherwise = do x <- indexArrM ba i
-                                      writeArr mba j x
+    go ba !i !j !mba | j < 0 = return ()
+                     | j > 4 = do  -- loop unrolling to match C performance
+                         indexArrM ba i >>= writeArr mba j
+                         indexArrM ba (i+1) >>= writeArr mba (j-1)
+                         indexArrM ba (i+2) >>= writeArr mba (j-2)
+                         indexArrM ba (i+3) >>= writeArr mba (j-3)
+                         go ba (i+4) (j-4) mba
+                     | otherwise = do indexArrM ba i >>= writeArr mba j
                                       go ba (i+1) (j-1) mba
 {-# INLINE reverse #-}
 
@@ -715,9 +758,6 @@ transpose vs =
 --
 -- Reducing vectors (folds)
 --
-foldl :: (Vec v a) => (b -> a -> b) -> b -> v a -> b
-foldl f z = List.foldl f z . unpack
-{-# INLINE foldl #-}
 
 foldl' :: (Vec v a) => (b -> a -> b) -> b -> v a -> b
 foldl' f z = \ (VecPat ba s l) -> go z s (s+l) ba
@@ -732,11 +772,6 @@ foldl1' f z = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "foldl1'"
               else foldl' f (indexArr ba s) (fromArr ba (s+1) (l-1) :: v a)
 {-# INLINE foldl1' #-}
-
-
-foldr :: Vec v a => (a -> b -> b) -> b -> v a -> b
-foldr f z = List.foldr f z . unpack
-{-# INLINE foldr #-}
 
 foldr' :: Vec v a => (a -> b -> b) -> b -> v a -> b
 foldr' f z =  \ (VecPat ba s l) -> go z (s+l-1) s ba
