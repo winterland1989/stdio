@@ -75,22 +75,44 @@ decodeChar (PrimArray (ByteArray ba#)) (I# idx#) =
 --
 decodeChar# :: ByteArray# -> Int# -> (# Char#, Int# #)
 {-# NOINLINE decodeChar# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
-decodeChar# ba# idx#
-    | isTrue# (w1# `leWord#` 0x7F##) = (# chr1# w1#, 1# #)
-    | isTrue# (w1# `leWord#` 0xDF##) =
-        let w2# = indexWord8Array# ba# (idx# +# 1#)
-        in (# chr2# w1# w2#, 2# #)
-    | isTrue# (w1# `leWord#` 0xEF##) =
-        let w2# = indexWord8Array# ba# (idx# +# 1#)
-            w3# = indexWord8Array# ba# (idx# +# 2#)
-        in (# chr3# w1# w2# w3#, 3# #)
-    | otherwise =
-        let w2# = indexWord8Array# ba# (idx# +# 1#)
-            w3# = indexWord8Array# ba# (idx# +# 2#)
-            w4# = indexWord8Array# ba# (idx# +# 3#)
-        in (# chr4# w1# w2# w3# w4#, 4# #)
-  where
-    w1# = indexWord8Array# ba# idx#
+decodeChar# ba# idx# = case indexWord8Array# ba# idx# of
+    w1#
+        | isTrue# (w1# `leWord#` 0x7F##) -> (# chr1# w1#, 1# #)
+        | isTrue# (w1# `leWord#` 0xDF##) ->
+            let w2# = indexWord8Array# ba# (idx# +# 1#)
+            in (# chr2# w1# w2#, 2# #)
+        | isTrue# (w1# `leWord#` 0xEF##) ->
+            let w2# = indexWord8Array# ba# (idx# +# 1#)
+                w3# = indexWord8Array# ba# (idx# +# 2#)
+            in (# chr3# w1# w2# w3#, 3# #)
+        | otherwise ->
+            let w2# = indexWord8Array# ba# (idx# +# 1#)
+                w3# = indexWord8Array# ba# (idx# +# 2#)
+                w4# = indexWord8Array# ba# (idx# +# 3#)
+            in (# chr4# w1# w2# w3# w4#, 4# #)
+
+-- | Decode a codepoint's length in bytes
+--
+-- This function assumed all bytes are UTF-8 encoded, and the index param point to the
+-- beginning of a codepoint.
+--
+decodeCharLen :: PrimArray Word8 -> Int -> Int
+{-# INLINE decodeCharLen #-}
+decodeCharLen (PrimArray (ByteArray ba#)) (I# idx#) =
+    let i# = decodeCharLen# ba# idx# in I# i#
+
+-- | The unboxed version of 'decodeCharLen'
+--
+-- This function is marked as @NOINLINE@ to reduce code size.
+--
+decodeCharLen# :: ByteArray# -> Int# -> Int#
+{-# NOINLINE decodeCharLen# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
+decodeCharLen# ba# idx# = case indexWord8Array# ba# idx# of
+    w1#
+        | isTrue# (w1# `leWord#` 0x7F##) -> 1#
+        | isTrue# (w1# `leWord#` 0xDF##) -> 2#
+        | isTrue# (w1# `leWord#` 0xEF##) -> 3#
+        | otherwise -> 4#
 
 -- | Decode a 'Char' from bytes in rerverse order.
 --
@@ -124,17 +146,65 @@ decodeCharReverse# ba# idx# =
         else  (# chr2# w2# w1#, 2# #)
     else (# chr1# w1#, 1# #)
 
+
+-- | Decode a codepoint's length in bytes in reverse order.
+--
+-- This function assumed all bytes are UTF-8 encoded, and the index param point to the end
+-- of a codepoint.
+--
+decodeCharLenReverse :: PrimArray Word8 -> Int -> Int
+{-# INLINE decodeCharLenReverse #-}
+decodeCharLenReverse (PrimArray (ByteArray ba#)) (I# idx#) =
+    let i# = decodeCharLenReverse# ba# idx# in I# i#
+
+-- | The unboxed version of 'decodeCharLenReverse'
+--
+-- This function is marked as @NOINLINE@ to reduce code size.
+--
+decodeCharLenReverse# :: ByteArray# -> Int# -> Int#
+{-# NOINLINE decodeCharLenReverse# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
+decodeCharLenReverse# ba# idx# =
+    let w1# = indexWord8Array# ba# idx#
+    in if isContinueByte# w1#
+        then
+        let w2# = indexWord8Array# ba# (idx# -# 1#)
+        in if isContinueByte# w2#
+        then
+            let w3# = indexWord8Array# ba# (idx# -# 2#)
+            in if isContinueByte# w3#
+            then 4#
+            else 3#
+        else 2#
+    else 1#
+
 -- | Validate if current index point to a valid utf8 codepoint.
--- If the does, return the utf8 bytes length, otherwise return the negation of
+--
+-- If the codepoint is valid, return the utf8 bytes length, otherwise return the negation of
 -- offset we should skip(so that a replacing decoder can meet the security rules).
--- If @0#@ is returned, then you should feed more bytes to continue validation.
+-- If @0#@ is returned, then you should feed more bytes to continue validation. Note this function
+-- guarantee only return @0@ when the trailing bytes are partial valid codepoint. That means you
+-- can safely replace them with a replacement char or ignore it if no more bytes are to be fed.
 --
 -- reference: https://howardhinnant.github.io/utf_summary.html
+--
+validateChar :: PrimArray Word8
+             -> Int  -- current index
+             -> Int  -- end index(which shouldn't be accessed)
+             -> Int
+{-# INLINE validateChar #-}
+validateChar (PrimArray (ByteArray ba#)) (I# idx#) (I# end#) =
+    let i# = validateChar# ba# idx# end# in I# i#
+
+
+-- | The unboxed version of 'decodeCharLenReverse'
+--
+-- This function is marked as @NOINLINE@ to reduce code size.
 --
 validateChar# :: ByteArray# -> Int# -> Int# -> Int#
 {-# NOINLINE validateChar# #-}
 validateChar# ba# idx# end# =
-    case end# -# idx# of
+    let w1# = indexWord8Array# ba# idx#
+    in case end# -# idx# of
         1#
             | isTrue# (w1# `leWord#` 0x7F##) -> 1#
             | isTrue# (w1# `leWord#` 0xC1##) -> -1#
@@ -277,8 +347,6 @@ validateChar# ba# idx# end# =
                 else -1#
             | isTrue# (w1# `geWord#` 0xF5##) -> -1#
             | otherwise -> -1#
-  where
-    w1# = indexWord8Array# ba# idx#
 
 between# :: Word# -> Word# -> Word# -> Bool
 {-# INLINE between# #-}

@@ -53,6 +53,7 @@ wordZ = 0
 bytes :: [Benchmark]
 bytes =
     [ bgroup "singleton" singleton
+    , bgroup "eq" eq
     , bgroup "pack/100 elems"  packSmall
     , bgroup "pack/10000 elems"  packLarge
     , bgroup "unpack" unpack
@@ -80,6 +81,14 @@ singleton :: [Benchmark]
 singleton =
     [ bench "bytestring/singleton" $ nf B.singleton 128
     , bench "bytes/singleton"      $ nf (V.singleton @V.PrimVector) (128 :: Word8)
+    ]
+
+eq :: [Benchmark]
+eq =
+    [ bench "bytestring/(==)/same bytestring" $ nf (== bytestring10000) bytestring10000
+    , bench "bytes/(==)/same bytes"      $ nf (== bytes10000) bytes10000
+    , bench "bytestring/(==)" $ nf (== bytestring10000) (B.copy bytestring10000)
+    , bench "bytes/(==)"      $ nf (== bytes10000) (V.copy bytes10000)
     ]
 
 packSmall :: [Benchmark]

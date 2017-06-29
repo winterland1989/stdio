@@ -56,21 +56,21 @@ data UTF8DecodeResult
 
 validateUTF8 :: V.Bytes -> UTF8DecodeResult
 {-# INLINE validateUTF8 #-}
-validateUTF8 bs@(V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# l#)) = go s#
+validateUTF8 bs@(V.PrimVector ba s l) = go s
   where
-    end# = s# +# l#
-    go :: Int# -> UTF8DecodeResult
-    go i#
-        | isTrue# (i# <# end#) = case validateChar# ba# i# end# of
-            r#
-                | isTrue# (r# ># 0#)  -> go (i# +# r#)
-                | isTrue# (r# ==# 0#) ->
+    end = s + l
+    go :: Int -> UTF8DecodeResult
+    go !i
+        | i < end = case validateChar ba i end of
+            r
+                | r > 0  -> go (i + r)
+                | r == 0 ->
                     PartialBytes
-                        (Text (V.PrimVector (PrimArray (ByteArray ba#)) (I# s#) (I# (i# -# s#))))
-                        (V.PrimVector (PrimArray (ByteArray ba#)) (I# i#) (I# (end# -# i#)))
+                        (Text (V.PrimVector ba s (i-s)))
+                        (V.PrimVector ba i (end-i))
                 | otherwise ->
                     InvalidBytes
-                        (V.PrimVector (PrimArray (ByteArray ba#)) (I# i#) (I# (negateInt# r#)))
+                        (V.PrimVector ba i (-r))
         | otherwise = Success (Text bs)
 
 validateUTF8_ :: V.Bytes -> (Text, V.Bytes)
@@ -137,9 +137,9 @@ unpack :: Text -> String
 {-# INLINE [1] unpack #-}
 unpack (Text (V.PrimVector ba s l)) = go s
   where
-    !sl = s + l
+    !end = s + l
     go !idx
-        | idx < sl =
+        | idx < end =
             let (# c, i #) = decodeChar ba idx in c : go (idx + i)
         | otherwise = []
 
@@ -147,9 +147,9 @@ unpackFB :: Text -> (Char -> a -> a) -> a -> a
 {-# INLINE [0] unpackFB #-}
 unpackFB (Text (V.PrimVector ba s l)) k z = go s
   where
-    !sl = s + l
+    !end = s + l
     go !idx
-        | idx < sl =
+        | idx < end =
             let (# c, i #) = decodeChar ba idx in c `k` go (idx + i)
         | otherwise = z
 
@@ -252,8 +252,8 @@ length :: Text -> Int
 {-# INLINABLE length #-}
 length (Text (V.PrimVector ba s l)) = go s 0
   where
-    !sl = s + l
-    go !i !acc | i < sl = let (# _, j #) = decodeChar ba i
+    !end = s + l
+    go !i !acc | i < end = let j = decodeCharLen ba i
                           in go (i+j) (1+acc)
                | otherwise = acc
 

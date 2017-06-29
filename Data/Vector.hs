@@ -32,7 +32,7 @@ module Data.Vector (
   , w2c, c2w
   -- * Basic creating
   , create, creating, createN
-  , empty, singleton
+  , empty, singleton, copy
   -- * Conversion between list
   , pack, packN, packR, packRN
   , unpack, unpackR
@@ -178,11 +178,11 @@ instance Eq a => Eq (Vector a) where
 eqVector :: Eq a => Vector a -> Vector a -> Bool
 eqVector (Vector baA sA lA) (Vector baB sB lB) = lA == lB && go sA sB
   where
-    !slA = sA + lA
+    !endA = sA + lA
     go !i !j
-        | i >= slA  = True
-        | otherwise =
+        | i < endA =
             (indexSmallArray baA i == indexSmallArray baB j) && go (i+1) (j+1)
+        | otherwise = True
 
 instance {-# OVERLAPPABLE #-} Ord a => Ord (Vector a) where
     compare = compareVector
@@ -191,10 +191,10 @@ instance {-# OVERLAPPABLE #-} Ord a => Ord (Vector a) where
 compareVector :: Ord a => Vector a -> Vector a -> Ordering
 compareVector (Vector baA sA lA) (Vector baB sB lB) = go sA sB
   where
-    !slA = sA + lA
-    !slB = sB + lB
-    go !i !j | i >= slA  = slB `compare` j
-             | j >= slB  = slA `compare` i
+    !endA = sA + lA
+    !endB = sB + lB
+    go !i !j | i >= endA  = endB `compare` j
+             | j >= endB  = endA `compare` i
              | otherwise = let o = indexSmallArray baA i `compare` indexSmallArray baB j
                            in case o of EQ -> go (i+1) (j+1)
                                         x  -> x
@@ -234,7 +234,6 @@ data PrimVector a = PrimVector
 pvW16 :: Q.QuasiQuoter
 pvW16 = Q.QuasiQuoter
     (Q.word16LiteralLE $ \ len addr -> [| PrimVector (Q.word16ArrayFromAddr len $(addr)) 0 len |])
-
     (error "Cannot use bAsc as a pattern")
     (error "Cannot use bAsc as a type")
     (error "Cannot use bAsc as a dec")
@@ -249,37 +248,40 @@ instance Prim a => Vec PrimVector a where
 
 instance {-# OVERLAPPABLE #-} Prim a => Eq (PrimVector a) where
     (==) = equateBytes
-    {-# INLINABLE (==) #-}
+    {-# INLINE (==) #-}
 
 equateBytes :: forall a. Prim a => PrimVector a -> PrimVector a -> Bool
+{-# INLINE equateBytes #-}
 equateBytes (PrimVector (PrimArray (ByteArray baA#)) sA lA)
             (PrimVector (PrimArray (ByteArray baB#)) sB lB) =
     let r = unsafeDupablePerformIO $
             c_memcmp baA# (fromIntegral $ sA * siz)
-                     baB# (fromIntegral $ sB * siz) (fromIntegral $ min lA lB * siz)
+                     baB# (fromIntegral $ sB * siz) (fromIntegral $ min (lA*siz) (lB*siz))
     in lA == lB && r == 0
   where siz = sizeOf (undefined :: a)
 
 instance {-# OVERLAPPABLE #-} (Prim a, Ord a) => Ord (PrimVector a) where
     compare = comparePrimVector
-    {-# INLINABLE compare #-}
+    {-# INLINE compare #-}
 
 instance {-# OVERLAPPING #-} Ord (PrimVector Word8) where
     compare = compareBytes
-    {-# INLINABLE compare #-}
+    {-# INLINE compare #-}
 
 comparePrimVector :: (Prim a, Ord a) => PrimVector a -> PrimVector a -> Ordering
+{-# INLINE comparePrimVector #-}
 comparePrimVector (PrimVector baA sA lA) (PrimVector baB sB lB) = go sA sB
   where
-    !slA = sA + lA
-    !slB = sB + lB
-    go !i !j | i >= slA  = slB `compare` j
-             | j >= slB  = slA `compare` i
+    !endA = sA + lA
+    !endB = sB + lB
+    go !i !j | i >= endA  = endB `compare` j
+             | j >= endB  = endA `compare` i
              | otherwise = let o = indexPrimArray baA i `compare` indexPrimArray baB j
                            in case o of EQ -> go (i+1) (j+1)
                                         x  -> x
 
 compareBytes :: PrimVector Word8 -> PrimVector Word8 -> Ordering
+{-# INLINE compareBytes #-}
 compareBytes (PrimVector (PrimArray (ByteArray baA#)) sA lA)
              (PrimVector (PrimArray (ByteArray baB#)) sB lB) =
     let r = unsafeDupablePerformIO $
@@ -386,6 +388,7 @@ createN :: Vec v a
         => Int  -- length's upper bound
         -> (forall s. MArray v s a -> ST s Int)  -- initialization function which return the actual length
         -> v a
+{-# INLINE createN #-}
 createN l fill = runST (do
         mba <- newArr l
         l' <- fill mba
@@ -395,18 +398,23 @@ createN l fill = runST (do
         then return $! fromArr ba 0 l'
         else error "Data.PrimVector.createN: return size exceeds initial size"
     )
-{-# INLINE createN #-}
 
 -- | /O(1)/. The empty vector.
 --
 empty :: Vec v a => v a
-empty = create 0 (\_ -> return ())
 {-# INLINE empty #-}
+empty = create 0 (\_ -> return ())
 
--- | /O(1)/. Single element vector..
+-- | /O(1)/. Single element vector.
 singleton :: Vec v a => a -> v a
-singleton c = create 1 (\ mba -> writeArr mba 0 c)
 {-# INLINE singleton #-}
+singleton c = create 1 (\ mba -> writeArr mba 0 c)
+
+-- | /O(n)/. Copy a vector from slice.
+--
+copy :: Vec v a => v a -> v a
+{-# INLINE copy #-}
+copy (VecPat ba s l) = create l (\ mba -> copyArr mba 0 ba s l)
 
 --------------------------------------------------------------------------------
 -- Conversion between list
@@ -517,21 +525,19 @@ unpack :: Vec v a => v a -> [a]
 {-# INLINE [1] unpack #-}
 unpack (VecPat ba s l) = go s
   where
-    !sl = s + l
+    !end = s + l
     go !idx
-        | idx < sl =
-            let !x = indexArr ba idx in x : go (idx+1)
-        | otherwise = []
+        | idx >= end = []
+        | otherwise = let !x = indexArr ba idx in x : go (idx+1)
 
 unpackFB :: Vec v a => v a -> (a -> r -> r) -> r -> r
 {-# INLINE [0] unpackFB #-}
 unpackFB (VecPat ba s l) k z = go s
   where
-    !sl = s + l
+    !end = s + l
     go !idx
-        | idx < sl =
-            let !x = indexArr ba idx in x `k` go (idx+1)
-        | otherwise = z
+        | idx >= end = z
+        | otherwise = let !x = indexArr ba idx in x `k` go (idx+1)
 
 {-# RULES
 "unpack" [~1] forall v . unpack v = build (\ k z -> unpackFB v k z)
@@ -678,7 +684,7 @@ reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
   where
     go :: IArray v a -> Int -> Int -> MArray v s a -> ST s ()
     go ba !i !j !mba | j < 0 = return ()
-                     | j > 4 = do  -- loop unrolling to match C performance
+                     | j > 4 = do  -- a bit of loop unrolling
                          indexArrM ba i >>= writeArr mba j
                          indexArrM ba (i+1) >>= writeArr mba (j-1)
                          indexArrM ba (i+2) >>= writeArr mba (j-2)
@@ -688,35 +694,33 @@ reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
                                       go ba (i+1) (j-1) mba
 {-# INLINE reverse #-}
 
--- | /O(n)/ The 'intersperse' function takes a 'Word8' and a
--- 'PrimVector' and \`intersperses\' that byte between the elements of
--- the 'PrimVector'.  It is analogous to the intersperse function on
+-- | /O(n)/ The 'intersperse' function takes an element and a
+-- vector and \`intersperses\' that element between the elements of
+-- the vector.  It is analogous to the intersperse function on
 -- Lists.
 --
 intersperse :: forall v a. Vec v a => a -> v a -> v a
-intersperse x v@(VecPat ba s l)
-    | l < 2  = v
-    | otherwise = create (2*l-1) (go s 0)
+intersperse x = \ v@(VecPat ba s l) ->
+    if l < 2  then v else create (2*l-1) (go ba s 0 (s+l-1))
    where
-    sl = s + l -1
-    go :: Int -> Int -> MArray v s a -> ST s ()
-    go !i !j !mba
-        | i == sl = writeArr mba j =<< indexArrM ba i
+    go :: IArray v a -> Int -> Int -> Int -> MArray v s a -> ST s ()
+    go ba !i !j !end !mba
+        | i >= end = writeArr mba j =<< indexArrM ba i
+        | i < end - 4 = do -- a bit of loop unrolling
+            writeArr mba j =<< indexArrM ba i
+            writeArr mba (j+1) x
+            writeArr mba j =<< indexArrM ba (i+1)
+            writeArr mba (j+3) x
+            writeArr mba j =<< indexArrM ba (i+2)
+            writeArr mba (j+5) x
+            writeArr mba j =<< indexArrM ba (i+3)
+            writeArr mba (j+7) x
+            go ba (i+4) (j+8) end mba
         | otherwise = do
-            writeArr mba j (indexArr ba i)
-            writeArr mba (j+1) (indexArr ba i)
-            go (i+1) (j+2) mba
-{-# INLINE [1] intersperse #-}
-{-# RULES "intersperse/Bytes" intersperse = intersperseBytes #-}
-
-intersperseBytes :: Word8 -> Bytes -> Bytes
-intersperseBytes w v@(PrimVector (PrimArray (ByteArray ba#)) s l)
-    | l < 2  = v
-    | otherwise = create (2*l-1) (\ (MutablePrimArray (MutableByteArray mba#)) ->
-            unsafeIOToST
-                (c_intersperse mba# ba# (fromIntegral s) (fromIntegral l) (fromIntegral w))
-        )
-{-# INLINE intersperseBytes #-}
+            writeArr mba j =<< indexArrM ba i
+            writeArr mba (j+1) x
+            go ba (i+1) (j+2) end mba
+{-# INLINE intersperse #-}
 
 -- | /O(n)/ The 'intercalate' function takes a 'PrimVector' and a list of
 -- 'PrimVector's and concatenates the list after interspersing the first
@@ -915,12 +919,12 @@ mapAccumL :: forall u v a b c. (Vec u b, Vec v c) => (a -> b -> (a, c)) -> a -> 
 mapAccumL f z = \ (VecPat ba s l) -> creating l (go z s 0 (s+l) ba)
   where
     go :: a -> Int -> Int -> Int -> IArray u b -> MArray v s c -> ST s a
-    go !acc !i !j !sl !ba !mba
-        | i >= sl   = return acc
-        | otherwise = do
+    go !acc !i !j !end !ba !mba
+        | i < end = do
             let (acc', c) = acc `f` indexArr ba i
             writeArr mba j c
-            go acc' (i+1) (j+1) sl ba mba
+            go acc' (i+1) (j+1) end ba mba
+        | otherwise = return acc
 {-# INLINE mapAccumL #-}
 
 -- | The 'mapAccumR' function behaves like a combination of 'map' and
@@ -1075,15 +1079,6 @@ rangeCut !r !min !max | r < min = min
 {-# INLINE rangeCut #-}
 
 --------------------------------------------------------------------------------
-
-foreign import ccall unsafe "string.h strlen" c_strlen
-    :: Addr# -> IO CSize
-
-foreign import ccall unsafe "bytes.c reverse"
-    c_reverse :: MutableByteArray# s -> ByteArray# -> CSize -> IO ()
-
-foreign import ccall unsafe "bytes.c intersperse"
-    c_intersperse :: MutableByteArray# s -> ByteArray# -> CSize -> CSize -> CChar -> IO ()
 
 foreign import ccall unsafe "bytes.c _memcmp"
     c_memcmp :: ByteArray# -> CSize -> ByteArray# -> CSize -> CSize -> IO CInt
