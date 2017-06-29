@@ -23,10 +23,12 @@ module Data.Primitive.PrimArray (
   copyPrimArray, copyMutablePrimArray, movePrimArray,
   setPrimArray, resizeMutablePrimArray, shrinkMutablePrimArray,
   copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr,
+
   -- * Information
   sizeofPrimArray, sizeofMutablePrimArray, sameMutablePrimArray,
   primArrayContents, mutablePrimArrayContents,
   isPrimArrayPinned, isMutablePrimArrayPinned
+
 ) where
 
 

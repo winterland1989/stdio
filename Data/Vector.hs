@@ -247,15 +247,15 @@ instance Prim a => Vec PrimVector a where
     {-# INLINE fromArr #-}
 
 instance {-# OVERLAPPABLE #-} Prim a => Eq (PrimVector a) where
-    (==) = equateBytes
+    (==) = eqPrimVector
     {-# INLINE (==) #-}
 
-equateBytes :: forall a. Prim a => PrimVector a -> PrimVector a -> Bool
-{-# INLINE equateBytes #-}
-equateBytes (PrimVector (PrimArray (ByteArray baA#)) sA lA)
-            (PrimVector (PrimArray (ByteArray baB#)) sB lB) =
+eqPrimVector :: forall a. Prim a => PrimVector a -> PrimVector a -> Bool
+{-# INLINE eqPrimVector #-}
+eqPrimVector (PrimVector (PrimArray (ByteArray baA#)) sA lA)
+        (PrimVector (PrimArray (ByteArray baB#)) sB lB) =
     let r = unsafeDupablePerformIO $
-            c_memcmp baA# (fromIntegral $ sA * siz)
+            c_memcmp baA# (fromIntegral $ sA * siz) -- we use memcmp for all primitive vector
                      baB# (fromIntegral $ sB * siz) (fromIntegral $ min (lA*siz) (lB*siz))
     in lA == lB && r == 0
   where siz = sizeOf (undefined :: a)
@@ -703,17 +703,22 @@ intersperse :: forall v a. Vec v a => a -> v a -> v a
 intersperse x = \ v@(VecPat ba s l) ->
     if l < 2  then v else create (2*l-1) (go ba s 0 (s+l-1))
    where
-    go :: IArray v a -> Int -> Int -> Int -> MArray v s a -> ST s ()
+    go :: IArray v a  -- the original bytes
+       -> Int         -- the reading index of orginal bytes
+       -> Int         -- the writing index of new buf
+       -> Int         -- the end of reading index(point to the last byte)
+       -> MArray v s a -- the new buf
+       -> ST s ()
     go ba !i !j !end !mba
         | i >= end = writeArr mba j =<< indexArrM ba i
         | i < end - 4 = do -- a bit of loop unrolling
             writeArr mba j =<< indexArrM ba i
             writeArr mba (j+1) x
-            writeArr mba j =<< indexArrM ba (i+1)
+            writeArr mba (j+2) =<< indexArrM ba (i+1)
             writeArr mba (j+3) x
-            writeArr mba j =<< indexArrM ba (i+2)
+            writeArr mba (j+4) =<< indexArrM ba (i+2)
             writeArr mba (j+5) x
-            writeArr mba j =<< indexArrM ba (i+3)
+            writeArr mba (j+6) =<< indexArrM ba (i+3)
             writeArr mba (j+7) x
             go ba (i+4) (j+8) end mba
         | otherwise = do
@@ -920,11 +925,11 @@ mapAccumL f z = \ (VecPat ba s l) -> creating l (go z s 0 (s+l) ba)
   where
     go :: a -> Int -> Int -> Int -> IArray u b -> MArray v s c -> ST s a
     go !acc !i !j !end !ba !mba
-        | i < end = do
+        | i >= end = return acc
+        | otherwise = do
             let (acc', c) = acc `f` indexArr ba i
             writeArr mba j c
             go acc' (i+1) (j+1) end ba mba
-        | otherwise = return acc
 {-# INLINE mapAccumL #-}
 
 -- | The 'mapAccumR' function behaves like a combination of 'map' and

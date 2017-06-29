@@ -9,7 +9,7 @@ import GHC.Prim
 import GHC.Types
 import GHC.CString
 import GHC.Exts (IsString(..), build)
-import Data.Primitive.ByteArray
+import Data.Primitive.PrimArray
 import qualified Data.Vector as V
 import Data.Array
 import GHC.ST
@@ -37,7 +37,7 @@ import Prelude hiding (reverse,head,tail,last,init,null
 
 -- | 'Text' represented as UTF-8 encoded 'Bytes'
 --
-newtype Text = Text V.Bytes
+newtype Text = Text { toUTF8Bytes :: V.Bytes }
 
 instance Eq Text where
     (Text b1) == (Text b2) = b1 == b2
@@ -139,9 +139,8 @@ unpack (Text (V.PrimVector ba s l)) = go s
   where
     !end = s + l
     go !idx
-        | idx < end =
-            let (# c, i #) = decodeChar ba idx in c : go (idx + i)
-        | otherwise = []
+        | idx >= end = []
+        | otherwise = let (# c, i #) = decodeChar ba idx in c : go (idx + i)
 
 unpackFB :: Text -> (Char -> a -> a) -> a -> a
 {-# INLINE [0] unpackFB #-}
@@ -149,9 +148,8 @@ unpackFB (Text (V.PrimVector ba s l)) k z = go s
   where
     !end = s + l
     go !idx
-        | idx < end =
-            let (# c, i #) = decodeChar ba idx in c `k` go (idx + i)
-        | otherwise = z
+        | idx >= end = z
+        | otherwise = let (# c, i #) = decodeChar ba idx in c `k` go (idx + i)
 
 {-# RULES
 "unpack" [~1] forall t . unpack t = build (\ k z -> unpackFB t k z)
@@ -204,13 +202,8 @@ snoc (Text (V.PrimVector ba s l)) c = Text $ V.createN (4 + l) $ \ mba -> do
     encodeChar mba l c
 
 append :: Text -> Text -> Text
-{-# INLINABLE append #-}
-append t1@(Text (V.PrimVector ba1 s1 l1)) t2@(Text (V.PrimVector ba2 s2 l2))
-    | l1 == 0   = t2
-    | l2 == 0   = t1
-    | otherwise = Text $ V.create (l1 + l2) $ \ mba -> do
-        copyArr mba 0 ba1 s1 l1
-        copyArr mba l1 ba2 s2 l2
+append ta tb = Text ( toUTF8Bytes ta `V.append` toUTF8Bytes tb )
+{-# INLINE append #-}
 
 uncons :: Text -> Maybe (Char, Text)
 {-# INLINE uncons #-}
@@ -253,9 +246,9 @@ length :: Text -> Int
 length (Text (V.PrimVector ba s l)) = go s 0
   where
     !end = s + l
-    go !i !acc | i < end = let j = decodeCharLen ba i
-                          in go (i+j) (1+acc)
-               | otherwise = acc
+    go !i !acc | i >= end = acc
+               | otherwise = let j = decodeCharLen ba i in go (i+j) (1+acc)
+
 
 --------------------------------------------------------------------------------
 -- * Transformations
@@ -267,27 +260,78 @@ map :: (Char -> Char) -> Text -> Text
 map f = \ t@(Text v) -> packN (V.length v + 3) (List.map f (unpack t)) -- the 3 bytes buffer is here for optimizing ascii mapping
 {-# INLINE map #-}                                                     -- because we do resize if less than 3 bytes left when building
 
-{-
 -- | /O(n)/ The 'intercalate' function takes a 'Text' and a list of
 -- 'Text's and concatenates the list after interspersing the first
 -- argument between each element of the list.
 intercalate :: Text -> [Text] -> Text
-intercalate t = concat . (F.intersperse t)
+intercalate t = concat . (List.intersperse t)
 {-# INLINE intercalate #-}
 
+concat :: [Text] -> Text
+concat = Text . V.concat . (List.map toUTF8Bytes) -- (coerce :: [Text] -> [V.Bytes])
+{-# INLINE concat #-}
+
 -- | /O(n)/ The 'intersperse' function takes a character and places it
--- between the characters of a 'Text'.  Subject to fusion.  Performs
--- replacement on invalid scalar values.
-intersperse     :: Char -> Text -> Text
-intersperse c t = unstream (S.intersperse (safe c) (stream t))
+-- between the characters of a 'Text'. Performs replacement on invalid scalar values.
+--
+intersperse :: Char -> Text -> Text
+intersperse c = \ t@(Text (V.PrimVector ba s l)) ->
+    let tlen = length t
+    in if length t < 2
+    then t
+    else (runST (do
+            mbaC <- newArr 4 -- encoded char buf
+            clen <- encodeChar mbaC 0 c
+            shrinkMutableArr mbaC clen
+            baC <- unsafeFreezeArr mbaC
+            let e = decodeCharLenReverse ba (s+l-1)
+            return . Text $ V.create (l + (tlen-1) * clen) (go baC ba s 0 (s+l-e))
+        ))
+  where
+    go :: PrimArray Word8  -- the encode char buf
+       -> PrimArray Word8  -- the original text
+       -> Int              -- decoding index of original text
+       -> Int              -- writing index of new buf
+       -> Int              -- the end of decoding index
+       -> MutablePrimArray s Word8 -- the new buf
+       -> ST s ()
+    go !baC !ba !i !j !end !mba
+        | i >= end = do
+            let l = decodeCharLen ba i
+            copyChar l mba j ba i
+        | otherwise = do
+            let l = decodeCharLen ba i
+            copyChar l mba j ba i
+            let i' = i + l
+                j' = j + l
+            let clen = sizeofArr baC
+            copyChar clen mba j' baC 0
+            go baC ba i' (j'+clen) end mba
+
+    copyChar :: Int -> MutablePrimArray s Word8 -> Int -> PrimArray Word8 -> Int -> ST s ()
+    copyChar !l !mba !j !ba !i = case l of
+        1 -> do writePrimArray mba j $ indexPrimArray ba i
+        2 -> do writePrimArray mba j $ indexPrimArray ba i
+                writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
+        3 -> do writePrimArray mba j $ indexPrimArray ba i
+                writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
+                writePrimArray mba (j+2) $ indexPrimArray ba (i+2)
+        _ -> do writePrimArray mba j $ indexPrimArray ba i
+                writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
+                writePrimArray mba (j+2) $ indexPrimArray ba (i+2)
+                writePrimArray mba (j+3) $ indexPrimArray ba (i+3)
 {-# INLINE intersperse #-}
 
--- | /O(n)/ Reverse the characters of a string. Subject to fusion.
+{-
+-- | /O(n)/ Reverse the characters of a string.
 reverse :: Text -> Text
 reverse t = S.reverse (stream t)
 {-# INLINE reverse #-}
 
 -}
+
+(/../) :: Text -> (Int, Int) -> Text
+(/../) = undefined
 
 --------------------------------------------------------------------------------
 

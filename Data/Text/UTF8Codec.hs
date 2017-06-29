@@ -10,6 +10,20 @@ import GHC.Types
 import GHC.ST
 import GHC.Word
 
+
+-- | Return a codepoint's encoded length in bytes
+--
+-- If the codepoint is invalid, we return 3(encoded bytes length of replacement char @\U+FFFD@).
+--
+encodeCharLength :: Char -> Int
+{-# INLINE encodeCharLength #-}
+encodeCharLength n
+    | n <= '\x00007F' = 1
+    | n <= '\x0007FF' = 2
+    | n <= '\x00FFFF' = 3
+    | n <= '\x10FFFF' = 4
+    | otherwise = 3
+
 -- | Encode a 'Char' into bytes
 --
 -- Write @\U+FFFD@ (encoded as @EF BF BD@ 3 bytes) for invalid unicode codepoint.
@@ -44,6 +58,11 @@ encodeChar# mba# i# c# = case (int2Word# (ord# c#)) of
             let s1# = writeWord8Array# mba# i# 0xEF## s#
                 s2# = writeWord8Array# mba# (i# +# 1#) 0xBF## s1#
                 s3# = writeWord8Array# mba# (i# +# 2#) 0xBD## s2#
+            in (# s3#, i# +# 3# #)
+        | isTrue# (n# `leWord#` 0x0000FFFF##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (0xE0## `or#` (n# `uncheckedShiftRL#` 12#)) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (0x80## `or#` ((n# `uncheckedShiftRL#` 6#) `and#` 0x3F##)) s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) (0x80## `or#` (n# `and#` 0x3F##)) s2#
             in (# s3#, i# +# 3# #)
         | isTrue# (n# `leWord#` 0x0010FFFF##) -> \ s# ->
             let s1# = writeWord8Array# mba# i# (0xF0## `or#` (n# `uncheckedShiftRL#` 18#)) s#
@@ -347,6 +366,7 @@ validateChar# ba# idx# end# =
                 else -1#
             | isTrue# (w1# `geWord#` 0xF5##) -> -1#
             | otherwise -> -1#
+  where
 
 between# :: Word# -> Word# -> Word# -> Bool
 {-# INLINE between# #-}
