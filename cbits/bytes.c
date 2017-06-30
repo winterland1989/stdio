@@ -2,9 +2,9 @@
 #include <string.h>
 #include "Rts.h"
 
-int _memcmp(void *a, 
+int _memcmp(char *a, 
             size_t aoff,
-            void *b, 
+            char *b, 
             size_t boff,
             size_t n) {
     a += aoff;

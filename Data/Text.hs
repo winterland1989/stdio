@@ -7,21 +7,18 @@ module Data.Text where
 
 import GHC.Prim
 import GHC.Types
-import GHC.CString
-import GHC.Exts (IsString(..), build)
+import GHC.Exts (build)
 import Data.Primitive.PrimArray
 import qualified Data.Vector as V
 import Data.Array
-import GHC.ST
-import Control.Exception
-import Control.DeepSeq (NFData(..))
+import Control.DeepSeq
+import Control.Monad.ST
 import Data.Foldable (foldlM)
 import Data.Word
 import Data.Char
 import Data.Bits
 import qualified Data.List as List
 import Data.Typeable
-import Foreign.C.Types
 import Data.Text.UTF8Codec
 
 import Prelude hiding (reverse,head,tail,last,init,null
@@ -108,10 +105,10 @@ pack = packN V.defaultInitSize
 --
 packN :: Int -> String -> Text
 {-# INLINE packN #-}
-packN n0 = \ ws0 -> runST (do mba <- newArr n0
+packN n0 = \ ws0 -> runST (do mba <- newPrimArray n0
                               (SP2 i mba') <- foldlM go (SP2 0 mba) ws0
-                              shrinkMutableArr mba' i
-                              ba <- unsafeFreezeArr mba'
+                              shrinkMutablePrimArray mba' i
+                              ba <- unsafeFreezePrimArray mba'
                               return (Text (V.fromArr ba 0 i))
                           )
   where
@@ -119,14 +116,14 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
     -- Keep an eye on its core!
     go :: SP2 s -> Char -> ST s (SP2 s)
     go (SP2 i mba) !c = do
-        siz <- sizeofMutableArr mba
+        siz <- sizeofMutablePrimArray mba
         if i < siz - 3  -- we need at least 4 bytes for safety
         then do
             i' <- encodeChar mba i c
             return (SP2 i' mba)
         else do
             let !siz' = siz `shiftL` 1
-            !mba' <- resizeMutableArr mba siz'
+            !mba' <- resizeMutablePrimArray mba siz'
             i' <- encodeChar mba' i c
             return (SP2 i' mba')
 
@@ -192,13 +189,13 @@ cons :: Char -> Text -> Text
 {-# INLINABLE cons #-}
 cons c (Text (V.PrimVector ba s l)) = Text $ V.createN (4 + l) $ \ mba -> do
         i <- encodeChar mba 0 c
-        copyArr mba i ba s l
+        copyPrimArray mba i ba s l
         return $! i + l
 
 snoc :: Text -> Char -> Text
 {-# INLINABLE snoc #-}
 snoc (Text (V.PrimVector ba s l)) c = Text $ V.createN (4 + l) $ \ mba -> do
-    copyArr mba 0 ba s l
+    copyPrimArray mba 0 ba s l
     encodeChar mba l c
 
 append :: Text -> Text -> Text
@@ -280,10 +277,10 @@ intersperse c = \ t@(Text (V.PrimVector ba s l)) ->
     in if length t < 2
     then t
     else (runST (do
-            mbaC <- newArr 4 -- encoded char buf
+            mbaC <- newPrimArray 4 -- encoded char buf
             clen <- encodeChar mbaC 0 c
-            shrinkMutableArr mbaC clen
-            baC <- unsafeFreezeArr mbaC
+            shrinkMutablePrimArray mbaC clen
+            baC <- unsafeFreezePrimArray mbaC
             let e = decodeCharLenReverse ba (s+l-1)
             return . Text $ V.create (l + (tlen-1) * clen) (go baC ba s 0 (s+l-e))
         ))
@@ -307,28 +304,21 @@ intersperse c = \ t@(Text (V.PrimVector ba s l)) ->
             let clen = sizeofArr baC
             copyChar clen mba j' baC 0
             go baC ba i' (j'+clen) end mba
-
-    copyChar :: Int -> MutablePrimArray s Word8 -> Int -> PrimArray Word8 -> Int -> ST s ()
-    copyChar !l !mba !j !ba !i = case l of
-        1 -> do writePrimArray mba j $ indexPrimArray ba i
-        2 -> do writePrimArray mba j $ indexPrimArray ba i
-                writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
-        3 -> do writePrimArray mba j $ indexPrimArray ba i
-                writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
-                writePrimArray mba (j+2) $ indexPrimArray ba (i+2)
-        _ -> do writePrimArray mba j $ indexPrimArray ba i
-                writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
-                writePrimArray mba (j+2) $ indexPrimArray ba (i+2)
-                writePrimArray mba (j+3) $ indexPrimArray ba (i+3)
 {-# INLINE intersperse #-}
 
-{-
 -- | /O(n)/ Reverse the characters of a string.
 reverse :: Text -> Text
-reverse t = S.reverse (stream t)
+reverse = \ (Text (V.PrimVector ba s l)) -> Text $ V.create l (go ba s l (s+l))
+  where
+    go :: PrimArray Word8 -> Int -> Int -> Int -> MutablePrimArray s Word8 -> ST s ()
+    go !ba !i !j !end !mba
+        | i >= end = return ()
+        | otherwise = do
+            let l = decodeCharLen ba i
+                j' = j - l
+            copyChar l mba j' ba i
+            go ba (i+l) j' end mba
 {-# INLINE reverse #-}
-
--}
 
 (/../) :: Text -> (Int, Int) -> Text
 (/../) = undefined

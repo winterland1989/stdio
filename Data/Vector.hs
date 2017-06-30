@@ -80,7 +80,8 @@ module Data.Vector (
   , drop
   , slice
   , splitAt
-
+  , takeWhile
+  , dropWhile
 
   -- * Misc
   , IPair(..)
@@ -91,21 +92,16 @@ module Data.Vector (
  ) where
 
 import Control.DeepSeq
-import Control.Exception (assert)
-import GHC.Exts (IsList(..), IsString(..), build)
-import Control.Monad.ST.Unsafe
+import GHC.Exts (build)
 import Control.Monad.ST
 import Control.Monad
 import Data.Primitive
-import Data.Primitive.Types
-import Data.Primitive.ByteArray
 import Data.Primitive.SmallArray
 import Data.Primitive.PrimArray
 import Data.Array
 import GHC.Word
 import GHC.Prim
 import GHC.Ptr (Ptr(..))
-import GHC.CString
 import Data.Typeable
 import Data.Data
 import Data.Bits
@@ -113,7 +109,6 @@ import qualified Data.List as List
 import Data.Foldable (foldlM, foldrM)
 import GHC.Types
 import Foreign.C.Types
-import Foreign.Storable (peekElemOff)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Quote as Q
 import Data.Primitive.PrimArrayQ as Q
@@ -164,7 +159,7 @@ instance Vec Vector a where
     type IArray Vector = SmallArray
     toArr (Vector arr s l) = (arr, s, l)
     {-# INLINE toArr #-}
-    fromArr arr s l = Vector arr s l
+    fromArr = Vector
     {-# INLINE fromArr #-}
 
 -- | A pattern synonyms for matching the underline array, offset and length.

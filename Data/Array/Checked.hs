@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Bound checked array operations.
@@ -51,7 +50,7 @@ module Data.Array.Checked
   ) where
 
 import qualified Data.Array as A
-import Control.Exception (Exception(..), throw, ArrayException(..))
+import Control.Exception (throw, ArrayException(..))
 import Data.Typeable
 import Control.Monad.Primitive
 import Data.Primitive.Types

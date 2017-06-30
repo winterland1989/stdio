@@ -4,7 +4,7 @@
 module Data.Text.UTF8Codec where
 
 import Data.Primitive.ByteArray
-import Data.Array
+import Data.Primitive.PrimArray
 import GHC.Prim
 import GHC.Types
 import GHC.ST
@@ -414,3 +414,19 @@ chr4# x1# x2# x3# x4# = chr# (z1# +# z2# +# z3# +# z4#)
     !z2# = uncheckedIShiftL# (y2# -# 0x80#) 12#
     !z3# = uncheckedIShiftL# (y3# -# 0x80#) 6#
     !z4# = y4# -# 0x80#
+
+
+-- |
+copyChar :: Int -> MutablePrimArray s Word8 -> Int -> PrimArray Word8 -> Int -> ST s ()
+{-# INLINE copyChar #-}
+copyChar !l !mba !j !ba !i = case l of
+    1 -> do writePrimArray mba j $ indexPrimArray ba i
+    2 -> do writePrimArray mba j $ indexPrimArray ba i
+            writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
+    3 -> do writePrimArray mba j $ indexPrimArray ba i
+            writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
+            writePrimArray mba (j+2) $ indexPrimArray ba (i+2)
+    _ -> do writePrimArray mba j $ indexPrimArray ba i
+            writePrimArray mba (j+1) $ indexPrimArray ba (i+1)
+            writePrimArray mba (j+2) $ indexPrimArray ba (i+2)
+            writePrimArray mba (j+3) $ indexPrimArray ba (i+3)

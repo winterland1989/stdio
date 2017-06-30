@@ -94,11 +94,11 @@ class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr wh
 instance Arr MutableArray Array a where
     newArr n = newArray n uninitialized
     {-# INLINE newArr #-}
-    newArrWith n x = newArray n x
+    newArrWith = newArray
     {-# INLINE newArrWith #-}
-    readArr marr i = readArray marr i
+    readArr = readArray
     {-# INLINE readArr #-}
-    writeArr marr i x = writeArray marr i x
+    writeArr = writeArray
     {-# INLINE writeArr #-}
     setArr marr s l x = go s
       where
@@ -106,22 +106,22 @@ instance Arr MutableArray Array a where
         go !i | i >= sl = return ()
               | otherwise = writeArray marr i x >> go (i+1)
     {-# INLINE setArr #-}
-    indexArr arr i = indexArray arr i
+    indexArr = indexArray
     {-# INLINE indexArr #-}
-    indexArrM arr i = indexArrayM arr i
+    indexArrM = indexArrayM
     {-# INLINE indexArrM #-}
-    freezeArr marr s l = freezeArray marr s l
+    freezeArr = freezeArray
     {-# INLINE freezeArr #-}
-    thawArr arr s l = thawArray arr s l
+    thawArr = thawArray
     {-# INLINE thawArr #-}
     unsafeFreezeArr = unsafeFreezeArray
     {-# INLINE unsafeFreezeArr #-}
     unsafeThawArr = unsafeThawArray
     {-# INLINE unsafeThawArr #-}
 
-    copyArr marr s1 arr s2 l  = copyArray marr s1 arr s2 l
+    copyArr = copyArray
     {-# INLINE copyArr #-}
-    copyMutableArr marr1 s1 marr2 s2 l = copyMutableArray marr1 s1 marr2 s2 l
+    copyMutableArr = copyMutableArray
     {-# INLINE copyMutableArr #-}
 
     moveArr marr1 s1 marr2 s2 l
@@ -149,9 +149,9 @@ instance Arr MutableArray Array a where
         | otherwise = copyMutableArray marr1 s1 marr2 s2 l
     {-# INLINE moveArr #-}
 
-    cloneArr arr s l = cloneArray arr s l
+    cloneArr = cloneArray
     {-# INLINE cloneArr #-}
-    cloneMutableArr marr s l = cloneMutableArray marr s l
+    cloneMutableArr = cloneMutableArray
     {-# INLINE cloneMutableArr #-}
 
     resizeMutableArr marr n = do
@@ -172,11 +172,11 @@ instance Arr MutableArray Array a where
 instance Arr SmallMutableArray SmallArray a where
     newArr n = newSmallArray n uninitialized
     {-# INLINE newArr #-}
-    newArrWith n x = newSmallArray n x
+    newArrWith = newSmallArray
     {-# INLINE newArrWith #-}
-    readArr marr i = readSmallArray marr i
+    readArr = readSmallArray
     {-# INLINE readArr #-}
-    writeArr marr i x = writeSmallArray marr i x
+    writeArr = writeSmallArray
     {-# INLINE writeArr #-}
     setArr marr s l x = go s
       where
@@ -184,22 +184,22 @@ instance Arr SmallMutableArray SmallArray a where
         go !i | i >= sl = return ()
               | otherwise = writeSmallArray marr i x >> go (i+1)
     {-# INLINE setArr #-}
-    indexArr arr i = indexSmallArray arr i
+    indexArr = indexSmallArray
     {-# INLINE indexArr #-}
-    indexArrM arr i = indexSmallArrayM arr i
+    indexArrM = indexSmallArrayM
     {-# INLINE indexArrM #-}
-    freezeArr marr s l = freezeSmallArray marr s l
+    freezeArr = freezeSmallArray
     {-# INLINE freezeArr #-}
-    thawArr arr s l = thawSmallArray arr s l
+    thawArr = thawSmallArray
     {-# INLINE thawArr #-}
     unsafeFreezeArr = unsafeFreezeSmallArray
     {-# INLINE unsafeFreezeArr #-}
     unsafeThawArr = unsafeThawSmallArray
     {-# INLINE unsafeThawArr #-}
 
-    copyArr marr s1 arr s2 l  = copySmallArray marr s1 arr s2 l
+    copyArr = copySmallArray
     {-# INLINE copyArr #-}
-    copyMutableArr marr1 s1 marr2 s2 l = copySmallMutableArray marr1 s1 marr2 s2 l
+    copyMutableArr = copySmallMutableArray
     {-# INLINE copyMutableArr #-}
 
     moveArr marr1 s1 marr2 s2 l
@@ -227,9 +227,9 @@ instance Arr SmallMutableArray SmallArray a where
         | otherwise = copySmallMutableArray marr1 s1 marr2 s2 l
     {-# INLINE moveArr #-}
 
-    cloneArr arr s l = cloneSmallArray arr s l
+    cloneArr = cloneSmallArray
     {-# INLINE cloneArr #-}
-    cloneMutableArr marr s l = cloneSmallMutableArray marr s l
+    cloneMutableArr = cloneSmallMutableArray
     {-# INLINE cloneMutableArr #-}
 
     resizeMutableArr marr n = do
@@ -249,20 +249,20 @@ instance Arr SmallMutableArray SmallArray a where
     {-# INLINE sizeofMutableArr #-}
 
 instance Prim a => Arr MutablePrimArray PrimArray a where
-    newArr n = newPrimArray n
+    newArr = newPrimArray
     {-# INLINE newArr #-}
     newArrWith n x = do
         marr <- newPrimArray n
         setPrimArray marr 0 n x
         return marr
     {-# INLINE newArrWith #-}
-    readArr marr i = readPrimArray marr i
+    readArr = readPrimArray
     {-# INLINE readArr #-}
-    writeArr marr i x = writePrimArray marr i x
+    writeArr = writePrimArray
     {-# INLINE writeArr #-}
-    setArr marr s l x = setPrimArray marr s l x
+    setArr = setPrimArray
     {-# INLINE setArr #-}
-    indexArr arr i = indexPrimArray arr i
+    indexArr = indexPrimArray
     {-# INLINE indexArr #-}
     indexArrM arr i = return (indexPrimArray arr i)
     {-# INLINE indexArrM #-}
@@ -281,12 +281,12 @@ instance Prim a => Arr MutablePrimArray PrimArray a where
     unsafeThawArr = unsafeThawPrimArray
     {-# INLINE unsafeThawArr #-}
 
-    copyArr marr s1 arr s2 l = copyPrimArray marr s1 arr s2 l
+    copyArr = copyPrimArray
     {-# INLINE copyArr #-}
-    copyMutableArr marr1 s1 marr2 s2 l = copyMutablePrimArray marr1 s1 marr2 s2 l
+    copyMutableArr = copyMutablePrimArray
     {-# INLINE copyMutableArr #-}
 
-    moveArr marr1 s1 marr2 s2 l = movePrimArray marr1 s1 marr2 s2 l
+    moveArr = movePrimArray
     {-# INLINE moveArr #-}
 
     cloneArr arr s l = runST (do
@@ -301,9 +301,9 @@ instance Prim a => Arr MutablePrimArray PrimArray a where
         return marr'
     {-# INLINE cloneMutableArr #-}
 
-    resizeMutableArr marr n = resizeMutablePrimArray marr n
+    resizeMutableArr = resizeMutablePrimArray
     {-# INLINE resizeMutableArr #-}
-    shrinkMutableArr marr n = shrinkMutablePrimArray marr n
+    shrinkMutableArr = shrinkMutablePrimArray
     {-# INLINE shrinkMutableArr #-}
 
     sameMutableArr = sameMutablePrimArray

@@ -1,0 +1,4 @@
+-- http://lemire.me/blog/2017/01/20/how-quickly-can-you-remove-spaces-from-a-string/
+-- https://graphics.stanford.edu/~seander/bithacks.html
+-- https://jameshfisher.github.io/2017/01/24/bitwise-check-for-zero-byte.html
+--
