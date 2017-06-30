@@ -16,11 +16,12 @@ import Control.DeepSeq
 import Builder
 import Bytes
 import Text
-
+import BitTwiddle
 
 main :: IO ()
-main = defaultMain -- $ List.reverse
+main = defaultMain $ List.reverse
     [ bgroup "Bytes" bytes
     , bgroup "Builder" builder
     , bgroup "Text" text
+    , bgroup "BitTwiddle" bitTwiddle
     ]

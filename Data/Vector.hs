@@ -80,8 +80,6 @@ module Data.Vector (
   , drop
   , slice
   , splitAt
-  , takeWhile
-  , dropWhile
 
   -- * Misc
   , IPair(..)
@@ -679,7 +677,7 @@ reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
   where
     go :: IArray v a -> Int -> Int -> MArray v s a -> ST s ()
     go ba !i !j !mba | j < 0 = return ()
-                     | j > 4 = do  -- a bit of loop unrolling
+                     | j >= 3 = do  -- a bit of loop unrolling
                          indexArrM ba i >>= writeArr mba j
                          indexArrM ba (i+1) >>= writeArr mba (j-1)
                          indexArrM ba (i+2) >>= writeArr mba (j-2)
@@ -706,7 +704,7 @@ intersperse x = \ v@(VecPat ba s l) ->
        -> ST s ()
     go ba !i !j !end !mba
         | i >= end = writeArr mba j =<< indexArrM ba i
-        | i < end - 4 = do -- a bit of loop unrolling
+        | i <= end - 4 = do -- a bit of loop unrolling
             writeArr mba j =<< indexArrM ba i
             writeArr mba (j+1) x
             writeArr mba (j+2) =<< indexArrM ba (i+1)

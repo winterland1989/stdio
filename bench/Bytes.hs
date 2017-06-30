@@ -51,7 +51,7 @@ wordZ :: Word8
 wordZ = 0
 
 bytes :: [Benchmark]
-bytes =
+bytes = List.reverse
     [ bgroup "singleton" singleton
     , bgroup "eq" eq
     , bgroup "pack/100 elems"  packSmall
