@@ -50,8 +50,7 @@ mkMask# w8# =
 --
 wordNotContainNullByte# :: Word# -> Bool
 {-# INLINE wordNotContainNullByte# #-}
-wordNotContainNullByte# w# = True
-{-
+wordNotContainNullByte# w# =
     let highbits# =
 #if SIZEOF_HSWORD == 4
             (w# `minusWord#` 0x01010101##) `and#` (not# w#) `and#` 0x80808080##
@@ -59,7 +58,7 @@ wordNotContainNullByte# w# = True
             (w# `minusWord#` 0x0101010101010101##) `and#` (not# w#) `and#` 0x8080808080808080##
 #endif
     in isTrue# (highbits# `eqWord#` 0##)
--}
+
 --
 -- https://sourceware.org/viewvc/src/newlib/libc/string/memchr.c?revision=1.4&view=markup
 
