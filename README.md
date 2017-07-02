@@ -15,9 +15,11 @@ This package is designed from ground, with two goals: simplicity and performance
 Guide
 -----
 
-I will try to give a briefly introduction on this package to help you get started, the first step is to get some knowledge on [primitive](http://hackage.haskell.org/package/primitive), it's well documented and used widely as the interface to GHC's primitive operations.
+I will try to give a briefly introduction on this package to help you get started, the first step is to get some knowledge on [primitive](http://hackage.haskell.org/package/primitive), it's well documented and used widely as the interface to GHC's primitive operations, then we can get started.
 
 + The `Arr` class
+
+Module `Data.Array` in stdio defined:
 
 ```haskell
 class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr where
@@ -46,6 +48,8 @@ newtype MutablePrimArray s a = MutablePrimArray (MutableByteArray s)
 Note this `Arr` class use functional-dependency to force an one-to-one immutable/mutable constrain, which is useful since lots of operations under `Arr` only mention either the immutable array type, or the mutable one.
 
 + The `Vec` class
+
+Module `Data.Vector` in stdio defined:
 
 ```haskell
 class (Arr (MArray v) (IArray v) a) => Vec v a where
@@ -89,6 +93,8 @@ pattern VecPat ba s l <- (toArr -> (ba,s,l))
 
 + `Text`
 
+Module `Data.Text` in stdio defined:
+
 ```haskell
 -- | In Data.Vector module we have this synonym
 type Bytes = PrimVector Word8
@@ -113,6 +119,8 @@ That is, either by validation or doing bad codepoint repair(replacement). The en
 I plan to add unicode case-mapping and normalization in future, and current plan is to use [utf8rewind](https://bitbucket.org/knight666/utf8rewind) package, which looks up to the task. But if anyone want to make a haskell version, i'll be happy to help out.
 
 + `Builder`
+
+Module `Data.Builder` in stdio defined:
 
 The `Builder` type is the standard way to constructing `PrimVector Word8`, which is defined as:
 
@@ -214,7 +222,7 @@ The reason for not introduce implicit fusion is that packed datatype is designed
 
 + Why not foundation?
 
-The array type in foundation is a sum type, and carry extra word for pinned status. Which is unreasonable. And the abuse of type class/family is only a comlication IMO.
+The array type in foundation is a sum type, which is unreasonable. And the abuse of type class/family is only a comlication IMO.
 
 + What about FFI with `Bytes` in stdio?
 
