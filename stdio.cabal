@@ -22,6 +22,7 @@ library
                             Data.Vector
                             Data.Array
                             Data.Array.Checked
+                            Data.Parser
                             Data.Text
                             Data.Text.UTF8Codec
 
@@ -33,7 +34,7 @@ library
     -- other-extensions:    
     build-depends:          base >=4.6 && <4.10
                         ,   ghc-prim
-                        ,   primitive
+                        ,   primitive >= 0.6.2
                         ,   deepseq
                         ,   template-haskell 
 
