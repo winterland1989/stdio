@@ -6,7 +6,7 @@ This library is an effort trying to improve and standardize Haskell's IO interfa
 + A faster/simpler vector type, which packed bytes type built on.
 + Binary and textual `Parser` and `Builder` for compact bytes.
 + A UTF-8 based text type for text process.
-+ A simper `Hanlder` for IO, include file and network module.
++ A simper `Handler` for IO, include file and network module.
 + A compact `FilePath` type.
 
 This package is designed from ground, with two goals: simplicity and performance, join in!
@@ -104,7 +104,7 @@ newtype Text = Text { toUTF8Bytes :: V.Bytes }
 
 `Text` is just a byte vector which must be UTF8-encoded, the only way to constructing such a value is to use:
 
-```
+```haskell
 data UTF8DecodeResult
     = Success !Text
     | PartialBytes !Text !V.Bytes
@@ -167,7 +167,7 @@ This part is under dev now
 
 This part is under dev now
 
-+ `Hanlder`
++ `Handler`
 
 This part is under dev now
 
