@@ -81,6 +81,18 @@ module Data.Vector (
   , slice
   , splitAt
 
+  -- * Searching ByteStrings
+
+  -- ** Searching by equality
+  , elem
+  , notElem
+
+  -- ** Searching with a predicate
+  , find
+  , filter
+  , partition
+
+
   -- * Misc
   , IPair(..)
   , defaultInitSize
@@ -96,6 +108,7 @@ import Control.Monad
 import Data.Primitive
 import Data.Primitive.SmallArray
 import Data.Primitive.PrimArray
+import Data.Primitive.BitTwiddle (memchrReverse)
 import Data.Array
 import GHC.Word
 import GHC.Prim
@@ -169,20 +182,27 @@ instance Eq a => Eq (Vector a) where
     {-# INLINABLE (==) #-}
 
 eqVector :: Eq a => Vector a -> Vector a -> Bool
-eqVector (Vector baA sA lA) (Vector baB sB lB) = lA == lB && go sA sB
+{-# INLINE eqVector #-}
+eqVector (Vector baA sA lA) (Vector baB sB lB)
+    | baA `sameArr` baB =
+        if sA == sB then lA == lB else lA == lB && go sA sB
+    | otherwise = lA == lB && go sA sB
   where
     !endA = sA + lA
     go !i !j
-        | i < endA =
+        | i >= endA = True
+        | otherwise =
             (indexSmallArray baA i == indexSmallArray baB j) && go (i+1) (j+1)
-        | otherwise = True
 
 instance {-# OVERLAPPABLE #-} Ord a => Ord (Vector a) where
     compare = compareVector
     {-# INLINABLE compare #-}
 
 compareVector :: Ord a => Vector a -> Vector a -> Ordering
-compareVector (Vector baA sA lA) (Vector baB sB lB) = go sA sB
+{-# INLINE compareVector #-}
+compareVector (Vector baA sA lA) (Vector baB sB lB)
+    | baA `sameArr` baB = if sA == sB then lA `compare` lB else go sA sB
+    | otherwise = go sA sB
   where
     !endA = sA + lA
     !endB = sB + lB
@@ -239,19 +259,23 @@ instance Prim a => Vec PrimVector a where
     fromArr arr s l = PrimVector arr s l
     {-# INLINE fromArr #-}
 
-instance {-# OVERLAPPABLE #-} Prim a => Eq (PrimVector a) where
+instance {-# OVERLAPPABLE #-} (Prim a, Eq a) => Eq (PrimVector a) where
     (==) = eqPrimVector
     {-# INLINE (==) #-}
 
 eqPrimVector :: forall a. Prim a => PrimVector a -> PrimVector a -> Bool
 {-# INLINE eqPrimVector #-}
-eqPrimVector (PrimVector (PrimArray (ByteArray baA#)) sA lA)
-        (PrimVector (PrimArray (ByteArray baB#)) sB lB) =
-    let r = unsafeDupablePerformIO $
-            c_memcmp baA# (fromIntegral $ sA * siz) -- we use memcmp for all primitive vector
-                     baB# (fromIntegral $ sB * siz) (fromIntegral $ min (lA*siz) (lB*siz))
-    in lA == lB && r == 0
-  where siz = sizeOf (undefined :: a)
+eqPrimVector (PrimVector baA sA lA)
+        (PrimVector baB@(PrimArray (ByteArray baB#)) sB lB)
+    | baA `samePrimArray` baB =
+        if sA == sB then lA == lB else lA == lB && go baA baB
+    | otherwise = lA == lB && go baA baB
+  where
+    go (PrimArray (ByteArray baA#)) (PrimArray (ByteArray baB#)) =
+        let r = c_memcmp baA# (fromIntegral $ sA * siz) -- we use memcmp for all primitive vector
+                         baB# (fromIntegral $ sB * siz) (fromIntegral $ min (lA*siz) (lB*siz))
+        in r == 0
+    siz = sizeOf (undefined :: a)
 
 instance {-# OVERLAPPABLE #-} (Prim a, Ord a) => Ord (PrimVector a) where
     compare = comparePrimVector
@@ -263,7 +287,9 @@ instance {-# OVERLAPPING #-} Ord (PrimVector Word8) where
 
 comparePrimVector :: (Prim a, Ord a) => PrimVector a -> PrimVector a -> Ordering
 {-# INLINE comparePrimVector #-}
-comparePrimVector (PrimVector baA sA lA) (PrimVector baB sB lB) = go sA sB
+comparePrimVector (PrimVector baA sA lA) (PrimVector baB sB lB)
+    | baA `samePrimArray` baB = if sA == sB then lA `compare` lB else go sA sB
+    | otherwise = go sA sB
   where
     !endA = sA + lA
     !endB = sB + lB
@@ -277,8 +303,7 @@ compareBytes :: PrimVector Word8 -> PrimVector Word8 -> Ordering
 {-# INLINE compareBytes #-}
 compareBytes (PrimVector (PrimArray (ByteArray baA#)) sA lA)
              (PrimVector (PrimArray (ByteArray baB#)) sB lB) =
-    let r = unsafeDupablePerformIO $
-            c_memcmp baA# (fromIntegral sA)
+    let r = c_memcmp baA# (fromIntegral sA)
                      baB# (fromIntegral sB) (fromIntegral $ min lA lB)
     in case r `compare` 0 of
         EQ  -> lA `compare` lB
@@ -1062,6 +1087,97 @@ splitAt s' (VecPat arr s l) = let v1 = fromArr arr s'' (s''-s)
                               in v1 `seq` v2 `seq` (v1, v2)
   where s'' = rangeCut (s+s') s (s+l)
 
+--------------------------------------------------------------------------------
+-- * Searching ByteStrings
+
+-- ** Searching by equality
+elem :: Vec v a => a -> v a -> Bool
+elem = undefined
+notElem ::  Vec v a => a -> v a -> Bool
+notElem a v = not (elem a v)
+
+elemIndex :: (Eq a, Vec v a) => a -> v a -> Maybe Int
+{-# INLINE [1] elemIndex #-}
+{-# RULES "elemIndex/Bytes" elemIndex = elemIndexBytes #-}
+elemIndex w (VecPat arr s l) = go s
+  where
+    !end = s + l
+    go !i
+        | i >= end = Nothing
+        | indexArr arr i == w =
+            let i' = i - s in i' `seq` Just i'
+        | otherwise = go (i+1)
+
+elemIndexBytes :: Word8 -> Bytes -> Maybe Int
+{-# INLINE elemIndexBytes #-}
+elemIndexBytes w (PrimVector (PrimArray (ByteArray ba#)) s l) =
+    let !w' = fromIntegral w
+        !s' = fromIntegral s
+        !l' = fromIntegral l
+    in case fromIntegral (c_memchr ba# s' w' l') of
+        -1 -> Nothing
+        r  -> Just r
+
+elemIndices :: (Eq a, Vec v a) => a -> v a -> [Int]
+{-# INLINE [1] elemIndices #-}
+{-# RULES "elemIndices/Bytes" elemIndices = elemIndicesBytes #-}
+elemIndices w (VecPat arr s l) = go s
+  where
+    !end = s + l
+    go !i
+        | i >= end = []
+        | indexArr arr i == w =
+            let i' = i - s in i' `seq` i' : go (i+1)
+
+elemIndicesBytes :: Word8 -> PrimVector Word8 -> [Int]
+{-# INLINE elemIndicesBytes #-}
+elemIndicesBytes w (PrimVector (PrimArray (ByteArray ba#)) s l) = go s
+  where
+    !w' = fromIntegral w
+    !end = s + l
+    go !i
+        | i >= end = []
+        | otherwise =
+            let !s' = fromIntegral i
+                !l' = fromIntegral (end - i)
+            in case fromIntegral (c_memchr ba# s' w' l') of
+                -1 -> []
+                r  -> r : go (i + r)
+
+elemIndexEnd :: (Eq a, Vec v a) => a -> v a -> Maybe Int
+{-# INLINE [1] elemIndexEnd #-}
+{-# RULES "elemIndexEnd/Bytes" elemIndexEnd = elemIndexEndBytes #-}
+elemIndexEnd w (VecPat arr s l) = go (s + l -1)
+  where
+    go !i
+        | i < s = Nothing
+        | indexArr arr i == w =
+            let i' = i - s in i' `seq` Just i'
+        | otherwise = go (i-1)
+
+elemIndexEndBytes :: Word8 -> Bytes -> Maybe Int
+{-# INLINE elemIndexEndBytes #-}
+elemIndexEndBytes w (PrimVector ba s l) =
+    case memchrReverse ba w (s+l-1) l of
+        -1 -> Nothing
+        r  -> Just r
+
+count :: Vec v a => a -> v a -> Int
+count = undefined
+
+
+-- ** Searching with a predicate
+
+find :: Vec v a => (a -> Bool) -> v a -> Maybe a
+find = undefined
+findIndex :: Vec v a => (a -> Bool) -> v a -> Maybe Int
+findIndex = undefined
+findIndices :: Vec v a => (a -> Bool) -> v a -> [Int]
+findIndices = undefined
+
+
+filter = undefined
+partition = undefined
 
 --------------------------------------------------------------------------------
 -- Common up near identical calls to `error' to reduce the number
@@ -1079,4 +1195,7 @@ rangeCut !r !min !max | r < min = min
 --------------------------------------------------------------------------------
 
 foreign import ccall unsafe "bytes.c _memcmp"
-    c_memcmp :: ByteArray# -> CSize -> ByteArray# -> CSize -> CSize -> IO CInt
+    c_memcmp :: ByteArray# -> CSize -> ByteArray# -> CSize -> CSize -> CInt
+
+foreign import ccall unsafe "bytes.c _memchr"
+    c_memchr :: ByteArray# -> CInt -> CSize -> CSize -> CSize

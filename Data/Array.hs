@@ -60,36 +60,82 @@ uninitialized = throw (UndefinedElement "Data.Array.uninitialized")
 -- They are used across this package and perform identical to their monomophric counterpart.
 --
 class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr where
-    -- | Test
+
+    -- | Make a new array with given size.
+    --
+    -- For boxed array, all elements are 'uninitialized' which shall not be accessed.
+    -- For primitive array, elements are just random garbage.
     newArr :: (PrimMonad m, PrimState m ~ s) => Int -> m (marr s a)
+
+    -- | Make a new array and fill it with an initial value.
     newArrWith :: (PrimMonad m, PrimState m ~ s) => Int -> a -> m (marr s a)
 
+    -- | Index mutable array in a primitive monad.
     readArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> m a
+
+    -- | Write mutable array in a primitive monad.
     writeArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> a -> m ()
+
+    -- | Fill mutable array with a given value.
     setArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> Int -> a -> m ()
 
+    -- | Index immutable array, which is a pure operation,
     indexArr :: arr a -> Int -> a
+
+    -- | Index immutable array in a primitive monad, this helps in situations that
+    -- you want your indexing result is not a thunk referencing whole array.
     indexArrM :: (Monad m) => arr a -> Int -> m a
 
+    -- | Safely freeze mutable array by make a immutable copy of its slice.
     freezeArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> Int -> m (arr a)
+
+    -- | Safely thaw immutable array by make a mutable copy of its slice.
     thawArr :: (PrimMonad m, PrimState m ~ s) => arr a -> Int -> Int -> m (marr s a)
+
+    -- | In place freeze a mutable array, the original mutable array can not be used
+    -- anymore.
     unsafeFreezeArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> m (arr a)
+
+    -- | In place thaw a immutable array, the original immutable array can not be used
+    -- anymore.
     unsafeThawArr :: (PrimMonad m, PrimState m ~ s) => arr a -> m (marr s a)
 
+    -- | Copy a slice of immutable array to mutable array at given offset.
     copyArr ::  (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> arr a -> Int -> Int -> m ()
+
+    -- | Copy a slice of mutable array to mutable array at given offset.
+    -- The two mutable arrays shall no be the same one.
     copyMutableArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> marr s a -> Int -> Int -> m ()
 
+    -- | Copy a slice of mutable array to mutable array at given offset.
+    -- The two mutable arrays may be the same one.
     moveArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> marr s a -> Int -> Int -> m ()
 
+    -- | Create immutable copy.
     cloneArr :: arr a -> Int -> Int -> arr a
+
+    -- | Create mutable copy.
     cloneMutableArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> Int -> m (marr s a)
 
+    -- | Resize mutable array to given size.
     resizeMutableArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> m (marr s a)
+
+    -- | Shrink mutable array to given size. This operation only works on primitive arrays.
+    -- For boxed array, this is a no-op, e.g. 'sizeOfMutableArr' will not change.
     shrinkMutableArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> Int -> m ()
 
+    -- | Is two mutable array are reference equal.
     sameMutableArr :: marr s a -> marr s a -> Bool
+
+    -- | Size of immutable array.
     sizeofArr :: arr a -> Int
+
+    -- | Size of mutable array.
     sizeofMutableArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> m Int
+
+    -- | Is two immutable array are reference equal.
+    -- See https://ghc.haskell.org/trac/ghc/ticket/13908 for more background.
+    sameArr :: arr a -> arr a -> Bool
 
 instance Arr MutableArray Array a where
     newArr n = newArray n uninitialized
@@ -168,6 +214,10 @@ instance Arr MutableArray Array a where
     {-# INLINE sizeofArr #-}
     sizeofMutableArr = return . sizeofMutableArray
     {-# INLINE sizeofMutableArr #-}
+
+    sameArr (Array arr1#) (Array arr2#) = isTrue# (
+        sameMutableArray# (unsafeCoerce# arr1#) (unsafeCoerce# arr2#))
+    {-# INLINE sameArr #-}
 
 instance Arr SmallMutableArray SmallArray a where
     newArr n = newSmallArray n uninitialized
@@ -248,6 +298,10 @@ instance Arr SmallMutableArray SmallArray a where
     sizeofMutableArr = return . sizeofSmallMutableArray
     {-# INLINE sizeofMutableArr #-}
 
+    sameArr (SmallArray arr1#) (SmallArray arr2#) = isTrue# (
+        sameSmallMutableArray# (unsafeCoerce# arr1#) (unsafeCoerce# arr2#))
+    {-# INLINE sameArr #-}
+
 instance Prim a => Arr MutablePrimArray PrimArray a where
     newArr = newPrimArray
     {-# INLINE newArr #-}
@@ -312,3 +366,6 @@ instance Prim a => Arr MutablePrimArray PrimArray a where
     {-# INLINE sizeofArr #-}
     sizeofMutableArr = sizeofMutablePrimArray
     {-# INLINE sizeofMutableArr #-}
+
+    sameArr = samePrimArray
+    {-# INLINE sameArr #-}

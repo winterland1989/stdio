@@ -27,7 +27,8 @@ module Data.Primitive.PrimArray (
   -- * Information
   sizeofPrimArray, sizeofMutablePrimArray, sameMutablePrimArray,
   primArrayContents, mutablePrimArrayContents,
-  isPrimArrayPinned, isMutablePrimArrayPinned
+  isPrimArrayPinned, isMutablePrimArrayPinned,
+  samePrimArray
 
 ) where
 
@@ -284,6 +285,12 @@ shrinkMutablePrimArray (MutablePrimArray (MutableByteArray mba#)) (I# i#) =
        )
   where siz# = sizeOf# (undefined :: a)
 {-# INLINE shrinkMutablePrimArray #-}
+
+-- | Check if the two immutable arrays refer to the same memory block.
+samePrimArray :: PrimArray a -> PrimArray a -> Bool
+{-# INLINE samePrimArray #-}
+samePrimArray (PrimArray (ByteArray ba1#)) (PrimArray (ByteArray ba2#)) =
+    isTrue# (sameMutableByteArray# (unsafeCoerce# ba1#) (unsafeCoerce# ba2#))
 
 --------------------------------------------------------------------------------
 --

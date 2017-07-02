@@ -51,7 +51,7 @@ wordZ :: Word8
 wordZ = 0
 
 bytes :: [Benchmark]
-bytes = List.reverse
+bytes = -- List.reverse
     [ bgroup "singleton" singleton
     , bgroup "eq" eq
     , bgroup "pack/100 elems"  packSmall
@@ -85,10 +85,10 @@ singleton =
 
 eq :: [Benchmark]
 eq =
-    [ bench "bytestring/(==)/same bytestring" $ nf (== bytestring10000) bytestring10000
-    , bench "bytes/(==)/same bytes"      $ nf (== bytes10000) bytes10000
-    , bench "bytestring/(==)" $ nf (== bytestring10000) (B.copy bytestring10000)
+    [ bench "bytestring/(==)" $ nf (== bytestring10000) (B.copy bytestring10000)
     , bench "bytes/(==)"      $ nf (== bytes10000) (V.copy bytes10000)
+    , bench "bytestring/(==)/same bytestring" $ nf (== bytestring10000) bytestring10000
+    , bench "bytes/(==)/same bytes"      $ nf (== bytes10000) bytes10000
     ]
 
 packSmall :: [Benchmark]

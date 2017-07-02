@@ -33,6 +33,7 @@ module Data.Array.Checked
   , A.sameMutableArr
   , A.sizeofArr
   , A.sizeofMutableArr
+  , A.sameArr
   -- * Boxed array type
   , A.Array(..)
   , A.MutableArray(..)
