@@ -68,8 +68,8 @@ In `stdio`, we use `Vector/vector` to refer a slice of array, which is also the 
 ```haskell
 data Vector a = Vector
     {-# UNPACK #-} !(SmallArray a) -- payload
-    {-# UNPACK #-} !Int         -- offset in elements of type a rather than in bytes
-    {-# UNPACK #-} !Int         -- length in elements of type a rather than in bytes
+    {-# UNPACK #-} !Int
+    {-# UNPACK #-} !Int
     deriving (Typeable, Data)
 
 instance Vec Vector a where ...
@@ -223,6 +223,10 @@ The reason for not introduce implicit fusion is that packed datatype is designed
 + Why not foundation?
 
 The array type in foundation is a sum type, which is unreasonable. And the abuse of type class/family is only a comlication IMO.
+
++ What about `mmap`?
+
+Well, `mmap` certainly has its usage, but export `mmap` via pure data structures, e.g. `ByteString` is not a good idea IMO. Take a look at `System.IO.FD` module, the plan is to define a `MMap` data type and provide `FD/DiskFD` instance for it.
 
 + What about FFI with `Bytes` in stdio?
 
