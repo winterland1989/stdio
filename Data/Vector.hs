@@ -521,7 +521,7 @@ data IPair a = IPair {-# UNPACK #-}!Int a
 
 -- | /O(n)/
 --
--- Alias for @'packRN' 16@.
+-- Alias for @'packRN' 'defaultInitSize'@.
 --
 packR :: Vec v a => [a] -> v a
 packR = packRN defaultInitSize
@@ -533,11 +533,11 @@ packR = packRN defaultInitSize
 --
 packRN :: forall v a. Vec v a => Int -> [a] -> v a
 packRN n0 = \ ws0 -> runST (do mba <- newArr n0
-                               let !n0' = n0-1
-                               (IPair i mba') <- foldlM go (IPair n0' mba) ws0
+                               (IPair i mba') <- foldlM go (IPair (n0-1) mba) ws0
                                ba <- unsafeFreezeArr mba'
-                               let n = sizeofArr ba
-                               return $! fromArr ba i (n-i)
+                               let i' = i + 1
+                                   n = sizeofArr ba
+                               return $! fromArr ba i' (n-i')
                            )
   where
     go :: IPair (MArray v s a) -> a -> ST s (IPair (MArray v s a))
@@ -545,14 +545,12 @@ packRN n0 = \ ws0 -> runST (do mba <- newArr n0
         n <- sizeofMutableArr mba
         if i >= 0
         then do writeArr mba i x
-                let !i' = i-1
-                return (IPair i' mba)
-        else do let !n' = n `shiftL` 1
-                    !n'' = n' - n
+                return (IPair (i-1) mba)
+        else do let !n' = n `shiftL` 1  -- double the buffer
                 !mba' <- newArr n'
-                copyMutableArr mba' n'' mba 0 n
-                writeArr mba' n'' x
-                return (IPair (n'' - 1) mba')
+                copyMutableArr mba' n mba 0 n
+                writeArr mba' (n-1) x
+                return (IPair (n-2) mba')
 {-# INLINE packRN #-}
 
 -- | /O(n)/ Convert vector to a list.
