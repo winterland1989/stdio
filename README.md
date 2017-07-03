@@ -157,7 +157,7 @@ buildBytesList :: Builder -> [V.Bytes]
 buildAndRun :: (V.Bytes -> IO ()) -> Builder -> IO ()
 ```
 
-This to directly turn builder into a byte vector, or turn it into a lazy list, or execute some IO action every time we fill a buffer up.
+That is to directly turn builder into a byte vector, or turn it into a lazy list, or execute some IO action every time we fill a buffer up.
 
 + `Parser`
 

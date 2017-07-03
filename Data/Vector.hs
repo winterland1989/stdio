@@ -16,6 +16,28 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 
+{-|
+Module      : Data.Vector
+Description : Fast boxed and unboxed vector
+Copyright   : (c) Winterland, 2017
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : non-portable
+
+This module provide fast boxed and unboxed vector with unified interface. Conceptually a vector is simply a slice of an array,
+for example this is the definition of boxed vector:
+
+@
+    data Vector a = Vector
+        {-# UNPACK #-} !(SmallArray a) -- payload
+        {-# UNPACK #-} !Int         -- offset
+        {-# UNPACK #-} !Int         -- length
+@
+
+The 'Vec' class unified different type of vectors, and this module provide operation over 'Vec' instances. The API is a combination
+of bytestring, text and vector. If you find missing functions, please report!
+-}
 
 module Data.Vector (
   -- * Vec typeclass
@@ -161,8 +183,8 @@ class (Arr (MArray v) (IArray v) a) => Vec v a where
 --
 data Vector a = Vector
     {-# UNPACK #-} !(SmallArray a) -- payload
-    {-# UNPACK #-} !Int         -- offset in elements of type a rather than in bytes
-    {-# UNPACK #-} !Int         -- length in elements of type a rather than in bytes
+    {-# UNPACK #-} !Int         -- offset
+    {-# UNPACK #-} !Int         -- length
     deriving (Typeable, Data)
 
 instance Vec Vector a where

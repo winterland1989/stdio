@@ -63,3 +63,20 @@ benchmark bench
     main-is:          Main.hs
     type:             exitcode-stdio-1.0
     ghc-options:      -O2 -threaded
+
+
+test-suite test
+    type: exitcode-stdio-1.0
+    main-is: Main.hs
+    -- other-modules:      
+    hs-source-dirs: test
+    build-depends:  stdio
+                  , base
+                  , tasty == 0.11.*
+                  , tasty-hunit
+                  , tasty-quickcheck 
+                  , QuickCheck
+
+    ghc-options:         -threaded
+    default-language:    Haskell2010 
+

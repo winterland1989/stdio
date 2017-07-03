@@ -7,11 +7,21 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE BangPatterns #-}
 
--- | Unified unboxed and boxed array operations using functional dependencies.
---
--- All operations are NOT bound checked, if you need checked operations please use "Data.Array.Checked".
--- It exports exactly same APIs so that you can switch between without pain.
---
+{-|
+Module      : Data.Array
+Description : Fast boxed and unboxed arrays
+Copyright   : (c) Winterland, 2017
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : non-portable
+
+Unified unboxed and boxed array operations using functional dependencies.
+
+All operations are NOT bound checked, if you need checked operations please use "Data.Array.Checked".
+It exports exactly same APIs so that you can switch between without pain.
+-}
+
 module Data.Array (
   -- * Arr typeclass
     Arr(..)
@@ -202,7 +212,7 @@ instance Arr MutableArray Array a where
 
     resizeMutableArr marr n = do
         marr' <- newArray n uninitialized
-        copyMutableArray marr' 0 marr 0 n
+        copyMutableArray marr' 0 marr 0 (sizeofMutableArray marr)
         return marr'
     {-# INLINE resizeMutableArr #-}
     shrinkMutableArr _ _ = return ()
@@ -284,7 +294,7 @@ instance Arr SmallMutableArray SmallArray a where
 
     resizeMutableArr marr n = do
         marr' <- newSmallArray n uninitialized
-        copySmallMutableArray marr' 0 marr 0 n
+        copySmallMutableArray marr' 0 marr 0 (sizeofSmallMutableArray marr)
         return marr'
     {-# INLINE resizeMutableArr #-}
     shrinkMutableArr _ _ = return ()
