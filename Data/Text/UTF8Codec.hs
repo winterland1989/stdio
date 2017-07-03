@@ -152,7 +152,7 @@ decodeCharReverse# :: ByteArray# -> Int# -> (# Char#, Int# #)
 decodeCharReverse# ba# idx# =
     let w1# = indexWord8Array# ba# idx#
     in if isContinueByte# w1#
-        then
+    then
         let w2# = indexWord8Array# ba# (idx# -# 1#)
         in if isContinueByte# w2#
         then
@@ -185,7 +185,7 @@ decodeCharLenReverse# :: ByteArray# -> Int# -> Int#
 decodeCharLenReverse# ba# idx# =
     let w1# = indexWord8Array# ba# idx#
     in if isContinueByte# w1#
-        then
+    then
         let w2# = indexWord8Array# ba# (idx# -# 1#)
         in if isContinueByte# w2#
         then
@@ -366,7 +366,6 @@ validateChar# ba# idx# end# =
                 else -1#
             | isTrue# (w1# `geWord#` 0xF5##) -> -1#
             | otherwise -> -1#
-  where
 
 between# :: Word# -> Word# -> Word# -> Bool
 {-# INLINE between# #-}
@@ -415,9 +414,14 @@ chr4# x1# x2# x3# x4# = chr# (z1# +# z2# +# z3# +# z4#)
     !z3# = uncheckedIShiftL# (y3# -# 0x80#) 6#
     !z4# = y4# -# 0x80#
 
-
--- |
-copyChar :: Int -> MutablePrimArray s Word8 -> Int -> PrimArray Word8 -> Int -> ST s ()
+-- | Unrolled copy loop for copying a utf8-encoded codepoint from source array to target array.
+--
+copyChar :: Int                       -- copy length, must be 1, 2, 3 or 4
+         -> MutablePrimArray s Word8  -- target array
+         -> Int                       -- writing offset
+         -> PrimArray Word8           -- source array
+         -> Int                       -- reading offset
+         -> ST s ()
 {-# INLINE copyChar #-}
 copyChar !l !mba !j !ba !i = case l of
     1 -> do writePrimArray mba j $ indexPrimArray ba i
