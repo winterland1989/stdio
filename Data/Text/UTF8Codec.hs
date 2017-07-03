@@ -125,7 +125,7 @@ decodeCharLen (PrimArray (ByteArray ba#)) (I# idx#) =
 -- This function is marked as @NOINLINE@ to reduce code size.
 --
 decodeCharLen# :: ByteArray# -> Int# -> Int#
-{-# NOINLINE decodeCharLen# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
+{-# INLINE decodeCharLen# #-} -- This branchy code make GHC impossible to fuse, DON'T inline
 decodeCharLen# ba# idx# = case indexWord8Array# ba# idx# of
     w1#
         | isTrue# (w1# `leWord#` 0x7F##) -> 1#

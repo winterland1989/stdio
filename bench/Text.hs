@@ -29,47 +29,48 @@ import Prelude hiding (reverse,head,tail,last,init,null
     ,zip,zipWith,unzip,notElem
     )
 
-text1000 :: T.Text
-text1000 = T.replicate 1000 (T.singleton '韩')
-
-stext1000 :: S.Text
-stext1000 = S.packN 1000 (List.replicate 1000 '韩')
-
-text :: [Benchmark]
-text = List.reverse
-    [ bgroup "pack" pack1000
-    , bgroup "unpack" unpack1000
-    , bgroup "last" last
-    , bgroup "length" length
-    , bgroup "map" map
+text :: T.Text -> S.Text -> [Benchmark]
+text t st = List.reverse
+    [ bgroup "pack"    (pack1000 t st)
+    , bgroup "unpack"  (unpack1000 t st)
+    , bgroup "last"    (last t st)
+    , bgroup "length"  (length t st)
+    , bgroup "map"     (map t st)
+    , bgroup "reverse" (reverse t st)
     ]
 
-unpack1000 :: [Benchmark]
-unpack1000 =
-    [ bench "text/unpack" $ nf T.unpack text1000
-    , bench "stdio text/unpack" $ nf S.unpack stext1000
+unpack1000 :: T.Text -> S.Text -> [Benchmark]
+unpack1000 t st =
+    [ bench "text/unpack" $ nf T.unpack t
+    , bench "stdio text/unpack" $ nf S.unpack st
     ]
 
-pack1000 :: [Benchmark]
-pack1000 =
+pack1000 :: T.Text -> S.Text -> [Benchmark]
+pack1000 t st =
     [ bench "text/pack" $ nf T.pack (List.replicate 1000 '0')
     , bench "stdio text/pack" $ nf S.pack (List.replicate 1000 '0')
     ]
 
-last :: [Benchmark]
-last =
-    [ bench "text/last" $ nf T.last text1000
-    , bench "stdio text/last" $ nf S.last stext1000
+last :: T.Text -> S.Text -> [Benchmark]
+last t st =
+    [ bench "text/last" $ nf T.last t
+    , bench "stdio text/last" $ nf S.last st
     ]
 
-length :: [Benchmark]
-length =
-    [ bench "text/length" $ nf T.length text1000
-    , bench "stdio text/length" $ nf S.length stext1000
+length :: T.Text -> S.Text -> [Benchmark]
+length t st =
+    [ bench "text/length" $ nf T.length t
+    , bench "stdio text/length" $ nf S.length st
     ]
 
-map :: [Benchmark]
-map =
-    [ bench "text/map" $ nf (T.map id) text1000
-    , bench "stdio text/map" $ nf (S.map id) stext1000
+map :: T.Text -> S.Text -> [Benchmark]
+map t st =
+    [ bench "text/map" $ nf (T.map id) t
+    , bench "stdio text/map" $ nf (S.map id) st
+    ]
+
+reverse :: T.Text -> S.Text -> [Benchmark]
+reverse t st =
+    [ bench "text/reverse" $ nf T.reverse t
+    , bench "stdio text/reverse" $ nf S.reverse st
     ]

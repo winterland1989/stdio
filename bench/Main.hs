@@ -17,11 +17,19 @@ import Builder
 import Bytes
 import Text
 import BitTwiddle
+import System.IO (readFile)
+import qualified "text" Data.Text as T
+import qualified "stdio" Data.Text as S
 
 main :: IO ()
-main = defaultMain $ List.reverse
-    [ bgroup "Bytes" bytes
-    , bgroup "Builder" builder
-    , bgroup "Text" text
-    , bgroup "BitTwiddle" bitTwiddle
-    ]
+main = do
+    str <- readFile "test/utf8-sample.txt"
+    let t = T.pack str
+        st = S.pack str
+    defaultMain $ List.reverse  -- uncomment this reverse to run last bench, useful for dev
+        [ bgroup "Bytes" bytes
+        , bgroup "Builder" builder
+        , bgroup "BitTwiddle" bitTwiddle
+        , bgroup "Text" (text t st)
+        ]
+
