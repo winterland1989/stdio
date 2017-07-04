@@ -6,6 +6,39 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE CPP #-}
 
+{-|
+Module      : Data.Primitive.PrimArray
+Description : Primitive arrays tagged with element type
+Copyright   : (c) Winterland, 2017
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : non-portable
+
+This module provide primitive arrays tagged with element type, all offset, length .. ,etc. is based on
+elemment not byte, and operations are NOT bound checked.
+
+You can define new primitive array by defining 'Prim' instances, but since GHC heap array are word aligned,
+It's not recommand to use 'PrimArray' with a type which alignment is not submultiple of word size. Otherwise
+you have to use 'newAlignedPinnedPrimArray' to make a new array for such a type.
+
+Here is an example of a RGB pixel 'Prim' instance.
+
+@
+  data Pixel = Pixel Word8 Word8 Word8 -- you may want to unpack these
+  instance Prim Pixel where
+    sizeOf# _ = 3#
+    alignment# _ = 1#
+    indexByteArray# ba# i# = Pixel (indexByteArray# ba# i#)
+                                (indexByteArray# ba# (i# +# 1#))
+                                (indexByteArray# ba# (i# +# 2#))
+    ...
+@
+
+Now you can use 'PrimArray Pixel' with either this module or "Data.Array/Data.Vector".
+-}
+
+
 module Data.Primitive.PrimArray (
   -- * Types
   PrimArray(..), MutablePrimArray(..),

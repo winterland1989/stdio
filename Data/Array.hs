@@ -143,8 +143,14 @@ class Arr (marr :: * -> * -> *) (arr :: * -> * ) a | arr -> marr, marr -> arr wh
     -- | Size of mutable array.
     sizeofMutableArr :: (PrimMonad m, PrimState m ~ s) => marr s a -> m Int
 
-    -- | Is two immutable array are reference equal.
+    -- | Is two immutable array are referencing the same one.
+    --
+    -- Note that 'sameArr' 's result may change depending on compiler's optimizations, for example
+    -- @let arr = runST ... in arr `sameArr` arr@ may return false if compiler decides to
+    -- inline it.
+    --
     -- See https://ghc.haskell.org/trac/ghc/ticket/13908 for more background.
+    --
     sameArr :: arr a -> arr a -> Bool
 
 instance Arr MutableArray Array a where
