@@ -65,6 +65,7 @@ bytes = -- List.reverse
     , bgroup "foldl'" foldl'
     , bgroup "foldr" foldr
     , bgroup "foldr'" foldr'
+    , bgroup "maximum" maximum
     , bgroup "concatMap" concatMap
     , bgroup "all" all
     , bgroup "all" any
@@ -179,6 +180,12 @@ foldr =
     [ bench "bytestring/foldr" $ nf (\ x -> B.foldr (+) wordZ x) bytestring1000
     , bench "vector/foldr"     $ nf (VU.foldr (+) wordZ) vector1000
     , bench "bytes/foldr"      $ nf (List.foldr (+) wordZ . V.unpack) bytes1000
+    ]
+
+maximum :: [Benchmark]
+maximum =
+    [ bench "bytestring/maximum" $ nf B.maximum bytestring1000
+    , bench "bytes/maximum"      $ nf V.maximum bytes1000
     ]
 
 concatMap :: [Benchmark]

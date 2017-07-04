@@ -26,7 +26,7 @@ main = do
     str <- readFile "test/utf8-sample.txt"
     let t = T.pack str
         st = S.pack str
-    defaultMain $ List.reverse  -- uncomment this reverse to run last bench, useful for dev
+    defaultMain -- $ List.reverse  -- uncomment this reverse bench, useful for dev
         [ bgroup "Bytes" bytes
         , bgroup "Builder" builder
         , bgroup "BitTwiddle" bitTwiddle

@@ -103,7 +103,7 @@ module Data.Vector (
   , slice
   , splitAt
 
-  -- * Searching ByteStrings
+  -- * Searching vectors
 
   -- ** Searching by equality
   , elem
@@ -362,15 +362,15 @@ type Bytes = PrimVector Word8
 -- | Conversion between 'Word8' and 'Char'. Should compile to a no-op.
 --
 w2c :: Word8 -> Char
-w2c (W8# w#) = C# (chr# (word2Int# w#))
 {-# INLINE w2c #-}
+w2c (W8# w#) = C# (chr# (word2Int# w#))
 
 -- | Unsafe conversion between 'Char' and 'Word8'. This is a no-op and
 -- silently truncates to 8 bits Chars > '\255'. It is provided as
 -- convenience for PrimVector construction.
 c2w :: Char -> Word8
-c2w (C# c#) = W8# (int2Word# (ord# c#))
 {-# INLINE c2w #-}
+c2w (C# c#) = W8# (int2Word# (ord# c#))
 
 bAsc :: Q.QuasiQuoter
 bAsc = Q.QuasiQuoter
@@ -380,12 +380,12 @@ bAsc = Q.QuasiQuoter
     (error "Cannot use bAsc as a dec")
 
 bytesFromAddr :: Int -> Addr# -> Bytes
+{-# NOINLINE bytesFromAddr #-} -- don't dump every literal with this code
 bytesFromAddr l addr# = unsafeDupablePerformIO $ do
     mba <- newArr l
     copyMutablePrimArrayFromPtr mba 0 (Ptr addr#) l
     ba <- unsafeFreezePrimArray mba
     return (PrimVector ba 0 l)
-{-# NOINLINE bytesFromAddr #-} -- don't dump every literal with this code
 
 pattern BytesPat ba s l <- (toArr -> (PrimArray ba,s,l))
 
@@ -397,13 +397,13 @@ create :: Vec v a
        => Int  -- length in elements of type @a@
        -> (forall s. MArray v s a -> ST s ())  -- initialization function
        -> v a
+{-# INLINE create #-}
 create l fill = runST (do
         mba <- newArr l
         fill mba
         ba <- unsafeFreezeArr mba
         return $! fromArr ba 0 l
     )
-{-# INLINE create #-}
 
 -- | Create a vector, return both the vector and the monadic result during creating.
 --
@@ -411,6 +411,7 @@ creating :: Vec v a
          => Int  -- length in elements of type @a@
          -> (forall s. MArray v s a -> ST s b)  -- initialization function
          -> (b, v a)
+{-# INLINE creating #-}
 creating l fill = runST (do
         mba <- newArr l
         b <- fill mba
@@ -418,7 +419,6 @@ creating l fill = runST (do
         let !v = fromArr ba 0 l
         return (b, v)
     )
-{-# INLINE creating #-}
 
 -- | Create a vector up to a specific length.
 --
@@ -464,29 +464,29 @@ copy (VecPat ba s l) = create l (\ mba -> copyArr mba 0 ba s l)
 -- Alias for @'packN' 'defaultInitSize'@.
 --
 pack :: Vec v a => [a] -> v a
-pack = packN defaultInitSize
 {-# INLINE pack #-}
+pack = packN defaultInitSize
 
 -- | The chunk size used for I\/O. Currently set to 32k, less the memory management overhead
 defaultChunkSize :: Int
-defaultChunkSize = 32 * 1024 - chunkOverhead
 {-# INLINE defaultChunkSize #-}
+defaultChunkSize = 32 * 1024 - chunkOverhead
 
 -- | The recommended chunk size. Currently set to 4k, less the memory management overhead
 smallChunkSize :: Int
-smallChunkSize = 4 * 1024 - chunkOverhead
 {-# INLINE smallChunkSize #-}
+smallChunkSize = 4 * 1024 - chunkOverhead
 
 -- | @defaultInitSize = 30
 --
 defaultInitSize :: Int
-defaultInitSize = 30
 {-# INLINE defaultInitSize #-}
+defaultInitSize = 30
 
 -- | The memory management overhead. Currently this is tuned for GHC only.
 chunkOverhead :: Int
-chunkOverhead = 2 * sizeOf (undefined :: Int)
 {-# INLINE chunkOverhead #-}
+chunkOverhead = 2 * sizeOf (undefined :: Int)
 
 -- | /O(n)/ Convert a list into a vector with an approximate size.
 --
@@ -496,6 +496,7 @@ chunkOverhead = 2 * sizeOf (undefined :: Int)
 -- This function is a /good consumer/ in the sense of build/foldr fusion.
 --
 packN :: forall v a. Vec v a => Int -> [a] -> v a
+{-# INLINE packN #-}
 packN n0 = \ ws0 -> runST (do mba <- newArr n0
                               (IPair i mba') <- foldlM go (IPair 0 mba) ws0
                               shrinkMutableArr mba' i
@@ -517,21 +518,21 @@ packN n0 = \ ws0 -> runST (do mba <- newArr n0
                 return (IPair (i+1) mba')
 
 data IPair a = IPair {-# UNPACK #-}!Int a
-{-# INLINE packN #-}
 
 -- | /O(n)/
 --
 -- Alias for @'packRN' 'defaultInitSize'@.
 --
 packR :: Vec v a => [a] -> v a
-packR = packRN defaultInitSize
 {-# INLINE packR #-}
+packR = packRN defaultInitSize
 
 -- | /O(n)/ 'packN' in reverse order.
 --
 -- This function is a /good consumer/ in the sense of build/foldr fusion.
 --
 packRN :: forall v a. Vec v a => Int -> [a] -> v a
+{-# INLINE packRN #-}
 packRN n0 = \ ws0 -> runST (do mba <- newArr n0
                                (IPair i mba') <- foldlM go (IPair (n0-1) mba) ws0
                                ba <- unsafeFreezeArr mba'
@@ -551,7 +552,6 @@ packRN n0 = \ ws0 -> runST (do mba <- newArr n0
                 copyMutableArr mba' n mba 0 n
                 writeArr mba' (n-1) x
                 return (IPair (n-2) mba')
-{-# INLINE packRN #-}
 
 -- | /O(n)/ Convert vector to a list.
 --
@@ -615,97 +615,98 @@ unpackRFB (VecPat ba s l) k z = go (s + l - 1)
 -- |  /O(1)/ The length of a vector.
 --
 length :: Vec v a => v a -> Int
-length (VecPat _ _ l) = l
 {-# INLINE length #-}
+length (VecPat _ _ l) = l
 
 -- | /O(1)/ Test whether a vector is empty.
 --
 null :: Vec v a => v a -> Bool
-null v = length v == 0
 {-# INLINE null #-}
+null v = length v == 0
 
 -- | /O(m+n)/
 --
 append :: Vec v a => v a -> v a -> v a
+{-# INLINE append #-}
 append (VecPat _ _ 0) b                    = b
 append a                (VecPat _ _ 0)     = a
 append (VecPat baA sA lA) (VecPat baB sB lB) = create (lA+lB) $ \ mba -> do
     copyArr mba 0  baA sA lA
     copyArr mba lA baB sB lB
-{-# INLINE append #-}
 
 -- | /O(n)/ 'cons' is analogous to (:) for lists, but of different
 -- complexity, as it requires making a copy.
 --
 cons :: Vec v a => a -> v a -> v a
+{-# INLINE cons #-}
 cons x (VecPat ba s l) = create (l+1) $ \ mba -> do
     writeArr mba 0 x
     copyArr mba 1 ba s l
-{-# INLINE cons #-}
 
 -- | /O(n)/ Append a byte to the end of a vector
 --
 snoc :: Vec v a => v a -> a -> v a
+{-# INLINE snoc #-}
 snoc (VecPat ba s l) x = create (l+1) $ \ mba -> do
     copyArr mba 0 ba s l
     writeArr mba l x
-{-# INLINE snoc #-}
 
 -- | /O(1)/ Extract the head and tail of a PrimVector, returning Nothing
 -- if it is empty.
 --
 uncons :: Vec v a => v a -> Maybe (a, v a)
+{-# INLINE uncons #-}
 uncons (VecPat ba s l)
     | l <= 0    = Nothing
     | otherwise = let v = fromArr ba (s+1) (l-1) in v `seq` Just (indexArr ba s, v)
-{-# INLINE uncons #-}
 
 -- | /O(1)/ Extract the 'init' and 'last' of a PrimVector, returning Nothing
 -- if it is empty.
 --
 unsnoc :: Vec v a => v a -> Maybe (v a, a)
+{-# INLINE unsnoc #-}
 unsnoc (VecPat ba s l)
     | l <= 0    = Nothing
     | otherwise = let v = fromArr ba s (l-1) in v `seq` Just (v, indexArr ba (s+l-1))
-{-# INLINE unsnoc #-}
 
 -- | /O(1)/ Extract the first element of a PrimVector, which must be non-empty.
 -- An exception will be thrown in the case of an empty PrimVector.
 --
 head :: Vec v a => v a -> a
+{-# INLINE head #-}
 head (VecPat ba s l)
     | l <= 0    = errorEmptyVector "head"
     | otherwise = indexArr ba s
-{-# INLINE head #-}
 
 -- | /O(1)/ Extract the elements after the head of a PrimVector, which must be non-empty.
 -- An exception will be thrown in the case of an empty PrimVector.
 tail :: Vec v a => v a -> v a
+{-# INLINE tail #-}
 tail (VecPat ba s l)
     | l <= 0    = errorEmptyVector "tail"
     | otherwise = fromArr ba (s+1) (l-1)
-{-# INLINE tail #-}
 
 -- | /O(1)/ Extract the first element of a PrimVector, which must be non-empty.
 -- An exception will be thrown in the case of an empty PrimVector.
 --
 last :: Vec v a => v a -> a
+{-# INLINE last #-}
 last (VecPat ba s l)
     | l <= 0    = errorEmptyVector "last"
     | otherwise = indexArr ba (s+l-1)
-{-# INLINE last #-}
 
 -- | /O(1)/ Extract the elements after the head of a PrimVector, which must be non-empty.
 -- An exception will be thrown in the case of an empty PrimVector.
 init :: Vec v a => v a -> v a
+{-# INLINE init #-}
 init (VecPat ba s l)
     | l <= 0    = errorEmptyVector "init"
     | otherwise = fromArr ba s (l-1)
-{-# INLINE init #-}
 
 --------------------------------------------------------------------------------
 
 map :: forall u v a b. (Vec u a, Vec v b) => (a -> b) -> u a -> v b
+{-# INLINE map #-}
 map f = \ (VecPat ba s l) -> create l (go ba l s 0)
   where
     go :: IArray u a -> Int -> Int -> Int -> MArray v s b -> ST s ()
@@ -713,11 +714,11 @@ map f = \ (VecPat ba s l) -> create l (go ba l s 0)
                          | otherwise = do x <- indexArrM ba i
                                           writeArr mba j (f x)
                                           go ba l (i+1) (j+1) mba
-{-# INLINE map #-}
 
 -- | /O(n)/ 'reverse' @xs@ efficiently returns the elements of @xs@ in reverse order.
 --
 reverse :: forall v a. (Vec v a) => v a -> v a
+{-# INLINE reverse #-}
 reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
   where
     go :: IArray v a -> Int -> Int -> MArray v s a -> ST s ()
@@ -730,7 +731,6 @@ reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
                          go ba (i+4) (j-4) mba
                      | otherwise = do indexArrM ba i >>= writeArr mba j
                                       go ba (i+1) (j-1) mba
-{-# INLINE reverse #-}
 
 -- | /O(n)/ The 'intersperse' function takes an element and a
 -- vector and \`intersperses\' that element between the elements of
@@ -738,6 +738,7 @@ reverse = \ (VecPat ba s l) -> create l (go ba s (l-1))
 -- Lists.
 --
 intersperse :: forall v a. Vec v a => a -> v a -> v a
+{-# INLINE intersperse #-}
 intersperse x = \ v@(VecPat ba s l) ->
     if l < 2  then v else create (2*l-1) (go ba s 0 (s+l-1))
    where
@@ -763,22 +764,22 @@ intersperse x = \ v@(VecPat ba s l) ->
             writeArr mba j =<< indexArrM ba i
             writeArr mba (j+1) x
             go ba (i+1) (j+2) end mba
-{-# INLINE intersperse #-}
 
--- | /O(n)/ The 'intercalate' function takes a 'PrimVector' and a list of
--- 'PrimVector's and concatenates the list after interspersing the first
+-- | /O(n)/ The 'intercalate' function takes a vector and a list of
+-- vectors and concatenates the list after interspersing the first
 -- argument between each element of the list.
 --
--- Note: 'intercalate' will force the entire 'PrimVector' list.
+-- Note: 'intercalate' will force the entire vector list.
 --
 intercalate :: Vec v a => v a -> [v a] -> v a
-intercalate s = concat . List.intersperse s
 {-# INLINE intercalate #-}
+intercalate s = concat . List.intersperse s
 
 -- | /O(n)/ intercalateElem. An efficient way to join [PrimVector]
 -- with an element. It's faster than @intercalate (singleton c)@.
 --
 intercalateElem :: Vec v a => a -> [v a] -> v a
+{-# INLINE intercalateElem #-}
 intercalateElem w = \ vs -> create (len vs) (copy 0 vs)
   where
     len []                      = 0
@@ -790,15 +791,14 @@ intercalateElem w = \ vs -> create (len vs) (copy 0 vs)
         let !i' = i + l
         copyArr mba i ba s l
         copy i' vs mba
-{-# INLINE intercalateElem #-}
 
 -- | The 'transpose' function transposes the rows and columns of its
--- 'PrimVector' argument.
+-- vector argument.
 --
 transpose :: Vec v a => [v a] -> [v a]
+{-# INLINE transpose #-}
 transpose vs =
     List.map (packN (List.length vs)) . List.transpose . List.map unpack $ vs
-{-# INLINE transpose #-}
 
 --------------------------------------------------------------------------------
 --
@@ -806,32 +806,32 @@ transpose vs =
 --
 
 foldl' :: (Vec v a) => (b -> a -> b) -> b -> v a -> b
+{-# INLINE foldl' #-}
 foldl' f z = \ (VecPat ba s l) -> go z s (s+l) ba
   where
     -- tail recursive; traverses array left to right
     go !acc !p !q ba | p >= q    = acc
                      | otherwise = go (f acc (indexArr ba p)) (p + 1) q ba
-{-# INLINE foldl' #-}
 
-foldl1' :: forall v a. Vec v a => (a -> a -> a) -> a -> v a -> a
-foldl1' f z = \ (VecPat ba s l) ->
+foldl1' :: forall v a. Vec v a => (a -> a -> a) -> v a -> a
+{-# INLINE foldl1' #-}
+foldl1' f = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "foldl1'"
               else foldl' f (indexArr ba s) (fromArr ba (s+1) (l-1) :: v a)
-{-# INLINE foldl1' #-}
 
 foldr' :: Vec v a => (a -> b -> b) -> b -> v a -> b
+{-# INLINE foldr' #-}
 foldr' f z =  \ (VecPat ba s l) -> go z (s+l-1) s ba
   where
     -- tail recursive; traverses array right to left
     go !acc !p !q ba | p < q     = acc
                      | otherwise = go (f (indexArr ba p) acc) (p - 1) q ba
-{-# INLINE foldr' #-}
 
-foldr1' :: forall v a. Vec v a => (a -> a -> a) -> a -> v a -> a
-foldr1' f z = \ (VecPat ba s l) ->
+foldr1' :: forall v a. Vec v a => (a -> a -> a) -> v a -> a
+{-# INLINE foldr1' #-}
+foldr1' f = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "foldr1'"
               else foldl' f (indexArr ba (s+l-1)) (fromArr ba s (l-1) :: v a)
-{-# INLINE foldr1' #-}
 
 --------------------------------------------------------------------------------
 --
@@ -839,10 +839,11 @@ foldr1' f z = \ (VecPat ba s l) ->
 --
 -- | /O(n)/ Concatenate a list of primitive vector.
 --
--- Note: 'concat' have to force the entire list to filter out empty 'PrimVector' and calculate
+-- Note: 'concat' have to force the entire list to filter out empty vector and calculate
 -- the length for allocation.
 --
 concat :: forall v a . Vec v a => [v a] -> v a
+{-# INLINE concat #-}
 concat vs = case pre 0 0 vs of
     (0, _)  -> empty
     (1, _)  -> let Just v = List.find (not . null) vs in v
@@ -861,36 +862,35 @@ concat vs = case pre 0 0 vs of
                                  !i' = i - l
                              when (l /= 0) (copyArr mba i' ba s l)
                              copy vs i' mba
-{-# INLINE concat #-}
 
--- | Map a function over a 'PrimVector' and concatenate the results
+-- | Map a function over a vector and concatenate the results
 concatMap :: Vec v a => (a -> v a) -> v a -> v a
-concatMap f = concat . foldr' ((:) . f) []
 {-# INLINE concatMap #-}
+concatMap f = concat . foldr' ((:) . f) []
 
 -- | /O(n)/ Applied to a predicate and a PrimVector, 'any' determines if
--- any element of the 'PrimVector' satisfies the predicate.
+-- any element of the vector satisfies the predicate.
 any :: Vec v a => (a -> Bool) -> v a -> Bool
-any f = List.any f . unpack
 {-# INLINE any #-}
+any f = List.any f . unpack
 
--- | /O(n)/ Applied to a predicate and a 'PrimVector', 'all' determines
--- if all elements of the 'PrimVector' satisfy the predicate.
+-- | /O(n)/ Applied to a predicate and a vector, 'all' determines
+-- if all elements of the vector satisfy the predicate.
 all :: Vec v a => (a -> Bool) -> v a -> Bool
-all f = List.all f . unpack
 {-# INLINE all #-}
+all f = List.all f . unpack
 
--- | /O(n)/ 'maximum' returns the maximum value from a 'PrimVector'
--- This function will fuse.
--- An exception will be thrown in the case of an empty PrimVector.
+-- | /O(n)/ 'maximum' returns the maximum value from a vector
+-- It's defined with 'foldl1'', an exception will be thrown in the case of an empty PrimVector.
 maximum :: (Vec v a, Ord a) => v a -> a
-maximum = undefined
+{-# INLINE maximum #-}
+maximum = foldl1' max
 
--- | /O(n)/ 'minimum' returns the minimum value from a 'PrimVector'
--- This function will fuse.
--- An exception will be thrown in the case of an empty PrimVector.
+-- | /O(n)/ 'minimum' returns the minimum value from a 'vector'
+-- It's defined with 'foldl1'', an exception will be thrown in the case of an empty PrimVector.
 minimum :: (Vec v a, Ord a) => v a -> a
-minimum = undefined
+{-# INLINE minimum #-}
+minimum = foldl1' min
 
 --------------------------------------------------------------------------------
 -- Scans
@@ -905,6 +905,7 @@ minimum = undefined
 -- > last (scanl f z xs) == foldl f z xs.
 --
 scanl :: forall v u a b. (Vec v a, Vec u b) => (b -> a -> b) -> b -> v a -> u b
+{-# INLINE scanl #-}
 scanl f z = \ (VecPat ba s l) ->
     create (l+1) (\ mba -> writeArr mba 0 z >> go ba z s 1 l mba)
   where
@@ -915,22 +916,21 @@ scanl f z = \ (VecPat ba s l) ->
             let acc' = acc `f` (indexArr ba i)
             writeArr mba j acc'
             go ba acc' (i+1) (j+1) l mba
-{-# INLINE scanl #-}
 
 -- | 'scanl1' is a variant of 'scanl' that has no starting value argument.
--- This function will fuse.
 --
 -- > scanl1 f [x1, x2, ...] == [x1, x1 `f` x2, ...]
 --
 scanl1 :: forall v a. Vec v a => (a -> a -> a) -> v a -> v a
+{-# INLINE scanl1 #-}
 scanl1 f = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "scanl1"
               else scanl f (indexArr ba s) (fromArr ba (s+1) (l-1) :: v a)
-{-# INLINE scanl1 #-}
 
 -- | scanr is the right-to-left dual of scanl.
 --
 scanr :: forall v u a b. (Vec v a, Vec u b) => (a -> b -> b) -> b -> v a -> u b
+{-# INLINE scanr #-}
 scanr f z = \ (VecPat ba s l) ->
     create (l+1) (\ mba -> writeArr mba l z >> go ba z (s+l-1) (l-1) mba)
   where
@@ -941,14 +941,13 @@ scanr f z = \ (VecPat ba s l) ->
             let acc' = indexArr ba i `f` acc
             writeArr mba j acc'
             go ba acc' (i-1) (j-1) mba
-{-# INLINE scanr #-}
 
 -- | 'scanr1' is a variant of 'scanr' that has no starting value argument.
 scanr1 :: forall v a. Vec v a => (a -> a -> a) -> v a -> v a
+{-# INLINE scanr1 #-}
 scanr1 f = \ (VecPat ba s l) ->
     if l <= 0 then errorEmptyVector "scanl1"
               else scanr f (indexArr ba (s+l-1)) (fromArr ba s (l-1) :: v a)
-{-# INLINE scanr1 #-}
 
 --------------------------------------------------------------------------------
 -- Accumulating maps
@@ -959,6 +958,7 @@ scanr1 f = \ (VecPat ba s l) ->
 -- final value of this accumulator together with the new list.
 --
 mapAccumL :: forall u v a b c. (Vec u b, Vec v c) => (a -> b -> (a, c)) -> a -> u b -> (a, v c)
+{-# INLINE mapAccumL #-}
 mapAccumL f z = \ (VecPat ba s l) -> creating l (go z s 0 (s+l) ba)
   where
     go :: a -> Int -> Int -> Int -> IArray u b -> MArray v s c -> ST s a
@@ -968,7 +968,6 @@ mapAccumL f z = \ (VecPat ba s l) -> creating l (go z s 0 (s+l) ba)
             let (acc', c) = acc `f` indexArr ba i
             writeArr mba j c
             go acc' (i+1) (j+1) end ba mba
-{-# INLINE mapAccumL #-}
 
 -- | The 'mapAccumR' function behaves like a combination of 'map' and
 -- 'foldr'; it applies a function to each element of a primitive vector,
@@ -976,6 +975,7 @@ mapAccumL f z = \ (VecPat ba s l) -> creating l (go z s 0 (s+l) ba)
 -- final value of this accumulator together with the new primitive vector.
 --
 mapAccumR :: forall u v a b c. (Vec u b, Vec v c) => (a -> b -> (a, c)) -> a -> u b -> (a, v c)
+{-# INLINE mapAccumR #-}
 mapAccumR f z = \ (VecPat ba s l) -> creating l (go z (s+l-1) s ba)
   where
     go :: a -> Int -> Int -> IArray u b -> MArray v s c -> ST s a
@@ -985,9 +985,8 @@ mapAccumR f z = \ (VecPat ba s l) -> creating l (go z (s+l-1) s ba)
             let (acc', c) = acc `f` indexArr ba i
             writeArr mba (i-s) c
             go acc' (i-1) s ba mba
-{-# INLINE mapAccumR #-}
 
---  Generating and unfolding primitive vector
+--  Generating and unfolding vector.
 --
 ---- | /O(n)/ 'replicate' @n x@ is a primitive vector of length @n@ with @x@
 -- the value of every element. The following holds:
@@ -997,13 +996,13 @@ mapAccumR f z = \ (VecPat ba s l) -> creating l (go z (s+l-1) s ba)
 -- This implemenation uses @setByteArray#@.
 --
 replicate :: (Vec v a) => Int -> a -> v a
-replicate n x = create n (\ mba -> setArr mba 0 n x)
 {-# INLINE replicate #-}
+replicate n x = create n (\ mba -> setArr mba 0 n x)
 
 -- | /O(n)/, where /n/ is the length of the result.  The 'unfoldr'
 -- function is analogous to the List \'unfoldr\'.  'unfoldr' builds a
 -- primitive vector from a seed value. The function takes the element and
--- returns 'Nothing' if it is done producing the primitive vector or returns
+-- returns 'Nothing' if it is done producing the vector or returns
 -- 'Just' @(a,b)@, in which case, @a@ is the next byte in the string,
 -- and @b@ is the seed value for further production.
 --
@@ -1013,10 +1012,10 @@ replicate n x = create n (\ mba -> setArr mba 0 n x)
 -- > == pack [0, 1, 2, 3, 4, 5]
 --
 unfoldr :: Vec u b => (a -> Maybe (b, a)) -> a -> u b
-unfoldr f = pack . List.unfoldr f
 {-# INLINE unfoldr #-}
+unfoldr f = pack . List.unfoldr f
 
--- | /O(n)/ Like 'unfoldr', 'unfoldrN' builds a ByteString from a seed
+-- | /O(n)/ Like 'unfoldr', 'unfoldrN' builds a vector from a seed
 -- value.  However, the length of the result is limited by the first
 -- argument to 'unfoldrN'.  This function is more efficient than 'unfoldr'
 -- when the maximum length of the result is known.
@@ -1026,6 +1025,7 @@ unfoldr f = pack . List.unfoldr f
 -- > fst (unfoldrN n f s) == take n (unfoldr f s)
 --
 unfoldrN :: forall v a b. Vec v b => Int -> (a -> Maybe (b, a)) -> a -> (v b, Maybe a)
+{-# INLINE unfoldrN #-}
 unfoldrN n f
     | n < 0     = \ z -> (empty, Just z)
     | otherwise = \ z ->
@@ -1039,28 +1039,27 @@ unfoldrN n f
           Nothing        -> return (Nothing, i)
           Just (x, acc') -> do writeArr mba i x
                                go acc' (i+1) mba
-{-# INLINE unfoldrN #-}
 
 -- ---------------------------------------------------------------------
 -- Substrings
 
--- | /O(1)/ 'take' @n@, applied to a ByteString @xs@, returns the prefix
+-- | /O(1)/ 'take' @n@, applied to a vector @xs@, returns the prefix
 -- of @xs@ of length @n@, or @xs@ itself if @n > 'length' xs@.
 take :: Vec v a => Int -> v a -> v a
+{-# INLINE take #-}
 take n v@(VecPat ba s l)
     | n <= 0    = empty
     | n >= l    = v
     | otherwise = fromArr ba s n
-{-# INLINE take #-}
 
 -- | /O(1)/ 'drop' @n xs@ returns the suffix of @xs@ after the first @n@
 -- elements, or @[]@ if @n > 'length' xs@.
 drop :: Vec v a => Int -> v a -> v a
+{-# INLINE drop #-}
 drop n v@(VecPat ba s l)
     | n <= 0    = v
     | n >= l    = empty
     | otherwise = fromArr ba (s+n) (l-n)
-{-# INLINE drop #-}
 
 
 -- | /O(1)/ Extract a sub-range vector with give start index and length.
@@ -1074,6 +1073,7 @@ drop n v@(VecPat ba s l)
 -- @
 --
 slice :: Vec v a => Int -> Int -> v a -> v a
+{-# INLINE slice #-}
 slice s' l' (VecPat arr s l) | l'' == 0  = empty
                              | otherwise = fromArr arr s'' l''
   where
@@ -1094,6 +1094,7 @@ slice s' l' (VecPat arr s l) | l'' == 0  = empty
 -- @
 --
 (|..|) :: Vec v a => v a -> (Int, Int) -> v a
+{-# INLINE (|..|) #-}
 (VecPat arr s l) |..| (s1, s2) | s1' <= s2' = empty
                                | otherwise  = fromArr arr s1' (s2' - s1')
   where
@@ -1102,13 +1103,14 @@ slice s' l' (VecPat arr s l) | l'' == 0  = empty
 
 -- | /O(1)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
 splitAt :: Vec v a => Int -> v a -> (v a, v a)
+{-# INLINE splitAt #-}
 splitAt s' (VecPat arr s l) = let v1 = fromArr arr s'' (s''-s)
                                   v2 = fromArr arr s'' (s+l-s'')
                               in v1 `seq` v2 `seq` (v1, v2)
   where s'' = rangeCut (s+s') s (s+l)
 
 --------------------------------------------------------------------------------
--- * Searching ByteStrings
+-- * Searching vectors
 
 -- ** Searching by equality
 elem :: Vec v a => a -> v a -> Bool
@@ -1203,14 +1205,14 @@ partition = undefined
 -- Common up near identical calls to `error' to reduce the number
 -- constant strings created when compiled:
 errorEmptyVector :: String -> a
-errorEmptyVector fun = error ("Data.PrimVector." ++ fun ++ ": empty PrimVector")
 {-# NOINLINE errorEmptyVector #-}
+errorEmptyVector fun = error ("Data.PrimVector." ++ fun ++ ": empty PrimVector")
 
 rangeCut :: Int -> Int -> Int -> Int
+{-# INLINE rangeCut #-}
 rangeCut !r !min !max | r < min = min
                       | r > max = max
                       | otherwise = r
-{-# INLINE rangeCut #-}
 
 --------------------------------------------------------------------------------
 
