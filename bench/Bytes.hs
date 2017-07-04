@@ -53,6 +53,7 @@ wordZ = 0
 bytes :: [Benchmark]
 bytes = -- List.reverse
     [ bgroup "singleton" singleton
+    , bgroup "map" map
     , bgroup "eq" eq
     , bgroup "pack/100 elems"  packSmall
     , bgroup "pack/10000 elems"  packLarge
@@ -65,6 +66,7 @@ bytes = -- List.reverse
     , bgroup "foldl'" foldl'
     , bgroup "foldr" foldr
     , bgroup "foldr'" foldr'
+    , bgroup "concat" concat
     , bgroup "maximum" maximum
     , bgroup "concatMap" concatMap
     , bgroup "all" all
@@ -186,6 +188,12 @@ maximum :: [Benchmark]
 maximum =
     [ bench "bytestring/maximum" $ nf B.maximum bytestring1000
     , bench "bytes/maximum"      $ nf V.maximum bytes1000
+    ]
+
+concat :: [Benchmark]
+concat =
+    [ bench "bytestring/concat"  $ nf B.concat (List.replicate 1000 bytestring1000)
+    , bench "bytes/concat"       $ nf V.concat (List.replicate 1000 bytes1000)
     ]
 
 concatMap :: [Benchmark]

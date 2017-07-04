@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Property.Vector where
 
@@ -13,7 +14,21 @@ import qualified Data.List as List
 
 propertyVector :: TestTree
 propertyVector = testGroup "vector property" [
-        testProperty "unpack . pack == id" . property $ \ xs ->
+        testProperty "vector eq == list eq" . property $ \ xs ys ->
+            (V.pack @V.Vector @Int xs == V.pack ys) === (xs == ys)
+    ,   testProperty "vector eq == list eq" . property $ \ xs ys ->
+            (V.pack @V.PrimVector @Int xs == V.pack ys) === (xs == ys)
+    ,   testProperty "vector eq == list eq" . property $ \ xs ys ->
+            (V.pack @V.PrimVector @Word8 xs == V.pack ys) === (xs == ys)
+
+    ,   testProperty "vector compare == list compare" . property $ \ xs ys ->
+            (V.pack @V.Vector @Int xs `compare` V.pack ys) === (xs `compare` ys)
+    ,   testProperty "vector compare `compare` list compare" . property $ \ xs ys ->
+            (V.pack @V.PrimVector @Int xs `compare` V.pack ys) === (xs `compare` ys)
+    ,   testProperty "vector compare `compare` list compare" . property $ \ xs ys ->
+            (V.pack @V.PrimVector @Word8 xs `compare` V.pack ys) === (xs `compare` ys)
+
+    ,   testProperty "unpack . pack == id" . property $ \ xs ->
             (V.unpack @V.Vector @Int) (V.pack xs)  === xs
     ,   testProperty "unpack . pack == id" . property $ \ xs ->
             (V.unpack @V.PrimVector @Int) (V.pack xs)  === xs
@@ -28,18 +43,18 @@ propertyVector = testGroup "vector property" [
             (V.unpackR @V.PrimVector @Word8) (V.packR xs)  === xs
 
     ,   testProperty "pack == packN XX" . property $ \ xs d ->
-            (V.pack @V.Vector @Int xs) === (V.packN (getPositive d) xs)
+            (V.pack @V.Vector @Int xs) === (V.packN d xs)
     ,   testProperty "pack == packN XX" . property $ \ xs d ->
-            (V.pack @V.PrimVector @Int xs) === (V.packN (getPositive d) xs)
+            (V.pack @V.PrimVector @Int xs) === (V.packN d xs)
     ,   testProperty "pack == packN XX" . property $ \ xs d ->
-            (V.pack @V.PrimVector @Word8 xs) === (V.packN (getPositive d) xs)
+            (V.pack @V.PrimVector @Word8 xs) === (V.packN d xs)
 
     ,   testProperty "packR == packRN XX" . property $ \ xs d ->
-            (V.packR @V.Vector @Int xs) === (V.packRN (getPositive d) xs)
+            (V.packR @V.Vector @Int xs) === (V.packRN d xs)
     ,   testProperty "packR == packRN XX" . property $ \ xs d ->
-            (V.packR @V.PrimVector @Int xs) === (V.packRN (getPositive d) xs)
+            (V.packR @V.PrimVector @Int xs) === (V.packRN d xs)
     ,   testProperty "packR == packRN XX" . property $ \ xs d ->
-            (V.packR @V.PrimVector @Word8 xs) === (V.packRN (getPositive d) xs)
+            (V.packR @V.PrimVector @Word8 xs) === (V.packRN d xs)
 
     ,   testProperty "reverse . pack == packR XX" . property $ \ xs ->
             (V.reverse $ V.pack @V.Vector @Int xs) === (V.packR xs)
@@ -55,25 +70,25 @@ propertyVector = testGroup "vector property" [
     ,   testProperty "vector length == list length" . property $ \ xs ->
             (V.length $ V.pack @V.PrimVector @Word8 xs)  ===  List.length xs
 
-    ,   testProperty "vector init == list init" . property $ \ xs ->
-            (V.init . V.pack @V.Vector @Int . getNonEmpty $ xs)  ===
-                (V.pack . List.init . getNonEmpty $ xs)
-    ,   testProperty "vector init == list init" . property $ \ xs ->
-            (V.init . V.pack @V.PrimVector @Int . getNonEmpty $ xs)  ===
-                (V.pack . List.init . getNonEmpty $ xs)
-    ,   testProperty "vector init == list init" . property $ \ xs ->
-            (V.init . V.pack @V.PrimVector @Word8 . getNonEmpty $ xs)  ===
-                (V.pack . List.init . getNonEmpty $ xs)
+    ,   testProperty "vector init == list init" . property $ \ (NonEmpty xs) ->
+            (V.init . V.pack @V.Vector @Int $ xs)  ===
+                (V.pack . List.init $ xs)
+    ,   testProperty "vector init == list init" . property $ \ (NonEmpty xs) ->
+            (V.init . V.pack @V.PrimVector @Int $ xs)  ===
+                (V.pack . List.init $ xs)
+    ,   testProperty "vector init == list init" . property $ \ (NonEmpty xs) ->
+            (V.init . V.pack @V.PrimVector @Word8 $ xs)  ===
+                (V.pack . List.init $ xs)
 
-    ,   testProperty "vector last == list last" . property $ \ xs ->
-            (V.last . V.pack @V.Vector @Int . getNonEmpty $ xs)  ===
-                (List.last . getNonEmpty $ xs)
-    ,   testProperty "vector last == list last" . property $ \ xs ->
-            (V.last . V.pack @V.PrimVector @Int . getNonEmpty $ xs)  ===
-                (List.last . getNonEmpty $ xs)
-    ,   testProperty "vector last == list last" . property $ \ xs ->
-            (V.last . V.pack @V.PrimVector @Word8 . getNonEmpty $ xs)  ===
-                (List.last . getNonEmpty $ xs)
+    ,   testProperty "vector last == list last" . property $ \ (NonEmpty xs) ->
+            (V.last . V.pack @V.Vector @Int $ xs)  ===
+                (List.last $ xs)
+    ,   testProperty "vector last == list last" . property $ \ (NonEmpty xs) ->
+            (V.last . V.pack @V.PrimVector @Int $ xs)  ===
+                (List.last $ xs)
+    ,   testProperty "vector last == list last" . property $ \ (NonEmpty xs) ->
+            (V.last . V.pack @V.PrimVector @Word8 $ xs)  ===
+                (List.last $ xs)
 
     ,   testProperty "vector map == list map" . property $ \ xs (Fun _ f) ->
             (V.map @V.Vector @V.Vector (f :: Int -> Integer) $ V.pack @V.Vector @Int xs) ===
@@ -92,13 +107,86 @@ propertyVector = testGroup "vector property" [
                 (V.pack $ List.map f xs)
 
     ,   testProperty "vector reverse == list reverse" . property $ \ xs ->
-            (V.reverse . V.pack @V.Vector @Int . getNonEmpty $ xs)  ===
-                (V.pack . List.reverse . getNonEmpty $ xs)
+            (V.reverse . V.pack @V.Vector @Int $ xs)  === (V.pack . List.reverse $ xs)
     ,   testProperty "vector reverse == list reverse" . property $ \ xs ->
-            (V.reverse . V.pack @V.PrimVector @Int . getNonEmpty $ xs)  ===
-                (V.pack . List.reverse . getNonEmpty $ xs)
+            (V.reverse . V.pack @V.PrimVector @Int $ xs)  === (V.pack . List.reverse $ xs)
     ,   testProperty "vector reverse == list reverse" . property $ \ xs ->
-            (V.reverse . V.pack @V.PrimVector @Word8 . getNonEmpty $ xs)  ===
-                (V.pack . List.reverse . getNonEmpty $ xs)
+            (V.reverse . V.pack @V.PrimVector @Word8 $ xs)  === (V.pack . List.reverse $ xs)
+
+    ,   testProperty "vector intersperse == list intersperse" . property $ \ xs x ->
+            (V.intersperse x . V.pack @V.Vector @Int $ xs)  ===
+                (V.pack . List.intersperse x $ xs)
+    ,   testProperty "vector intersperse x == list intersperse x" . property $ \ xs x ->
+            (V.intersperse x . V.pack @V.PrimVector @Int $ xs)  ===
+                (V.pack . List.intersperse x $ xs)
+    ,   testProperty "vector intersperse x == list intersperse x" . property $ \ xs x ->
+            (V.intersperse x . V.pack @V.PrimVector @Word8 $ xs)  ===
+                (V.pack . List.intersperse x $ xs)
+
+    ,   testProperty "vector intercalate == list intercalate" . property $ \ xs ys ->
+            (V.intercalate (V.pack ys) . List.map (V.pack @V.Vector @Int) $ xs)  ===
+                (V.pack . List.intercalate ys $ xs)
+    ,   testProperty "vector intercalate ys == list intercalate x" . property $ \ xs ys ->
+            (V.intercalate (V.pack ys) . List.map (V.pack @V.PrimVector @Int) $ xs)  ===
+                (V.pack . List.intercalate ys $ xs)
+    ,   testProperty "vector intercalate ys == list intercalate x" . property $ \ xs ys ->
+            (V.intercalate (V.pack ys) . List.map (V.pack @V.PrimVector @Word8) $ xs)  ===
+                (V.pack . List.intercalate ys $ xs)
+
+    ,   testProperty "vector foldl' == list foldl'" . property $ \ xs f x ->
+            (V.foldl' (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.Vector @Int $ xs)  ===
+                (List.foldl' (applyFun2 f) x $ xs)
+    ,   testProperty "vector foldl' x == list foldl' x" . property $ \ xs f x ->
+            (V.foldl' (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.PrimVector @Int $ xs)  ===
+                (List.foldl' (applyFun2 f) x $ xs)
+    ,   testProperty "vector foldl' x == list foldl' x" . property $ \ xs f x ->
+            (V.foldl' (applyFun2 f :: Int -> Word8 -> Int) x . V.pack @V.PrimVector @Word8 $ xs)  ===
+                (List.foldl' (applyFun2 f) x $ xs)
+
+    ,   testProperty "vector foldr' == list foldr" . property $ \ xs f x ->
+            (V.foldr' (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.Vector @Int $ xs)  ===
+                (List.foldr (applyFun2 f) x $ xs)
+    ,   testProperty "vector foldr' x == list foldr' x" . property $ \ xs f x ->
+            (V.foldr' (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.PrimVector @Int $ xs)  ===
+                (List.foldr (applyFun2 f) x $ xs)
+    ,   testProperty "vector foldr' x == list foldr' x" . property $ \ xs f x ->
+            (V.foldr' (applyFun2 f :: Word8 -> Int -> Int) x . V.pack @V.PrimVector @Word8 $ xs)  ===
+                (List.foldr (applyFun2 f) x $ xs)
+
+    ,   testProperty "vector concat == list concat" . property $ \ xss ->
+            (V.concat . List.map (V.pack @V.Vector @Int) $ xss)  === (V.pack . List.concat $ xss)
+    ,   testProperty "vector concat == list concat" . property $ \ xss ->
+            (V.concat . List.map (V.pack @V.PrimVector @Int) $ xss) === (V.pack . List.concat $ xss)
+    ,   testProperty "vector concat == list concat" . property $ \ xss ->
+            (V.concat . List.map (V.pack @V.PrimVector @Word8) $ xss) === (V.pack . List.concat $ xss)
+
+    ,   testProperty "vector concatMap == list concatMap" . property $ \ xss (Fun _ f) ->
+            (V.concatMap (V.pack @V.Vector @Int . f) . V.pack $ xss)  === (V.pack . List.concatMap f $ xss)
+    ,   testProperty "vector concatMap == list concatMap" . property $ \ xss (Fun _ f) ->
+            (V.concatMap (V.pack @V.PrimVector @Int . f) . V.pack $ xss) === (V.pack . List.concatMap f $ xss)
+    ,   testProperty "vector concatMap == list concatMap" . property $ \ xss (Fun _ f) ->
+            (V.concatMap (V.pack @V.PrimVector @Word8 . f) . V.pack $ xss) === (V.pack . List.concatMap f $ xss)
+
+    ,   testProperty "vector all == list all" . property $ \ xs (Fun _ f) ->
+            (V.all f . V.pack @V.Vector @Int $ xs)  === (List.all f $ xs)
+    ,   testProperty "vector all == list all" . property $ \ xs (Fun _ f) ->
+            (V.all f . V.pack @V.PrimVector @Int $ xs)  === (List.all f $ xs)
+    ,   testProperty "vector all == list all" . property $ \ xs (Fun _ f) ->
+            (V.all f . V.pack @V.PrimVector @Word8 $ xs)  === (List.all f $ xs)
+
+    ,   testProperty "vector any == list any" . property $ \ xs (Fun _ f) ->
+            (V.any f . V.pack @V.Vector @Int $ xs)  === (List.any f $ xs)
+    ,   testProperty "vector any == list any" . property $ \ xs (Fun _ f) ->
+            (V.any f . V.pack @V.PrimVector @Int $ xs)  === (List.any f $ xs)
+    ,   testProperty "vector any == list any" . property $ \ xs (Fun _ f) ->
+            (V.any f . V.pack @V.PrimVector @Word8 $ xs)  === (List.any f $ xs)
+
+    ,   testProperty "vector maximum == list maximum" . property $ \ (NonEmpty xs) ->
+            (V.maximum . V.pack @V.Vector @Int $ xs)  === (List.maximum $ xs)
+    ,   testProperty "vector maximum == list maximum" . property $ \ (NonEmpty xs) ->
+            (V.maximum . V.pack @V.PrimVector @Int $ xs)  === (List.maximum $ xs)
+    ,   testProperty "vector maximum == list maximum" . property $ \ (NonEmpty xs) ->
+            (V.maximum . V.pack @V.PrimVector @Word8 $ xs)  === (List.maximum $ xs)
+
 
     ]

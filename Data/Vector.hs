@@ -228,8 +228,8 @@ compareVector (Vector baA sA lA) (Vector baB sB lB)
   where
     !endA = sA + lA
     !endB = sB + lB
-    go !i !j | i >= endA  = endB `compare` j
-             | j >= endB  = endA `compare` i
+    go !i !j | i >= endA  = endA `compare` endB
+             | j >= endB  = endA `compare` endB
              | otherwise = let o = indexSmallArray baA i `compare` indexSmallArray baB j
                            in case o of EQ -> go (i+1) (j+1)
                                         x  -> x
@@ -315,8 +315,8 @@ comparePrimVector (PrimVector baA sA lA) (PrimVector baB sB lB)
   where
     !endA = sA + lA
     !endB = sB + lB
-    go !i !j | i >= endA  = endB `compare` j
-             | j >= endB  = endA `compare` i
+    go !i !j | i >= endA  = endA `compare` endB
+             | j >= endB  = endA `compare` endB
              | otherwise = let o = indexPrimArray baA i `compare` indexPrimArray baB j
                            in case o of EQ -> go (i+1) (j+1)
                                         x  -> x
@@ -393,17 +393,18 @@ pattern BytesPat ba s l <- (toArr -> (PrimArray ba,s,l))
 -- Basic creating
 
 -- | Create a vector.
+--
 create :: Vec v a
        => Int  -- length in elements of type @a@
        -> (forall s. MArray v s a -> ST s ())  -- initialization function
        -> v a
 {-# INLINE create #-}
-create l fill = runST (do
-        mba <- newArr l
+create n0 fill = runST (do
+        let n = max 0 n0
+        mba <- newArr n
         fill mba
         ba <- unsafeFreezeArr mba
-        return $! fromArr ba 0 l
-    )
+        return $! fromArr ba 0 n)
 
 -- | Create a vector, return both the vector and the monadic result during creating.
 --
@@ -412,13 +413,13 @@ creating :: Vec v a
          -> (forall s. MArray v s a -> ST s b)  -- initialization function
          -> (b, v a)
 {-# INLINE creating #-}
-creating l fill = runST (do
-        mba <- newArr l
+creating n0 fill = runST (do
+        let n = max 0 n0
+        mba <- newArr n
         b <- fill mba
         ba <- unsafeFreezeArr mba
-        let !v = fromArr ba 0 l
-        return (b, v)
-    )
+        let !v = fromArr ba 0 n
+        return (b, v))
 
 -- | Create a vector up to a specific length.
 --
@@ -429,15 +430,15 @@ createN :: Vec v a
         -> (forall s. MArray v s a -> ST s Int)  -- initialization function which return the actual length
         -> v a
 {-# INLINE createN #-}
-createN l fill = runST (do
-        mba <- newArr l
+createN n0 fill = runST (do
+        let n = max 0 n0
+        mba <- newArr n
         l' <- fill mba
         shrinkMutableArr mba l'
         ba <- unsafeFreezeArr mba
-        if l' <= l
+        if l' <= n
         then return $! fromArr ba 0 l'
-        else error "Data.PrimVector.createN: return size exceeds initial size"
-    )
+        else error "Data.PrimVector.createN: return size exceeds initial size")
 
 -- | /O(1)/. The empty vector.
 --
@@ -497,7 +498,8 @@ chunkOverhead = 2 * sizeOf (undefined :: Int)
 --
 packN :: forall v a. Vec v a => Int -> [a] -> v a
 {-# INLINE packN #-}
-packN n0 = \ ws0 -> runST (do mba <- newArr n0
+packN n0 = \ ws0 -> runST (do let n = max 4 n0
+                              mba <- newArr n
                               (IPair i mba') <- foldlM go (IPair 0 mba) ws0
                               shrinkMutableArr mba' i
                               ba <- unsafeFreezeArr mba'
@@ -533,12 +535,13 @@ packR = packRN defaultInitSize
 --
 packRN :: forall v a. Vec v a => Int -> [a] -> v a
 {-# INLINE packRN #-}
-packRN n0 = \ ws0 -> runST (do mba <- newArr n0
-                               (IPair i mba') <- foldlM go (IPair (n0-1) mba) ws0
+packRN n0 = \ ws0 -> runST (do let n = max 4 n0
+                               mba <- newArr n
+                               (IPair i mba') <- foldlM go (IPair (n-1) mba) ws0
                                ba <- unsafeFreezeArr mba'
                                let i' = i + 1
-                                   n = sizeofArr ba
-                               return $! fromArr ba i' (n-i')
+                                   n' = sizeofArr ba
+                               return $! fromArr ba i' (n'-i')
                            )
   where
     go :: IPair (MArray v s a) -> a -> ST s (IPair (MArray v s a))
@@ -775,8 +778,7 @@ intercalate :: Vec v a => v a -> [v a] -> v a
 {-# INLINE intercalate #-}
 intercalate s = concat . List.intersperse s
 
--- | /O(n)/ intercalateElem. An efficient way to join [PrimVector]
--- with an element. It's faster than @intercalate (singleton c)@.
+-- | /O(n)/ An efficient way to join vector with an element.
 --
 intercalateElem :: Vec v a => a -> [v a] -> v a
 {-# INLINE intercalateElem #-}
@@ -846,8 +848,8 @@ concat :: forall v a . Vec v a => [v a] -> v a
 {-# INLINE concat #-}
 concat vs = case pre 0 0 vs of
     (0, _)  -> empty
-    (1, _)  -> let Just v = List.find (not . null) vs in v
-    (_, l') -> create l' (copy vs l')
+    (1, _)  -> let Just v = List.find (not . null) vs in v -- there must be a not null vector
+    (_, l') -> create l' (copy vs 0)
   where
     -- pre scan to decide if we really need to copy and calculate total length
     pre :: Int -> Int -> [v a] -> (Int, Int)
@@ -857,11 +859,9 @@ concat vs = case pre 0 0 vs of
         | otherwise = pre (nacc+1) (l+lacc) vs
 
     copy :: [v a] -> Int -> MArray v s a -> ST s ()
-    copy [] _ _           = return ()
-    copy (v:vs) !i !mba = do let (ba, s, l) = toArr v
-                                 !i' = i - l
-                             when (l /= 0) (copyArr mba i' ba s l)
-                             copy vs i' mba
+    copy [] !_ !_                   = return ()
+    copy (VecPat ba s l:vs) !i !mba = do when (l /= 0) (copyArr mba i ba s l)
+                                         copy vs (i+l) mba
 
 -- | Map a function over a vector and concatenate the results
 concatMap :: Vec v a => (a -> v a) -> v a -> v a
