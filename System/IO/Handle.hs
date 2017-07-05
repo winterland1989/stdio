@@ -30,7 +30,11 @@ newHandle32K f = buffered f bufSiz bufSiz
 newHandle :: FD f => f -> Int -> Int -> IO (Handle f)
 newHandle f rbufSize wbufSiz =
 
-read :: (FD f) => Handle f -> IO (Maybe Bytes)
+-- | Perform buffered read on a 'Handle'
+--
+-- The reading logic is simple: if we have
+--
+read :: (FD f) => Handle f -> Int -> IO (Maybe Bytes)
 read Handle{..} = modifyMVar readBuf $ \ rbuf ->
     case rbuf of
         (x:xs) -> (xs, x)

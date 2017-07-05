@@ -7,10 +7,8 @@ This library is an effort trying to improve and standardize Haskell's IO interfa
 + Binary and textual `Parser` and `Builder` for compact bytes.
 + A UTF-8 based text type for text process.
 + A simpler `Handler` for IO, include file and network module.
-+ A compact `FilePath` type.
 
 This package is designed from ground, with two goals: simplicity and performance, join in!
-
 
 Guide
 -----
@@ -176,12 +174,11 @@ Roadmap
 + A unified vector type. (80%)
 + Unpinned bytestring based on vector. (80%) 
 + `Foreign` module for bytes. (0%)
-+ IO system for `Bytes`, new `Handler` design. (10%)
++ IO system for `Bytes`, new `Handler` design. (20%)
 + IO system for `Bytes`, file and network part. (20%)
-+ A compact `FilePath` type. (0%)
 + `Builder` for `Bytes`, both binary and textual. (50%)
-+ `Parser` for `Bytes`, both binary and textual. (0%)
-+ Basic UTF-8 text processing (0%)
++ `Parser` for `Bytes`, both binary and textual. (10%)
++ Basic UTF-8 text processing (20%)
 + Extend UTF-8 text processing, (normalization, unicode case-mapping, etc.) (0%)
 
 Join in!

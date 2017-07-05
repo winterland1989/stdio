@@ -40,6 +40,26 @@ instance Eq Text where
     (Text b1) == (Text b2) = b1 == b2
     {-# INLINE (==) #-}
 
+instance Ord Text where
+    compare = compareText
+    {-# INLINE compare #-}
+
+compareText :: Text -> Text -> Ordering
+{-# INLINE compareText #-}
+compareText (Text (V.PrimVector baA sA lA)) (Text (V.PrimVector baB sB lB))
+    | baA `samePrimArray` baB = if sA == sB then lA `compare` lB else go sA sB
+    | otherwise = go sA sB
+  where
+    !endA = sA + lA
+    !endB = sB + lB
+    go !i !j | i >= endA  = endA `compare` endB
+             | j >= endB  = endA `compare` endB
+             | otherwise = let (# ca, ka #) = decodeChar baA i
+                               (# cb, kb #) = decodeChar baB j
+                           in case ca `compare` cb of
+                                EQ -> go (i+ka) (j+kb)
+                                x  -> x
+
 instance Show Text where
     showsPrec p t = showsPrec p (unpack t)
 instance NFData Text where
