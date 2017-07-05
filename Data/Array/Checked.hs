@@ -1,10 +1,17 @@
 {-# LANGUAGE TypeFamilies #-}
 
--- | Bound checked array operations.
---
--- This module provides exactly the same API with "Data.Array", but will throw an 'IndexOutOfBounds' 'ArrayException'
--- on bound check failure.
---
+{-|
+Module      : Data.Array.Checked
+Description : Bounded checked boxed and unboxed arrays
+Copyright   : (c) Winterland, 2017
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : non-portable
+
+This module provides exactly the same API with "Data.Array", but will throw an 'IndexOutOfBounds'
+'ArrayException' on bound check failure.
+-}
 module Data.Array.Checked
   ( -- * Arr typeclass re-export
     A.Arr

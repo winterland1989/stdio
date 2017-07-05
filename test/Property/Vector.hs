@@ -188,5 +188,23 @@ propertyVector = testGroup "vector property" [
     ,   testProperty "vector maximum == list maximum" . property $ \ (NonEmpty xs) ->
             (V.maximum . V.pack @V.PrimVector @Word8 $ xs)  === (List.maximum $ xs)
 
+    ,   testProperty "vector scanl == list scanl" . property $ \ xs f x ->
+            (V.scanl @V.Vector @V.Vector (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.Vector @Int $ xs)  ===
+                (V.pack . List.scanl (applyFun2 f) x $ xs)
+    ,   testProperty "vector scanl x == list scanl x" . property $ \ xs f x ->
+            (V.scanl @V.PrimVector @V.PrimVector (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.PrimVector @Int $ xs)  ===
+                (V.pack . List.scanl (applyFun2 f) x $ xs)
+    ,   testProperty "vector scanl x == list scanl x" . property $ \ xs f x ->
+            (V.scanl @V.PrimVector @V.Vector (applyFun2 f :: Int -> Word8 -> Int) x . V.pack @V.PrimVector @Word8 $ xs)  ===
+                (V.pack . List.scanl (applyFun2 f) x $ xs)
 
+    ,   testProperty "vector scanr == list scanr" . property $ \ xs f x ->
+            (V.scanr @V.Vector @V.Vector (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.Vector @Int $ xs)  ===
+                (V.pack . List.scanr (applyFun2 f) x $ xs)
+    ,   testProperty "vector scanr x == list scanr x" . property $ \ xs f x ->
+            (V.scanr @V.PrimVector @V.PrimVector (applyFun2 f :: Int -> Int -> Int) x . V.pack @V.PrimVector @Int $ xs)  ===
+                (V.pack . List.scanr (applyFun2 f) x $ xs)
+    ,   testProperty "vector scanr x == list scanr x" . property $ \ xs f x ->
+            (V.scanr @V.PrimVector @V.Vector (applyFun2 f :: Word8 -> Int -> Int) x . V.pack @V.PrimVector @Word8 $ xs)  ===
+                (V.pack . List.scanr (applyFun2 f) x $ xs)
     ]

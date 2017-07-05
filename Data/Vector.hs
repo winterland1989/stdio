@@ -65,14 +65,14 @@ module Data.Vector (
   , cons, snoc, uncons, unsnoc
   , head, tail
   , last, init
-  -- * Transforming primitive vector
+  -- * Transforming vector
   , map
   , reverse
   , intersperse
   , intercalate
   , intercalateElem
   , transpose
-  -- * Reducing primitive vector (folds)
+  -- * Reducing vector (folds)
   , foldl'
   , foldl1'
   , foldr'
@@ -84,7 +84,7 @@ module Data.Vector (
   , all
   , maximum
   , minimum
-  -- * Building primitive vector
+  -- * Building vector
   -- ** Scans
   , scanl
   , scanl1
@@ -93,7 +93,7 @@ module Data.Vector (
   -- ** Accumulating maps
   , mapAccumL
   , mapAccumR
-  -- ** Generating and unfolding primitive vector
+  -- ** Generating and unfolding vector
   , replicate
   , unfoldr
   , unfoldrN
@@ -839,7 +839,7 @@ foldr1' f = \ (VecPat ba s l) ->
 --
 -- Special folds
 --
--- | /O(n)/ Concatenate a list of primitive vector.
+-- | /O(n)/ Concatenate a list of vector.
 --
 -- Note: 'concat' have to force the entire list to filter out empty vector and calculate
 -- the length for allocation.
@@ -953,7 +953,7 @@ scanr1 f = \ (VecPat ba s l) ->
 -- Accumulating maps
 
 -- | The 'mapAccumL' function behaves like a combination of 'map' and
--- 'foldl'; it applies a function to each element of a primitive vector,
+-- 'foldl'; it applies a function to each element of a vector,
 -- passing an accumulating parameter from left to right, and returning a
 -- final value of this accumulator together with the new list.
 --
@@ -970,9 +970,9 @@ mapAccumL f z = \ (VecPat ba s l) -> creating l (go z s 0 (s+l) ba)
             go acc' (i+1) (j+1) end ba mba
 
 -- | The 'mapAccumR' function behaves like a combination of 'map' and
--- 'foldr'; it applies a function to each element of a primitive vector,
+-- 'foldr'; it applies a function to each element of a vector,
 -- passing an accumulating parameter from right to left, and returning a
--- final value of this accumulator together with the new primitive vector.
+-- final value of this accumulator together with the new vector.
 --
 mapAccumR :: forall u v a b c. (Vec u b, Vec v c) => (a -> b -> (a, c)) -> a -> u b -> (a, v c)
 {-# INLINE mapAccumR #-}
@@ -988,7 +988,7 @@ mapAccumR f z = \ (VecPat ba s l) -> creating l (go z (s+l-1) s ba)
 
 --  Generating and unfolding vector.
 --
----- | /O(n)/ 'replicate' @n x@ is a primitive vector of length @n@ with @x@
+---- | /O(n)/ 'replicate' @n x@ is a vector of length @n@ with @x@
 -- the value of every element. The following holds:
 --
 -- > replicate w c = unfoldr w (\u -> Just (u,u)) c
@@ -1001,7 +1001,7 @@ replicate n x = create n (\ mba -> setArr mba 0 n x)
 
 -- | /O(n)/, where /n/ is the length of the result.  The 'unfoldr'
 -- function is analogous to the List \'unfoldr\'.  'unfoldr' builds a
--- primitive vector from a seed value. The function takes the element and
+-- vector from a seed value. The function takes the element and
 -- returns 'Nothing' if it is done producing the vector or returns
 -- 'Just' @(a,b)@, in which case, @a@ is the next byte in the string,
 -- and @b@ is the seed value for further production.
