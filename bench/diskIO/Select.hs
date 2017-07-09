@@ -23,9 +23,9 @@ main = do
 
   where
     loop fd fd' = do
-        ptr <- mallocBytes 1024
-        siz <- read fd ptr 1024
-        write fd' ptr 1024
+        ptr <- mallocBytes 32750
+        siz <- read fd ptr 32750
+        write fd' ptr (fromIntegral siz)
         free ptr
         case siz `compare` 0 of
             LT -> error ("error:" ++ show siz)

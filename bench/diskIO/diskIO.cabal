@@ -35,7 +35,18 @@ executable unsafe-ffi
   default-language:    Haskell2010
   ghc-options:         -threaded -with-rtsopts=-N4
 
+executable thread-pool
+  main-is:             ThreadPool.hs
+  -- other-modules:       
+  -- other-extensions:    
+  build-depends:       base >=4.9 && <4.10
+                    ,   async
+                    ,   ghc-prim
+  -- hs-source-dirs:      
+  default-language:    Haskell2010
+  ghc-options:         -threaded -with-rtsopts=-N4
 executable select
+
   main-is:             Select.hs
   -- other-modules:       
   -- other-extensions:    
