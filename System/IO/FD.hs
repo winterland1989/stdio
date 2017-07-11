@@ -15,7 +15,11 @@ This module provide low-level operations on file descriptors to help you define 
 these operations are not protected by any locks, you might want to protect them with MVar to provide certain
 concurrent semantics. Users are encouraged to use wrappered device types instead of dealing with file descriptors directly.
 
-Despite of the /everything is a file/ philosophy, file descriptors operations are extremly hard to get right.
+Some functions require error message to provide better error reporting, the convention is that you should provide as
+detailed error message as you could, it should contains caller and file specific informations,
+something like "System.IO.File.close: /home/bob/test.txt" is OK.
+
+Despite the /everything is a file/ philosophy, file descriptors operations are extremly hard to get right.
 This module re-exports most functions from "GHC.IO.FD" module, which will:
 
   * Correctly handle non-threaded and threaded runtime so that other haskell threads won't be blocked.
@@ -73,10 +77,13 @@ import Data.Word
 
 -- | Make a new 'FD' from OS file descriptor.
 --
+-- 'newFD' won't perform file lock for regular files, locking semantics should be implemented by wrapper types.
+--
 newFD :: CInt   -- ^ the file descriptor
       -> Bool   -- ^ is a socket (on Windows)
       -> Bool   -- ^ is in non-blocking mode on Unix
       -> FD
+{-# INLINABLE newFD #-}
 newFD fd is_socket is_nonblock =
     FD{ fdFD = fd,
 #ifndef mingw32_HOST_OS
@@ -96,6 +103,7 @@ fread :: String  -- ^ location message when error
       -> Int        -- ^ buffer offset
       -> Int        -- ^ read limit
       -> IO Int     -- ^ actual bytes read
+{-# INLINABLE fread #-}
 fread loc !fd buf off len = readRawBufferPtr loc fd buf off (fromIntegral len)
 
 -- | Write exaclty N bytes to 'FD'
@@ -106,6 +114,7 @@ fwrite :: String  -- ^ location message when error
         -> Int        -- ^ buffer offset
         -> Int        -- ^ write length
         -> IO ()
+{-# INLINABLE fwrite #-}
 fwrite loc !fd buf off len = do
     res <- writeRawBufferPtr loc fd buf off (fromIntegral len)
     let res' = fromIntegral res
@@ -115,8 +124,21 @@ fwrite loc !fd buf off len = do
 --
 -- This operation is concurrency-safe, e.g. other threads blocked on this 'FD' will get an IO exception.
 --
-fclose :: FD -> IO ()
-fclose = close
+-- Note regular file using file locks should release lock before call 'fclose', otherwise if we're preempted
+-- after closing but before releasing, the FD may have been reused, and we may release the wrong 'FD'.
+--
+fclose :: String -> FD -> IO ()
+{-# INLINABLE fclose #-}
+fclose loc fd = do
+    let closer realFd =
+            throwErrnoIfMinus1Retry_ loc $
+#ifdef mingw32_HOST_OS
+            if fdIsSocket fd then
+                c_closesocket (fromIntegral realFd)
+            else
+#endif
+                c_close (fromIntegral realFd)
+    closeFdWith closer (fromIntegral (fdFD fd))
 
 -- | Duplicate 'FD'.
 --
@@ -134,8 +156,8 @@ fseekable :: FD -> IO Bool
 fseekable = isSeekable
 
 -- | Seeking 'FD'.
-fseek :: FD -> SeekMode -> Int -> IO ()
-fseek fd mode off = throwErrnoIfMinus1Retry_ "seek" $
+fseek :: String -> FD -> SeekMode -> Int -> IO ()
+fseek loc fd mode off = throwErrnoIfMinus1Retry_ loc $
     c_lseek (fdFD fd) (fromIntegral off) seektype
   where
     seektype :: CInt
@@ -146,16 +168,16 @@ fseek fd mode off = throwErrnoIfMinus1Retry_ "seek" $
 
 -- | Tell 'FD' current offset.
 --
-ftell :: FD -> IO Int
-ftell fd = fromIntegral `fmap` (throwErrnoIfMinus1Retry "hGetPosn" $
+ftell :: String -> FD -> IO Int
+ftell loc fd = fromIntegral `fmap` (throwErrnoIfMinus1Retry loc $
     c_lseek (fdFD fd) 0 sEEK_CUR)
 
 -- | Get file size.
 --
-fgetSize :: FD -> IO Int
-fgetSize fd = do
+fgetSize :: String -> FD -> IO Int
+fgetSize loc fd = do
     allocaBytes sizeof_stat $ \ p_stat -> do
-        throwErrnoIfMinus1Retry_ "fileSize" $
+        throwErrnoIfMinus1Retry_ loc $
             c_fstat (fdFD fd) p_stat
         c_mode <- st_mode p_stat :: IO CMode
         if not (s_isreg c_mode)
@@ -166,24 +188,24 @@ fgetSize fd = do
 
 -- | Set file size.
 --
-fsetSize :: FD -> Int -> IO ()
-fsetSize fd size = throwErrnoIf_ (/=0) "GHC.IO.FD.setSize" $
+fsetSize :: String -> FD -> Int -> IO ()
+fsetSize loc fd size = throwErrnoIf_ (/=0) loc $
     c_ftruncate (fdFD fd) (fromIntegral size)
 
 -- | Flush OS cache into disk.
 --
-fsync :: FD -> IO ()
-fsync fd = do
+fsync :: String -> FD -> IO ()
+fsync loc fd = do
 #ifdef mingw32_HOST_OS
     success <- c_FlushFileBuffers =<< c_get_osfhandle (fdFD fd)
     if success
     then return ()
     else do
         err_code <- c_GetLastError
-        throwIO $ mkIOError ("System.IO.File.fsync: error code is 0x" ++ showHex err_code)
+        throwIO $ mkIOError (loc ++ ", error code is 0x" ++ showHex err_code)
                     Nothing (Just fp)
 #else
-    throwErrnoIfMinus1_ "fileSynchronise" (c_fsync (fdFD fd))
+    throwErrnoIfMinus1_ loc (c_fsync (fdFD fd))
 #endif
 
 -- | Get device type.
@@ -214,6 +236,16 @@ fsetEcho = setEcho
 fsetCanonical :: FD -> Bool -> IO ()
 fsetCanonical = setRaw
 
+--------------------------------------------------------------------------------
+
+#if defined(i386_HOST_ARCH)
+# define WINDOWS_CCONV stdcall
+#elif defined(x86_64_HOST_ARCH)
+# define WINDOWS_CCONV ccall
+#else
+# error Unknown mingw32 arch
+#endif
+
 #ifdef mingw32_HOST_OS
 foreign import ccall unsafe "_get_osfhandle"
     c_get_osfhandle :: CInt -> IO (Ptr ())
@@ -227,4 +259,3 @@ foreign import WINDOWS_CCONV unsafe "windows.h GetLastError"
 foreign import capi safe "unistd.h fsync"
     c_fsync :: CInt  -> IO CInt
 #endif
-

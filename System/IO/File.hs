@@ -5,19 +5,18 @@ module System.IO.File where
 
 import qualified Control.Exception as E
 import qualified GHC.IO.Exception as E
-import System.Posix.Internals
+import System.Posix.Internals hiding (FD)
 import System.Posix.Types (CDev, CIno)
-import Foreign.C
+import System.IO.FD
 import Foreign.Marshal
-import GHC.IO.FD
+import Foreign.Ptr
+import Foreign.C
 import Foreign.C.Types
 import Data.Int
 import Data.Word
 import Data.Bits ((.|.))
-import GHC.Conc.IO (closeFdWith)
-import Numeric (showHex)
 
-data File = File { fileFd :: CInt, filePath :: FilePath }
+data File = File { fileFd :: {-# UNPACK #-} !FD, filePath :: FilePath }
 
 -- | OS provides seperated flag for file operations(O_CREAT, O_APPEND, O_WRONLY..), but we
 -- only provide several combination here for convenience. Notably:
@@ -34,12 +33,14 @@ data AccessMode
 
 -- | Open a 'File', which must be a regular file, otherwise an 'IOError' will be thrown.
 --
--- The GHC rts provide file lock so that a file can not be opened multiple times.
+-- `openFile` locks the file according to the Haskell 2010 single writer/multiple reader
+-- locking semantics.
 --
-open :: FilePath -> AccessMode -> IO File
-open path mode = withFilePath path $ \ f -> do
+openFile :: FilePath -> AccessMode -> IO File
+openFile path mode = withFilePath path $ \ f -> do
+    let msg = "System.IO.File.open" ++ path
 
-    fd <- throwErrnoIfMinus1Retry "System.IO.File.open" (c_open f oflags 0o666)
+    fd <- throwErrnoIfMinus1Retry msg (c_open f oflags 0o666)
 
     (isRegularFile, dev, ino) <- (`E.onException` c_close fd) $ allocaBytes sizeof_stat $ \ p_stat -> do
         throwErrnoIfMinus1Retry "c_fstat" $ do
@@ -57,11 +58,10 @@ open path mode = withFilePath path $ \ f -> do
         r <- lockFile fd unique_dev unique_ino (fromBool write)
         if (r == -1)
         then E.ioException $
-            E.IOError Nothing E.ResourceBusy "fopen" "file is locked" Nothing (Just path)
-        else return (File fd path)
+            E.IOError Nothing E.ResourceBusy msg "file is locked" Nothing (Just path)
+        else return (File (newFD fd False True) path)
     else E.ioException $
-        E.IOError Nothing E.InappropriateType "fopen" "not a regular file" Nothing (Just path)
-
+        E.IOError Nothing E.InappropriateType msg "not a regular file" Nothing (Just path)
   where
 #ifdef mingw32_HOST_OS
     commonFLAG = o_BINARY .|. o_NONBLOCK .|. o_NOCTTY
@@ -74,67 +74,30 @@ open path mode = withFilePath path $ \ f -> do
         AppendMode ->    commonFLAG .|. o_CREAT .|. o_APPEND .|. o_WRONLY
         ReadWriteMode -> commonFLAG .|. o_CREAT .|. o_RDWR
 
--- | Close a 'File'
+-- | Release the file lock and close a 'File'
 --
-close :: File -> IO ()
-close (File fd path) = do
+closeFile :: File -> IO ()
+closeFile (File fd path) = do
     -- release the lock *first*, because otherwise if we're preempted
     -- after closing but before releasing, the FD may have been reused.
-    unlockFile fd
-    closeFdWith closer (fromIntegral fd)
-  where
-    closer realFd = throwErrnoIfMinus1Retry_ "System.IO.File.close" $
-         c_close (fromIntegral realFd)
-
--- | A mode that determines the effect of 'hSeek' @hdl mode i@.
-data SeekMode = AbsoluteSeek        -- ^ the position of @hdl@ is set to @i@.
-              | RelativeSeek        -- ^ the position of @hdl@ is set to offset @i@
-                                    -- from the current position.
-              | SeekFromEnd         -- ^ the position of @hdl@ is set to offset @i@
-                                    -- from the end of the file.
-    deriving (Eq, Ord, Enum, Read, Show)
+    unlockFile (fdFD fd)
+    fclose ("System.IO.File.close:" ++ path) fd
 
 -- |
-fseek :: File -> SeekMode -> Int64 -> IO Int64
-fseek (File fd _) mode off = do
-    off' <- throwErrnoIfMinus1Retry "seek" $
-        c_lseek fd (fromIntegral off) seektype
-    return (fromIntegral off')
-    where
-        seektype = case mode of
-            AbsoluteSeek -> sEEK_SET
-            RelativeSeek -> sEEK_CUR
-            SeekFromEnd  -> sEEK_END
-        fgetSize (File fd _) =
-            allocaBytes sizeof_stat $ \ p_stat -> do
-                throwErrnoIfMinus1Retry_ "fileSize" $ c_fstat fd p_stat
-                fromIntegral `fmap` st_size p_stat  -- regular files always have size
+--
+seekFile :: File -> SeekMode -> Int -> IO ()
+seekFile (File fd path) mode offset =
+    fseek ("System.IO.File.seekFile:" ++ path) fd mode offset
 
-fgetSize :: File -> IO Int64
-fgetSize (File fd _) =
-    allocaBytes sizeof_stat $ \ p_stat -> do
-        throwErrnoIfMinus1Retry_ "fileSize" $ c_fstat fd p_stat
-        fromIntegral `fmap` st_size p_stat -- File is guaranteed to be a regular file
+{-
+getFileSize :: File -> IO Int
+getFileSize = fgetSize . fdFD
 
 fsetSize :: File -> Int64 -> IO ()
 fsetSize (File fd _) size = throwErrnoIf_ (/=0) "System.IO.File.fsetSize" $
-     c_ftruncate fd (fromIntegral size)
 
-fsync :: File -> IO ()
-fsync (File fd fp) = do
-#ifdef mingw32_HOST_OS
-    success <- c_FlushFileBuffers =<< c_get_osfhandle
-    if success
-    then return ()
-    else do
-        err_code <- c_GetLastError
-        throwIO $ mkIOError ("System.IO.File.fsync: error code is 0x" ++ showHex err_code)
-                    Nothing (Just fp)
-#else
-    throwErrnoIfMinus1_ "fileSynchronise" (c_fsync fd)
-#endif
 
-{-
+
 fopenMode :: File -> AccessMode -> f
 fgetMode :: File -> IO AccessMode
 -}
@@ -158,28 +121,7 @@ getUniqueFileInfo fd _ _ = do
 getUniqueFileInfo _ dev ino = return (fromIntegral dev, fromIntegral ino)
 #endif
 
-#if defined(i386_HOST_ARCH)
-# define WINDOWS_CCONV stdcall
-#elif defined(x86_64_HOST_ARCH)
-# define WINDOWS_CCONV ccall
-#else
-# error Unknown mingw32 arch
-#endif
-
 #ifdef mingw32_HOST_OS
 foreign import ccall unsafe "get_unique_file_info"
     c_getUniqueFileInfo :: CInt -> Ptr Word64 -> Ptr Word64 -> IO ()
-
-foreign import ccall unsafe "_get_osfhandle"
-    c_get_osfhandle :: CInt -> IO (Ptr ())
-
-foreign import WINDOWS_CCONV unsafe "windows.h FlushFileBuffers"
-	c_FlushFileBuffers :: Ptr () -> IO Bool
-
-foreign import WINDOWS_CCONV unsafe "windows.h GetLastError"
-    c_GetLastError :: IO Word32
-#else
-foreign import capi safe "unistd.h fsync"
-    c_fsync :: CInt  -> IO CInt
 #endif
-

@@ -1,6 +1,9 @@
 stdio: standard input and output
 ================================
 
+[![Linux Build Status](https://img.shields.io/travis/winterland1989/stdio/master.svg?label=Linux%20build)](https://travis-ci.org/winterland1989/stdio)
+[![Windows Build Status](https://img.shields.io/appveyor/ci/winterland1989/stdio/master.svg?label=Windows%20build)](https://ci.appveyor.com/project/winterland1989/stdio/branch/master)
+
 This library is an effort trying to improve and standardize Haskell's IO interface with pack data types.
 
 + A faster/simpler vector type, which packed bytes type built on.
