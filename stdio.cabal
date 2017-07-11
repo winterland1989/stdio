@@ -30,6 +30,7 @@ library
                             Data.Builder
 
                             System.IO.File
+                            System.IO.FD
     -- other-modules:       
     -- other-extensions:    
     build-depends:          base >=4.6 && <4.10

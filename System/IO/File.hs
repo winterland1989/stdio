@@ -182,3 +182,4 @@ foreign import WINDOWS_CCONV unsafe "windows.h GetLastError"
 foreign import capi safe "unistd.h fsync"
     c_fsync :: CInt  -> IO CInt
 #endif
+
