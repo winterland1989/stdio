@@ -33,8 +33,8 @@ library
                             System.IO.FD
     -- other-modules:       
     -- other-extensions:    
-    build-depends:          base >=4.6 && <4.10
-                        ,   ghc-prim
+    build-depends:          base >=4.8 && <5.0
+                        ,   ghc-prim  >= 0.4
                         ,   primitive >= 0.6.2
                         ,   deepseq
                         ,   template-haskell 

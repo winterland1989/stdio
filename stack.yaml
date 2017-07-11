@@ -1,5 +1,0 @@
-resolver: nightly-2017-07-11
-packages:
-- '.'
-flags: {}
-extra-package-dbs: []
