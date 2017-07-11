@@ -1,19 +1,22 @@
-cache:
-- "c:\\sr -> appveyor.yml" ##
+install:
+  # Using '-y' and 'refreshenv' as a workaround to:
+  # https://github.com/haskell/cabal/issues/3687
+  - choco install -y ghc --version 8.0.2
+  - refreshenv
+  # See http://help.appveyor.com/discussions/problems/6312-curl-command-not-found#comment_42195491
+  # NB: Do this after refreshenv, otherwise it will be clobbered!
+  - set PATH=C:\Program Files\Git\mingw64\bin;%PATH%
+  # TODO: remove --insecure, this is to workaround haskell.org
+  # failing to send intermediate cert; see https://github.com/haskell/cabal/pull/4172
+  - curl -o cabal.zip --insecure --progress-bar https://www.haskell.org/cabal/release/cabal-install-1.24.0.0/cabal-install-1.24.0.0-x86_64-unknown-mingw32.zip
+  - 7z x -bd cabal.zip
+  - cabal --version
+  - cabal update
 
-build: off
-
-before_test:
-- set PATH=C:\Program Files\Git\mingw64\bin;%PATH%
-- curl -ostack.zip -L --insecure http://www.stackage.org/stack/windows-i386
-- 7z x stack.zip stack.exe
-
-clone_folder: "c:\\project"
-environment:
-  global:
-    STACK_ROOT: "c:\\sr"
-
-test_script:
-- stack setup > nul
-- echo "" | stack --no-terminal build --test
-- stack exec -- ghc -package=foundation -e 1
+build_script:
+  - cabal install Cabal
+  - cabal install --only-dependencies --enable-tests --enable-benchmarks
+  - cabal build   # this builds all libraries and executables (including tests/benchmarks)
+  - cabal test
+  - cabal check
+  - cabal sdist   # tests that a source-distribution can be generated

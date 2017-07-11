@@ -34,6 +34,7 @@ Please take a look at unix man page for details on each operations, which are ma
 module System.IO.FD (
   -- * FD type and universal operations
     FD
+  , fdFD
   , newFD
   , fread
   , fwrite
