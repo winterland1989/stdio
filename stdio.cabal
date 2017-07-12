@@ -29,6 +29,7 @@ library
                             Data.Binary
                             Data.Builder
 
+                            System.IO.Exception 
                             System.IO.File
                             System.IO.FD
     -- other-modules:       
