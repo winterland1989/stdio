@@ -62,6 +62,8 @@ module System.IO.FD (
 
 
 import Control.Monad
+import Control.Exception
+import System.IO.Error
 import Control.Concurrent.MVar
 import Control.Concurrent (rtsSupportsBoundThreads)
 import System.Posix.Types
@@ -74,6 +76,7 @@ import GHC.Conc.IO
 import GHC.IO.FD
 import GHC.IO.Device
 import Data.Word
+import Numeric (showHex)
 
 -- | Make a new 'FD' from OS file descriptor.
 --
@@ -104,7 +107,8 @@ fread :: String  -- ^ location message when error
       -> Int        -- ^ read limit
       -> IO Int     -- ^ actual bytes read
 {-# INLINABLE fread #-}
-fread loc !fd buf off len = readRawBufferPtr loc fd buf off (fromIntegral len)
+fread loc !fd buf off len =
+    fromIntegral `fmap` readRawBufferPtr loc fd buf off (fromIntegral len)
 
 -- | Write exaclty N bytes to 'FD'
 --
@@ -133,7 +137,7 @@ fclose loc fd = do
     let closer realFd =
             throwErrnoIfMinus1Retry_ loc $
 #ifdef mingw32_HOST_OS
-            if fdIsSocket fd then
+            if fdIsSocket_ fd /= 0 then
                 c_closesocket (fromIntegral realFd)
             else
 #endif
@@ -203,7 +207,7 @@ fsync loc fd = do
     else do
         err_code <- c_GetLastError
         throwIO $ mkIOError (loc ++ ", error code is 0x" ++ showHex err_code)
-                    Nothing (Just fp)
+                    Nothing Nothing
 #else
     throwErrnoIfMinus1_ loc (c_fsync (fdFD fd))
 #endif
@@ -255,6 +259,9 @@ foreign import WINDOWS_CCONV unsafe "windows.h FlushFileBuffers"
 
 foreign import WINDOWS_CCONV unsafe "windows.h GetLastError"
     c_GetLastError :: IO Word32
+
+foreign import WINDOWS_CCONV unsafe "HsBase.h closesocket"
+   c_closesocket :: CInt -> IO CInt
 #else
 foreign import capi safe "unistd.h fsync"
     c_fsync :: CInt  -> IO CInt
