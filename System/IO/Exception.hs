@@ -11,7 +11,7 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : non-portable
 
-This module implemented extensible 'SomeIOException' following approach described in /An Extensible Dynamically-Typed
+This module implemented extensible io exception following approach described in /An Extensible Dynamically-Typed
 Hierarchy of Exceptions/ by Simon Marlow. The implementation in this module has simplified to meet common need.
 User who want to catch certain type of exceptions can directly use exception types this module provide,
 which are modeled after @IOErrorType@ from "GHC.IO.Exception". This module also provide similar functions from
@@ -19,7 +19,7 @@ which are modeled after @IOErrorType@ from "GHC.IO.Exception". This module also 
 
 Functions from this package will throw exceptions from this module only instead of the old 'IOError' on I/O exceptions.
 
-Example for library author defining new 'SomeIOException':
+Example for library author defining new io exception:
 
 @
   data MyNetworkException = MyNetworkException ... deriving (Show, Typeable)
@@ -40,6 +40,7 @@ module System.IO.Exception
   , ioExceptionToException
   , ioExceptionFromException
     -- * Builtin io exception types
+  , IOEInfo(..)
   , AlreadyExists(..)
   , NoSuchThing(..)
   , ResourceBusy(..)
@@ -69,14 +70,12 @@ module System.IO.Exception
   , retryErrnoMayBlock
   , retryErrnoMinus1MayBlock
   , retryErrnoNullMayBlock
-
     -- * Errno type
   , Errno(..)
   , isValidErrno
   , getErrno
   , resetErrno
   , showErrno
-  , IOEInfo(..)
   ) where
 
 import Control.Exception
@@ -88,6 +87,8 @@ import Foreign.C.String
 import Foreign.Ptr
 import GHC.Stack
 
+-- | The root type of all io exceptions, you can catch all io exception by catching this root type.
+--
 data SomeIOException = forall e . Exception e => SomeIOException e
     deriving Typeable
 
@@ -337,6 +338,8 @@ retryErrnoNullMayBlock = retryErrnoMayBlock (== nullPtr)
 
 --------------------------------------------------------------------------------
 
+-- | IO exceptions informations.
+--
 data IOEInfo = IOEInfo
     { ioeErrno :: Errno           -- ^ the errno
     , ioeDescription :: String    -- ^ description from strerror
