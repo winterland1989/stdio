@@ -11,11 +11,13 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : non-portable
 
-This module implemented extensible 'SomeIOException' following approach described in /An Extensible Dynamically-Typed Hierarchy of Exceptions/
-by Simon Marlow. The implementation in this module has simplified to meet common need. User who want to catch certain type of io exceptions
-can directly use exception types this module provide, which are modeled after @IOErrorType@ from "GHC.IO.Exception".
+This module implemented extensible 'SomeIOException' following approach described in /An Extensible Dynamically-Typed
+Hierarchy of Exceptions/ by Simon Marlow. The implementation in this module has simplified to meet common need.
+User who want to catch certain type of exceptions can directly use exception types this module provide,
+which are modeled after @IOErrorType@ from "GHC.IO.Exception". This module also provide similar functions from
+"Foreign.C.Error" with a different naming scheme, the old naming is too long and incomprehensible.
 
-The functions from this package will throw these exceptions only instead of the old 'IOError' on io exception.
+Functions from this package will throw exceptions from this module only instead of the old 'IOError' on I/O exceptions.
 
 Example for library author defining new 'SomeIOException':
 
@@ -25,6 +27,10 @@ Example for library author defining new 'SomeIOException':
         toException = ioExceptionToException
         fromException = ioExceptionFromException
 @
+
+Exceptions from this module contain 'IOEInfo' which is pretty detailed, but this also require user of this module
+do some extra work to keep error message's quality. New defined I/O exceptions are also encouraged to include a 'CallStack',
+since it helps a lot when debugging.
 
 -}
 
@@ -52,14 +58,29 @@ module System.IO.Exception
   , TimeExpired(..)
   , ResourceVanished(..)
   , Interrupted(..)
-    -- * throw io exception with errno
-  , throwIOErrno
+    -- * Throw io exceptions
+  , throwThreadErrno
+  , performErrno
+  , performErrnoMinus1
+  , performErrnoNull
+  , retryErrno
+  , retryErrnoMinus1
+  , retryErrnoNull
+  , retryErrnoMayBlock
+  , retryErrnoMinus1MayBlock
+  , retryErrnoNullMayBlock
+
+    -- * Errno type
   , Errno(..)
+  , isValidErrno
+  , getErrno
+  , resetErrno
   , showErrno
   , IOEInfo(..)
   ) where
 
 import Control.Exception
+import Control.Monad
 import Data.Typeable
 import Foreign.C.Error
 import Foreign.C.Types
@@ -107,18 +128,18 @@ IOE(TimeExpired)
 IOE(ResourceVanished)
 IOE(Interrupted)
 
--- | Throw different type of io exceptions based on errno.
+-- | Throw io exception corresponding to the current value of 'getErrno'.
 --
 -- The mapping between errno and exception type are model after "Foreign.C.Error", if there's missing
 -- or wrong mapping, please report.
 --
-throwIOErrno :: HasCallStack
-             => Errno     -- the errno
-             -> String    -- device info, such as filename, socket address, etc
-             -> IO a
-throwIOErrno errno dev = do
+throwThreadErrno :: CallStack -- callstack
+                 -> String    -- device info, such as filename, socket address, etc
+                 -> IO a
+throwThreadErrno cstack dev = do
+    errno <- getErrno
     desc <- (strerror errno >>= peekCString)
-    let info = IOEInfo errno desc dev callStack
+    let info = IOEInfo errno desc dev cstack
     case () of
         _
 
@@ -222,6 +243,97 @@ throwIOErrno errno dev = do
             | errno == eWOULDBLOCK     -> throwIO (OtherError              info)
             | errno == eXDEV           -> throwIO (UnsupportedOperation    info)
             | otherwise                -> throwIO (OtherError              info)
+
+
+--------------------------------------------------------------------------------
+
+-- | Throw io exception based on given predicate.
+--
+performErrno :: (a -> Bool) -- ^ predicate to apply to the result value of the IO operation,
+                            -- we will call 'throwThreadErrno' on True
+             -> CallStack   -- ^ callstack
+             -> String      -- ^ device information
+             -> IO a        -- ^ the IO operation to be performed
+             -> IO a
+performErrno pred cstack dev f = do
+    res <- f
+    if pred res then throwThreadErrno cstack dev else return res
+
+-- | as 'performErrno', but retry the 'IO' action when it yields the
+-- error code 'eINTR' - this amounts to the standard retry loop for
+-- interrupted POSIX system calls.
+--
+retryErrno :: (a -> Bool) -> CallStack -> String -> IO a -> IO a
+retryErrno pred cstack dev f  = do
+    res <- f
+    if pred res
+    then do
+        err <- getErrno
+        if err == eINTR
+        then retryErrno pred cstack dev f
+        else throwThreadErrno cstack dev
+    else return res
+
+-- | as 'retryErrno', but additionally if the operation
+-- yields the error code 'eAGAIN' or 'eWOULDBLOCK', an alternative
+-- action is performed before retrying.
+--
+retryErrnoMayBlock :: (a -> Bool)  -- ^ predicate to apply to the result value
+                                   -- of the 'IO' operation
+                   -> CallStack    -- ^ callstack
+                   -> String       -- ^ device info
+                   -> IO a         -- ^ the 'IO' operation to be performed
+                   -> IO b         -- ^ action to execute before retrying if
+                                   -- an immediate retry would block
+                   -> IO a
+retryErrnoMayBlock pred cstack dev f on_block  = do
+    res <- f
+    if pred res
+    then do
+        err <- getErrno
+        if err == eINTR
+        then retryErrnoMayBlock pred cstack dev f on_block
+        else if err == eWOULDBLOCK || err == eAGAIN
+             then do _ <- on_block
+                     retryErrnoMayBlock pred cstack dev f on_block
+             else throwThreadErrno cstack dev
+    else return res
+
+-- | Throw io exception corresponding to the current value of 'getErrno'
+-- if the 'IO' action returns a result of @-1@.
+--
+performErrnoMinus1 :: (Eq a, Num a) => CallStack -> String -> IO a -> IO a
+performErrnoMinus1 = performErrno (== -1)
+
+-- | Throw io exception corresponding to the current value of 'getErrno'
+-- if the 'IO' action returns a result of @-1@, but retries in case of
+-- an interrupted operation.
+--
+retryErrnoMinus1 :: (Eq a, Num a) => CallStack -> String -> IO a -> IO a
+retryErrnoMinus1  = retryErrno (== -1)
+
+-- | as 'retryErrnoMinus1', but checks for operations that would block.
+--
+retryErrnoMinus1MayBlock :: (Eq a, Num a) => CallStack -> String -> IO a -> IO b -> IO a
+retryErrnoMinus1MayBlock = retryErrnoMayBlock (== -1)
+
+-- | Throw io exception corresponding to the current value of 'getErrno'
+-- if the 'IO' action returns 'nullPtr'.
+--
+performErrnoNull :: CallStack -> String -> IO (Ptr a) -> IO (Ptr a)
+performErrnoNull  = performErrno (== nullPtr)
+
+-- | Throw io exception corresponding to the current value of 'getErrno'
+-- if the 'IO' action returns 'nullPtr',
+-- but retry in case of an interrupted operation.
+--
+retryErrnoNull :: CallStack -> String -> IO (Ptr a) -> IO (Ptr a)
+retryErrnoNull = retryErrno (== nullPtr)
+
+-- | as 'retryErrnoNull', but checks for operations that would block.
+--
+retryErrnoNullMayBlock :: CallStack -> String -> IO (Ptr a) -> IO b -> IO (Ptr a)
+retryErrnoNullMayBlock = retryErrnoMayBlock (== nullPtr)
 
 --------------------------------------------------------------------------------
 
