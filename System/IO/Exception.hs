@@ -60,16 +60,16 @@ module System.IO.Exception
   , ResourceVanished(..)
   , Interrupted(..)
     -- * Throw io exceptions
-  , throwThreadErrno
-  , performErrno
-  , performErrnoMinus1
-  , performErrnoNull
-  , retryErrno
-  , retryErrnoMinus1
-  , retryErrnoNull
-  , retryErrnoMayBlock
-  , retryErrnoMinus1MayBlock
-  , retryErrnoNullMayBlock
+  , throwErrno
+  , throwErrorIf
+  , throwErrnoIfMinus1
+  , throwErrnoIfNull
+  , throwErrnoIfRetry
+  , throwErrnoIfMinus1Retry
+  , throwErrnoIfNullRetry
+  , throwErrnoIfRetryMayBlock
+  , throwErrnoIfMinus1RetryMayBlock
+  , throwErrnoIfNullRetryMayBlock
     -- * Errno type
   , Errno(..)
   , isValidErrno
@@ -134,10 +134,10 @@ IOE(Interrupted)
 -- The mapping between errno and exception type are model after "Foreign.C.Error", if there's missing
 -- or wrong mapping, please report.
 --
-throwThreadErrno :: CallStack -- callstack
+throwErrno :: CallStack -- callstack
                  -> String    -- device info, such as filename, socket address, etc
                  -> IO a
-throwThreadErrno cstack dev = do
+throwErrno cstack dev = do
     errno <- getErrno
     desc <- (strerror errno >>= peekCString)
     let info = IOEInfo errno desc dev cstack
@@ -250,36 +250,36 @@ throwThreadErrno cstack dev = do
 
 -- | Throw io exception based on given predicate.
 --
-performErrno :: (a -> Bool) -- ^ predicate to apply to the result value of the IO operation,
-                            -- we will call 'throwThreadErrno' on True
+throwErrorIf :: (a -> Bool) -- ^ predicate to apply to the result value of the IO operation,
+                            -- we will call 'throwErrno' on True
              -> CallStack   -- ^ callstack
              -> String      -- ^ device information
              -> IO a        -- ^ the IO operation to be performed
              -> IO a
-performErrno pred cstack dev f = do
+throwErrorIf pred cstack dev f = do
     res <- f
-    if pred res then throwThreadErrno cstack dev else return res
+    if pred res then throwErrno cstack dev else return res
 
--- | as 'performErrno', but retry the 'IO' action when it yields the
+-- | as 'throwErrorIf', but retry the 'IO' action when it yields the
 -- error code 'eINTR' - this amounts to the standard retry loop for
 -- interrupted POSIX system calls.
 --
-retryErrno :: (a -> Bool) -> CallStack -> String -> IO a -> IO a
-retryErrno pred cstack dev f  = do
+throwErrnoIfRetry :: (a -> Bool) -> CallStack -> String -> IO a -> IO a
+throwErrnoIfRetry pred cstack dev f  = do
     res <- f
     if pred res
     then do
         err <- getErrno
         if err == eINTR
-        then retryErrno pred cstack dev f
-        else throwThreadErrno cstack dev
+        then throwErrnoIfRetry pred cstack dev f
+        else throwErrno cstack dev
     else return res
 
--- | as 'retryErrno', but additionally if the operation
+-- | as 'throwErrnoIfRetry', but additionally if the operation
 -- yields the error code 'eAGAIN' or 'eWOULDBLOCK', an alternative
 -- action is performed before retrying.
 --
-retryErrnoMayBlock :: (a -> Bool)  -- ^ predicate to apply to the result value
+throwErrnoIfRetryMayBlock :: (a -> Bool)  -- ^ predicate to apply to the result value
                                    -- of the 'IO' operation
                    -> CallStack    -- ^ callstack
                    -> String       -- ^ device info
@@ -287,54 +287,54 @@ retryErrnoMayBlock :: (a -> Bool)  -- ^ predicate to apply to the result value
                    -> IO b         -- ^ action to execute before retrying if
                                    -- an immediate retry would block
                    -> IO a
-retryErrnoMayBlock pred cstack dev f on_block  = do
+throwErrnoIfRetryMayBlock pred cstack dev f on_block  = do
     res <- f
     if pred res
     then do
         err <- getErrno
         if err == eINTR
-        then retryErrnoMayBlock pred cstack dev f on_block
+        then throwErrnoIfRetryMayBlock pred cstack dev f on_block
         else if err == eWOULDBLOCK || err == eAGAIN
              then do _ <- on_block
-                     retryErrnoMayBlock pred cstack dev f on_block
-             else throwThreadErrno cstack dev
+                     throwErrnoIfRetryMayBlock pred cstack dev f on_block
+             else throwErrno cstack dev
     else return res
 
 -- | Throw io exception corresponding to the current value of 'getErrno'
 -- if the 'IO' action returns a result of @-1@.
 --
-performErrnoMinus1 :: (Eq a, Num a) => CallStack -> String -> IO a -> IO a
-performErrnoMinus1 = performErrno (== -1)
+throwErrnoIfMinus1 :: (Eq a, Num a) => CallStack -> String -> IO a -> IO a
+throwErrnoIfMinus1 = throwErrorIf (== -1)
 
 -- | Throw io exception corresponding to the current value of 'getErrno'
 -- if the 'IO' action returns a result of @-1@, but retries in case of
 -- an interrupted operation.
 --
-retryErrnoMinus1 :: (Eq a, Num a) => CallStack -> String -> IO a -> IO a
-retryErrnoMinus1  = retryErrno (== -1)
+throwErrnoIfMinus1Retry :: (Eq a, Num a) => CallStack -> String -> IO a -> IO a
+throwErrnoIfMinus1Retry  = throwErrnoIfRetry (== -1)
 
--- | as 'retryErrnoMinus1', but checks for operations that would block.
+-- | as 'throwErrnoIfMinus1Retry', but checks for operations that would block.
 --
-retryErrnoMinus1MayBlock :: (Eq a, Num a) => CallStack -> String -> IO a -> IO b -> IO a
-retryErrnoMinus1MayBlock = retryErrnoMayBlock (== -1)
+throwErrnoIfMinus1RetryMayBlock :: (Eq a, Num a) => CallStack -> String -> IO a -> IO b -> IO a
+throwErrnoIfMinus1RetryMayBlock = throwErrnoIfRetryMayBlock (== -1)
 
 -- | Throw io exception corresponding to the current value of 'getErrno'
 -- if the 'IO' action returns 'nullPtr'.
 --
-performErrnoNull :: CallStack -> String -> IO (Ptr a) -> IO (Ptr a)
-performErrnoNull  = performErrno (== nullPtr)
+throwErrnoIfNull :: CallStack -> String -> IO (Ptr a) -> IO (Ptr a)
+throwErrnoIfNull  = throwErrorIf (== nullPtr)
 
 -- | Throw io exception corresponding to the current value of 'getErrno'
 -- if the 'IO' action returns 'nullPtr',
 -- but retry in case of an interrupted operation.
 --
-retryErrnoNull :: CallStack -> String -> IO (Ptr a) -> IO (Ptr a)
-retryErrnoNull = retryErrno (== nullPtr)
+throwErrnoIfNullRetry :: CallStack -> String -> IO (Ptr a) -> IO (Ptr a)
+throwErrnoIfNullRetry = throwErrnoIfRetry (== nullPtr)
 
--- | as 'retryErrnoNull', but checks for operations that would block.
+-- | as 'throwErrnoIfNullRetry', but checks for operations that would block.
 --
-retryErrnoNullMayBlock :: CallStack -> String -> IO (Ptr a) -> IO b -> IO (Ptr a)
-retryErrnoNullMayBlock = retryErrnoMayBlock (== nullPtr)
+throwErrnoIfNullRetryMayBlock :: CallStack -> String -> IO (Ptr a) -> IO b -> IO (Ptr a)
+throwErrnoIfNullRetryMayBlock = throwErrnoIfRetryMayBlock (== nullPtr)
 
 --------------------------------------------------------------------------------
 
