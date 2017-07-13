@@ -12,19 +12,17 @@ Stability   : experimental
 Portability : non-portable
 
 This module provide low-level operations on file descriptors to help you define your own I/O devices,
-these operations are not protected by any locks, you might want to protect them with MVar to provide certain
-concurrent semantics. Users are encouraged to use wrappered device types instead of dealing with file descriptors directly.
+these operations may only works for certain type of file descriptors due to OS limitations, and are not protected by any locks,
+you have to protect them with MVar to provide certain concurrent semantics.
+Users are encouraged to use wrappered device types instead of dealing with file descriptors directly.
 
-Some functions require error message to provide better error reporting, the convention is that you should provide as
-detailed error message as you could, it should contains caller and file specific informations,
-something like "System.IO.File.close: /home/bob/test.txt" is OK.
+Operations use 'HasCallStack' to provide better error reporting, the convention is that you also provide detail device informations,
+such as file name or socket address.
 
 Despite the /everything is a file/ philosophy, file descriptors operations are extremly hard to get right.
-This module re-exports most functions from "GHC.IO.FD" module, which will:
+Operations in this module will:
 
   * Correctly handle non-threaded and threaded runtime so that other haskell threads won't be blocked.
-  * Correctly handle windows and unix differences, e.g. sockets need extra care on windows.
-  * Correctly handle both O_NONBLOCK and O_BLOCK file descriptors, which is important for unix standard streams.
   * Use OS I/O multiplexer where possible, currently use epoll on linux, and kqueue on other unix environment.
 
 For file descriptors which I/O multiplexer might not work for, for example regular files, cares should be taken: don't
@@ -38,10 +36,10 @@ Please take a look at unix man page for details on each operations, which are ma
 module System.IO.FD (
   -- * FD type and universal operations
     FD
-  , fdFD
-  , newFD
   , fread
+  , freadBlock
   , fwrite
+  , fwriteBlock
   , fclose
   , fdup
   , fdup2
@@ -63,106 +61,199 @@ module System.IO.FD (
 
 import Control.Monad
 import Control.Exception
-import System.IO.Error
+import System.IO.Exception
 import Control.Concurrent.MVar
 import Control.Concurrent (rtsSupportsBoundThreads)
 import System.Posix.Types
-import System.Posix.Internals hiding (FD, setEcho, getEcho)
-import Foreign.C
+import System.Posix.Internals
 import Foreign.Marshal
 import Foreign.C.Types
 import Foreign.Ptr
+import Foreign.Storable
 import GHC.Conc.IO
-import GHC.IO.FD
-import GHC.IO.Device
+import GHC.IO.Device (IODeviceType(..), SeekMode(..))
+import GHC.Stack
 import Data.Word
+import Data.Bits
 import Numeric (showHex)
 
--- | Make a new 'FD' from OS file descriptor.
+
+-- NOTE: On Win32 platforms, this will only work with file descriptors
+-- referring to file handles. i.e., it'll fail for socket FDs.
+fdStat :: HasCallStack => String -> FD -> IO (IODeviceType, CDev, CIno)
+fdStat dev fd =
+    allocaBytes sizeof_stat $ \ p_stat -> do
+        throwErrnoIfMinus1Retry_ callStack dev $
+            c_fstat fd p_stat
+        ty <- statGetType p_stat
+        dev <- st_dev p_stat
+        ino <- st_ino p_stat
+        return (ty,dev,ino)
+
+
+-- | Get device type.
 --
--- 'newFD' won't perform file lock for regular files, locking semantics should be implemented by wrapper types.
+-- NOTE: On Win32 platforms, this will only work with file descriptors
+-- referring to file handles. i.e., it'll fail for socket FDs.
 --
-newFD :: CInt   -- ^ the file descriptor
-      -> Bool   -- ^ is a socket (on Windows)
-      -> Bool   -- ^ is in non-blocking mode on Unix
-      -> FD
-{-# INLINABLE newFD #-}
-newFD fd is_socket is_nonblock =
-    FD{ fdFD = fd,
-#ifndef mingw32_HOST_OS
-        fdIsNonBlocking = fromEnum is_nonblock
-#else
-        fdIsSocket_ = fromEnum is_socket
-#endif
-      }
+fdeviceType :: FD -> IO IODeviceType
+fdeviceType fd = do (ty,_,_) <- fdStat fd; return ty
 
 
 -- | Read up to N bytes from a 'FD'.
 --
+-- The 'FD' should be opened with 'O_NONBLOCK' if it can block, otherwise 'fread' would block RTS.
+-- All 'FD' we create in this package are marked with 'O_NONBLOCK'(except standard streams).
 --
-fread :: String  -- ^ location message when error
+fread :: HasCallStack
+      => String  -- ^ device info
       -> FD      -- ^ the file descriptor
       -> Ptr Word8  -- ^ the buffer
       -> Int        -- ^ buffer offset
       -> Int        -- ^ read limit
       -> IO Int     -- ^ actual bytes read
 {-# INLINABLE fread #-}
-fread loc !fd buf off len =
-    fromIntegral `fmap` readRawBufferPtr loc fd buf off (fromIntegral len)
+fread dev !fd buf off len = do
+#ifndef mingw32_HOST_OS
+    unsafe_read
+  where
+    do_read call = fromIntegral `fmap`
+                      throwErrnoIfMinus1RetryMayBlock callStack dev call
+                            (threadWaitRead (fromIntegral fd))
+    unsafe_read = do_read (c_read fd (buf `plusPtr` off) (fromIntegral len))
+#else /* mingw32_HOST_OS.... */
+    if rtsSupportsBoundThreads
+    then blockingReadRawBufferPtr callStack dev fd buf off len
+    else asyncReadRawBufferPtr    callStack dev fd buf off len
+#endif
+
+-- | Read up to N bytes from a 'FD'.
+--
+-- The 'FD' could be opened with 'O_BLOCK', we do a select before reading. This functions is mainly used for
+-- standard streams since we don't want to change their flags.
+--
+freadBlock :: HasCallStack
+           => String     -- ^ device info
+           -> FD         -- ^ the file descriptor
+           -> Ptr Word8  -- ^ the buffer
+           -> Int        -- ^ buffer offset
+           -> Int        -- ^ read limit
+           -> IO Int     -- ^ actual bytes read
+{-# INLINABLE freadBlock #-}
+freadBlock dev !fd buf off len = do
+#ifndef mingw32_HOST_OS
+    r <- throwErrnoIfMinus1 callStack dev (unsafe_fdReady fd 0 0 0)
+    if r /= 0
+    then read
+    else do threadWaitRead (fromIntegral fd); read
+  where
+    do_read call = fromIntegral `fmap`
+                      throwErrnoIfMinus1RetryMayBlock callStack dev call
+                            (threadWaitRead (fromIntegral fd))
+    read        = if rtsSupportsBoundThreads then safe_read else unsafe_read
+    unsafe_read = do_read (c_read fd (buf `plusPtr` off) (fromIntegral len))
+    safe_read   = do_read (c_safe_read fd (buf `plusPtr` off) (fromIntegral len))
+#else /* mingw32_HOST_OS.... */
+    if rtsSupportsBoundThreads
+    then blockingReadRawBufferPtr callStack dev fd buf off len
+    else asyncReadRawBufferPtr    callStack dev fd buf off len
+#endif
 
 -- | Write exaclty N bytes to 'FD'
 --
-fwrite :: String  -- ^ location message when error
-        -> FD      -- ^ the file descriptor
-        -> Ptr Word8  -- ^ the buffer
-        -> Int        -- ^ buffer offset
-        -> Int        -- ^ write length
-        -> IO ()
+fwrite :: HasCallStack
+       => String  -- ^ device info
+       -> FD      -- ^ the file descriptor
+       -> Ptr Word8  -- ^ the buffer
+       -> Int        -- ^ buffer offset
+       -> Int        -- ^ write length
+       -> IO Int
 {-# INLINABLE fwrite #-}
-fwrite loc !fd buf off len = do
-    res <- writeRawBufferPtr loc fd buf off (fromIntegral len)
-    let res' = fromIntegral res
-    when (res' < len) (fwrite loc fd (buf `plusPtr` res') 0 (len - res'))
+fwrite dev !fd buf off len = do
+#ifndef mingw32_HOST_OS
+    unsafe_write -- unsafe is ok, it can't block
+  where
+    do_write call = fromIntegral `fmap`
+                      throwErrnoIfMinus1RetryMayBlock callStack dev call
+                        (threadWaitWrite (fromIntegral fd))
+    unsafe_write  = do_write (c_write fd (buf `plusPtr` off) (fromIntegral len))
+#else /* mingw32_HOST_OS.... */
+    if rtsSupportsBoundThreads
+    then blockingWriteRawBufferPtr callStack dev fd buf off len
+    else asyncWriteRawBufferPtr    callStack dev fd buf off len
+#endif
+
+-- | Write exaclty N bytes to 'FD'
+--
+fwriteBlock :: HasCallStack
+            => String  -- ^ location message when error
+            -> FD      -- ^ the file descriptor
+            -> Ptr Word8  -- ^ the buffer
+            -> Int        -- ^ buffer offset
+            -> Int        -- ^ write length
+            -> IO Int
+{-# INLINABLE fwriteBlock #-}
+fwriteBlock dev !fd buf off len = do
+#ifndef mingw32_HOST_OS
+    r <- unsafe_fdReady fd 1 0 0
+    if r /= 0
+    then write
+    else do threadWaitWrite (fromIntegral fd); write
+  where
+    do_write call = fromIntegral `fmap`
+                        throwErrnoIfMinus1RetryMayBlock callStack dev call
+                            (threadWaitWrite (fromIntegral fd))
+    write         = if rtsSupportsBoundThreads then safe_write else unsafe_write
+    unsafe_write  = do_write (c_write fd (buf `plusPtr` off) (fromIntegral len))
+    safe_write    = do_write (c_safe_write fd (buf `plusPtr` off) (fromIntegral len))
+#else /* mingw32_HOST_OS.... */
+    if rtsSupportsBoundThreads
+    then blockingWriteRawBufferPtr callStack dev fd buf off len
+    else asyncWriteRawBufferPtr    callStack dev fd buf off len
+#endif
+
 
 -- | Close a 'FD'.
 --
 -- This operation is concurrency-safe, e.g. other threads blocked on this 'FD' will get an IO exception.
 --
--- Note regular file using file locks should release lock before call 'fclose', otherwise if we're preempted
--- after closing but before releasing, the FD may have been reused, and we may release the wrong 'FD'.
+-- Note if 'FD' is socket then you should use 'closeSocket' instead of this function.
 --
-fclose :: String -> FD -> IO ()
+fclose :: HasCallStack => String -> FD -> IO ()
 {-# INLINABLE fclose #-}
-fclose loc fd = do
-    let closer realFd =
-            throwErrnoIfMinus1Retry_ loc $
-#ifdef mingw32_HOST_OS
-            if fdIsSocket_ fd /= 0 then
-                c_closesocket (fromIntegral realFd)
-            else
-#endif
-                c_close (fromIntegral realFd)
-    closeFdWith closer (fromIntegral (fdFD fd))
+fclose dev fd = do
+    let closer realFD =
+            throwErrnoIfMinus1Retry_ callStack dev $
+                c_close (fromIntegral realFD)
+    closeFdWith closer (fromIntegral fd)
 
 -- | Duplicate 'FD'.
 --
-fdup :: FD -> IO FD
-fdup = dup
+fdup :: HasCallStack => FD -> IO FD
+fdup fd = do
+    newfd <- throwErrnoIfMinus1 callStack "dup device" $ c_dup fd
+    return newfd
 
 -- | Duplicate the first 'FD' to the second 'FD', the second 'FD' is sliently closed if open.
 --
-fdup2 :: FD -> FD -> IO FD
-fdup2 = dup2
+fdup2 :: HasCallStack => FD -> FD -> IO FD
+fdup2 fd fdto = do
+    -- Windows' dup2 does not return the new descriptor, unlike Unix
+    throwErrnoIfMinus1 callStack "dup device" $
+        c_dup2 fd fdto
+    return fdto -- original FD, with the new fdFD
 
 -- | Is 'FD' seekable?
 --
 fseekable :: FD -> IO Bool
-fseekable = isSeekable
+fseekable fd = do
+  t <- fdeviceType fd
+  return (t == RegularFile || t == RawDevice)
 
 -- | Seeking 'FD'.
-fseek :: String -> FD -> SeekMode -> Int -> IO ()
-fseek loc fd mode off = throwErrnoIfMinus1Retry_ loc $
-    c_lseek (fdFD fd) (fromIntegral off) seektype
+fseek :: HasCallStack => String -> FD -> SeekMode -> Int -> IO ()
+fseek dev fd mode off = throwErrnoIfMinus1Retry_ callStack dev $
+    c_lseek fd (fromIntegral off) seektype
   where
     seektype :: CInt
     seektype = case mode of
@@ -172,17 +263,18 @@ fseek loc fd mode off = throwErrnoIfMinus1Retry_ loc $
 
 -- | Tell 'FD' current offset.
 --
-ftell :: String -> FD -> IO Int
-ftell loc fd = fromIntegral `fmap` (throwErrnoIfMinus1Retry loc $
-    c_lseek (fdFD fd) 0 sEEK_CUR)
+ftell :: HasCallStack => String -> FD -> IO Int
+ftell dev fd = fromIntegral `fmap`
+    (throwErrnoIfMinus1Retry callStack dev $
+        c_lseek fd 0 sEEK_CUR)
 
 -- | Get file size.
 --
-fgetSize :: String -> FD -> IO Int
-fgetSize loc fd = do
+fgetSize :: HasCallStack => String -> FD -> IO Int
+fgetSize dev fd = do
     allocaBytes sizeof_stat $ \ p_stat -> do
-        throwErrnoIfMinus1Retry_ loc $
-            c_fstat (fdFD fd) p_stat
+        throwErrnoIfMinus1Retry_ callStack dev $
+            c_fstat fd p_stat
         c_mode <- st_mode p_stat :: IO CMode
         if not (s_isreg c_mode)
         then return (-1)
@@ -192,38 +284,38 @@ fgetSize loc fd = do
 
 -- | Set file size.
 --
-fsetSize :: String -> FD -> Int -> IO ()
-fsetSize loc fd size = throwErrnoIf_ (/=0) loc $
-    c_ftruncate (fdFD fd) (fromIntegral size)
+fsetSize :: HasCallStack => String -> FD -> Int -> IO ()
+fsetSize dev fd size = throwErrnoIf_ (/=0) callStack dev $
+    c_ftruncate fd (fromIntegral size)
 
 -- | Flush OS cache into disk.
 --
-fsync :: String -> FD -> IO ()
-fsync loc fd = do
+fsync :: HasCallStack => String -> FD -> IO ()
+fsync dev fd = do
 #ifdef mingw32_HOST_OS
-    success <- c_FlushFileBuffers =<< c_get_osfhandle (fdFD fd)
+    success <- c_FlushFileBuffers =<< c_get_osfhandle fd
     if success
     then return ()
     else do
         err_code <- c_GetLastError
-        throwIO $ mkIOError (loc ++ ", error code is 0x" ++ showHex err_code)
+        throwIO $ mkIOError (dev ++ ", error code is 0x" ++ showHex err_code)
                     Nothing Nothing
 #else
-    throwErrnoIfMinus1_ loc (c_fsync (fdFD fd))
+    throwErrnoIfMinus1_ callStack dev (c_fsync fd)
 #endif
 
--- | Get device type.
---
--- NOTE: On Win32 platforms, this will only work with file descriptors
--- referring to file handles. i.e., it'll fail for socket FDs.
---
-fdeviceType :: FD -> IO IODeviceType
-fdeviceType = devType
+--------------------------------------------------------------------------------
+
 
 -- | Is this 'FD' a pointer?
 --
 fterminal :: FD -> IO Bool
-fterminal = isTerminal
+fterminal fd =
+#if defined(mingw32_HOST_OS)
+    is_console fd >>= return . toBool
+#else
+    c_isatty fd >>= return . toBool
+#endif
 
 -- | Get terminal echo state.
 --
@@ -238,7 +330,29 @@ fsetEcho = setEcho
 -- | Set terminal to canonical / non-canonical mode.
 --
 fsetCanonical :: FD -> Bool -> IO ()
-fsetCanonical = setRaw
+fsetCanonical fd cooked =
+#ifdef mingw32_HOST_OS
+  x <- set_console_buffering fd (if cooked then 1 else 0)
+  if (x /= 0)
+   then ioError (ioe_unk_error "setCooked" "failed to set buffering")
+   else return ()
+#else
+  tcSetAttr fd $ \ p_tios -> do
+
+    -- turn on/off ICANON
+    lflag <- c_lflag p_tios :: IO CTcflag
+    let new_lflag | cooked    = lflag .|. (fromIntegral const_icanon)
+                  | otherwise = lflag .&. complement (fromIntegral const_icanon)
+    poke_c_lflag p_tios (new_lflag :: CTcflag)
+
+    -- set VMIN & VTIME to 1/0 respectively
+    when (not cooked) $ do
+            c_cc <- ptr_c_cc p_tios
+            let vmin  = (c_cc `plusPtr` (fromIntegral const_vmin))  :: Ptr Word8
+                vtime = (c_cc `plusPtr` (fromIntegral const_vtime)) :: Ptr Word8
+            poke vmin  1
+            poke vtime 0
+#endif
 
 --------------------------------------------------------------------------------
 
@@ -265,4 +379,7 @@ foreign import WINDOWS_CCONV unsafe "HsBase.h closesocket"
 #else
 foreign import capi safe "unistd.h fsync"
     c_fsync :: CInt  -> IO CInt
+
+foreign import ccall unsafe "fdReady"
+    unsafe_fdReady :: CInt -> CInt -> CInt -> CInt -> IO CInt
 #endif

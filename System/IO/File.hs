@@ -59,7 +59,7 @@ openFile path mode = withFilePath path $ \ f -> do
         if (r == -1)
         then E.ioException $
             E.IOError Nothing E.ResourceBusy msg "file is locked" Nothing (Just path)
-        else return (File (newFD fd False True) path)
+        else return (File fd path)
     else E.ioException $
         E.IOError Nothing E.InappropriateType msg "not a regular file" Nothing (Just path)
   where
@@ -80,7 +80,7 @@ closeFile :: File -> IO ()
 closeFile (File fd path) = do
     -- release the lock *first*, because otherwise if we're preempted
     -- after closing but before releasing, the FD may have been reused.
-    unlockFile (fdFD fd)
+    unlockFile fd
     fclose ("System.IO.File.close:" ++ path) fd
 
 -- |

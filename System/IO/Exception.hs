@@ -70,6 +70,13 @@ module System.IO.Exception
   , throwErrnoIfRetryMayBlock
   , throwErrnoIfMinus1RetryMayBlock
   , throwErrnoIfNullRetryMayBlock
+
+  , throwErrnoIf_
+  , throwErrnoIfMinus1_
+  , throwErrnoIfRetry_
+  , throwErrnoIfMinus1Retry_
+  , throwErrnoIfRetryMayBlock_
+  , throwErrnoIfMinus1RetryMayBlock_
     -- * Errno type
   , Errno(..)
   , isValidErrno
@@ -81,7 +88,24 @@ module System.IO.Exception
 import Control.Exception
 import Control.Monad
 import Data.Typeable
-import Foreign.C.Error
+import Foreign.C.Error hiding (
+    throwErrno
+  , throwErrorIf
+  , throwErrnoIfMinus1
+  , throwErrnoIfNull
+  , throwErrnoIfRetry
+  , throwErrnoIfMinus1Retry
+  , throwErrnoIfNullRetry
+  , throwErrnoIfRetryMayBlock
+  , throwErrnoIfMinus1RetryMayBlock
+  , throwErrnoIfNullRetryMayBlock
+  , throwErrnoIf_
+  , throwErrnoIfMinus1_
+  , throwErrnoIfRetry_
+  , throwErrnoIfMinus1Retry_
+  , throwErrnoIfRetryMayBlock_
+  , throwErrnoIfMinus1RetryMayBlock_
+  )
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Ptr
@@ -280,23 +304,23 @@ throwErrnoIfRetry pred cstack dev f  = do
 -- action is performed before retrying.
 --
 throwErrnoIfRetryMayBlock :: (a -> Bool)  -- ^ predicate to apply to the result value
-                                   -- of the 'IO' operation
-                   -> CallStack    -- ^ callstack
-                   -> String       -- ^ device info
-                   -> IO a         -- ^ the 'IO' operation to be performed
-                   -> IO b         -- ^ action to execute before retrying if
-                                   -- an immediate retry would block
-                   -> IO a
-throwErrnoIfRetryMayBlock pred cstack dev f on_block  = do
+                                          -- of the 'IO' operation
+                          -> CallStack    -- ^ callstack
+                          -> String       -- ^ device info
+                          -> IO a         -- ^ the 'IO' operation to be performed
+                          -> IO b         -- ^ action to execute before retrying if
+                                          -- an immediate retry would block
+                          -> IO a
+throwErrnoIfRetryMayBlock pred cstack dev f onblock  = do
     res <- f
     if pred res
     then do
         err <- getErrno
         if err == eINTR
-        then throwErrnoIfRetryMayBlock pred cstack dev f on_block
+        then throwErrnoIfRetryMayBlock pred cstack dev f onblock
         else if err == eWOULDBLOCK || err == eAGAIN
-             then do _ <- on_block
-                     throwErrnoIfRetryMayBlock pred cstack dev f on_block
+             then do _ <- onblock
+                     throwErrnoIfRetryMayBlock pred cstack dev f onblock
              else throwErrno cstack dev
     else return res
 
@@ -335,6 +359,24 @@ throwErrnoIfNullRetry = throwErrnoIfRetry (== nullPtr)
 --
 throwErrnoIfNullRetryMayBlock :: CallStack -> String -> IO (Ptr a) -> IO b -> IO (Ptr a)
 throwErrnoIfNullRetryMayBlock = throwErrnoIfRetryMayBlock (== nullPtr)
+
+throwErrnoIf_ :: (a -> Bool) -> CallStack -> String -> IO a -> IO ()
+throwErrnoIf_ pred cstack dev f = void (throwErrorIf pred cstack dev f)
+
+throwErrnoIfMinus1_ :: (Eq a, Num a) => CallStack -> String -> IO a -> IO ()
+throwErrnoIfMinus1_ cstack dev f = void (throwErrnoIfMinus1 cstack dev f)
+
+throwErrnoIfRetry_ :: (a -> Bool) -> CallStack -> String -> IO a -> IO ()
+throwErrnoIfRetry_ pred cstack dev f = void (throwErrnoIfRetry pred cstack dev f)
+
+throwErrnoIfMinus1Retry_ :: (Eq a, Num a) => CallStack -> String -> IO a -> IO ()
+throwErrnoIfMinus1Retry_ cstack dev f = void (throwErrnoIfMinus1Retry cstack dev f)
+
+throwErrnoIfRetryMayBlock_ :: (a -> Bool) -> CallStack -> String -> IO a -> IO b -> IO ()
+throwErrnoIfRetryMayBlock_ pred cstack dev f onblock = void (throwErrnoIfRetryMayBlock pred cstack dev f onblock)
+
+throwErrnoIfMinus1RetryMayBlock_ :: (Eq a, Num a) => CallStack -> String -> IO a -> IO b -> IO ()
+throwErrnoIfMinus1RetryMayBlock_ cstack dev f onblock = void (throwErrnoIfMinus1RetryMayBlock cstack dev f onblock)
 
 --------------------------------------------------------------------------------
 
