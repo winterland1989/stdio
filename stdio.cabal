@@ -31,7 +31,8 @@ library
 
                             System.IO.Exception 
                             System.IO.File
-                            System.IO.FD
+                            System.IO.Handle
+
     -- other-modules:       
     -- other-extensions:    
     build-depends:          base >=4.8 && <5.0
@@ -39,6 +40,7 @@ library
                         ,   primitive >= 0.6.2
                         ,   deepseq
                         ,   template-haskell 
+                        ,   managed
 
     c-sources:          cbits/bytes.c
                         cbits/win32.c

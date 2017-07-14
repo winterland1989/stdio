@@ -2,13 +2,12 @@ module System.IO.Handle where
 
 
 import Control.Concurrent.MVar
-import System.IO.FD
 
 class Input f where
-    fread :: f -> Int -> Ptr Word8 -> IO Int
+    input :: f -> Int -> Ptr Word8 -> IO Int
 
 class Output f where
-    fwrite :: f -> Ptr Word8 -> Int -> IO ()
+    output :: f -> Ptr Word8 -> Int -> IO ()
 
 -- | Handle
 --

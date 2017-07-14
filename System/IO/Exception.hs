@@ -29,7 +29,7 @@ Example for library author defining new io exception:
 @
 
 Exceptions from this module contain 'IOEInfo' which is pretty detailed, but this also require user of this module
-do some extra work to keep error message's quality. New defined I/O exceptions are also encouraged to include a 'CallStack',
+do some extra work to keep error message's quality. New defined I/O exceptions are also encouraged to include a 'IOEInfo',
 since it helps a lot when debugging.
 
 -}
@@ -164,7 +164,7 @@ throwErrno :: CallStack -- callstack
 throwErrno cstack dev = do
     errno <- getErrno
     desc <- (strerror errno >>= peekCString)
-    let info = IOEInfo errno desc dev cstack
+    let info = IOEInfo (Just errno) desc dev cstack
     case () of
         _
 
@@ -383,15 +383,15 @@ throwErrnoIfMinus1RetryMayBlock_ cstack dev f onblock = void (throwErrnoIfMinus1
 -- | IO exceptions informations.
 --
 data IOEInfo = IOEInfo
-    { ioeErrno :: Errno           -- ^ the errno
+    { ioeErrno :: Maybe Errno     -- ^ the errno
     , ioeDescription :: String    -- ^ description from strerror
     , ioeDevice :: String         -- ^ device info, such as filename, socket address, etc
     , ioeCallStack :: CallStack   -- ^ lightweight partial call-stack
     }
 
 instance Show IOEInfo where
-    show (IOEInfo errno desc dev cstack) =
-         "{errno:" ++ (showErrno errno) ++ ", " ++
+    show (IOEInfo merrno desc dev cstack) =
+         (maybe "" (\errno -> "{errno:" ++ (showErrno errno) ++ ", ") merrno) ++
          "description:" ++ desc ++ ", " ++
          "device:" ++ dev ++ ", " ++
          "callstack:" ++ prettyCallStack cstack ++ "}"
