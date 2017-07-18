@@ -42,7 +42,7 @@ library
                         ,   deepseq
                         ,   template-haskell 
                         ,   managed
-                        ,   unboxed-ref
+                        ,   unboxed-ref >= 0.4
 
     c-sources:          cbits/bytes.c
                         cbits/win32.c

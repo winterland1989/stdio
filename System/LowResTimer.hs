@@ -28,6 +28,7 @@ Reference:
 module System.LowResTimer
   ( -- * low resolution timers
     registerLowResTimer
+  , debounce
   ) where
 
 import Data.Array
@@ -116,8 +117,8 @@ ensureLowResTimerManager lrtm@(LowResTimerManager _ _ _ runningLock) = do
 --
 startLowResTimerManager :: LowResTimerManager ->IO ()
 startLowResTimerManager lrtm@(LowResTimerManager _ _ regCounter runningLock)  = do
-    modifyMVar_ runningLock $ \ _ -> do
-        c <- readIORefU regCounter
+    modifyMVar_ runningLock $ \ _ -> do     -- we shouldn't receive async exception here
+        c <- readIORefU regCounter          -- unless something terribly wrong happened, e.g., stackoverflow
         if c > 0
         then do
             forkIO (fireLowResTimerQueue lrtm)  -- we offload the scanning to another thread to minimize
@@ -148,7 +149,7 @@ fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter running
 
     go tList tListRef regCounter
   where
-    go (TimerItem roundCounter action nextList) tListRef regCounter = E.mask_ $ do
+    go (TimerItem roundCounter action nextList) tListRef regCounter = do
         r <- atomicSubCounter_ roundCounter 1
         case r `compare` 0 of
             LT -> do                                     -- if round number is less than 0, then it's a cancelled timer
@@ -162,3 +163,29 @@ fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter running
                 atomicModifyIORef' tListRef $ \ tlist -> (TimerItem roundCounter action tlist, ())
                 go nextList tListRef regCounter
     go TimerNil _ _ = return ()
+
+--------------------------------------------------------------------------------
+
+-- | Cache result of an IO action for give time t.
+--
+-- This combinator is useful when you want to share IO result within a period, the action will be called
+-- on demand, but will never be called more frequently than 1/t.
+--
+-- One common way to get a shared periodical updated value is to start a seperate thread,
+-- but doing that will stop system from being idle, which stop idle GC from running,
+-- and in turn disable deadlock detection, which is too bad. This function solves that.
+--
+debounce :: Int -> IO a -> IO (IO a)
+debounce t action = do
+    resultLock <- newEmptyMVar
+    return $ do
+        mresult <- tryReadMVar resultLock
+        case mresult of
+            Just result -> return result
+            _           -> do
+                result' <- action
+                written <- tryPutMVar resultLock result'    -- there may be some contention here
+                when written . void $             -- we don't have to success, but if we have
+                    registerLowResTimer t         -- after t ms we clear result
+                        (void $ tryTakeMVar resultLock)
+                return result'

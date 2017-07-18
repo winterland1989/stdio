@@ -3,43 +3,63 @@ module System.IO.Handle where
 
 import Control.Concurrent.MVar
 
+-- | Input device
+--
+-- Convention: 'input' should return 0 on EOF.
+--
 class Input f where
     input :: f -> Int -> Ptr Word8 -> IO Int
 
+-- | Output device
+--
 class Output f where
-    output :: f -> Ptr Word8 -> Int -> IO ()
+    output :: f -> Ptr Word8 -> Int -> IO Int
 
--- | Handle
---
--- A Handle handle contain a read buffer and write buffer which are protected by seperated 'MVar's.
---
---
--- @
---
---
---
 
-data Handle f = Handle
-    { fd  :: !f
-    , readBufSize   :: {-# UNPACK #-} !Int
-    , readBuf       :: {-# UNPACK #-} !MVar [Bytes]
-    , writeBuf      :: {-# UNPACK #-} !(PrimArray Word8)
-    , writeBufIndex :: {-# UNPACK #-} !MVar Int
+
+data BufferedInput_ = BufferedInput_
+    { bufferInput  :: Int -> Ptr Word8 -> IO Int
+    , bufferOffset :: {-# UNPACK #-} !Int
+    , bufferLength :: {-# UNPACK #-} !Int
+    , inputBuffer  :: {-# UNPACK #-} !(MutablePrimArray Word8)
     }
 
-newHandle32K :: FD f => f -> IO (Handle f)
-newHandle32K f = buffered f bufSiz bufSiz
-  where bufSiz = (32 * 1024) - 2 * sizeOf (undefined :: Word)
+type BufferedInput = MVar BufferedInput_
 
-newHandle :: FD f => f -> Int -> Int -> IO (Handle f)
-newHandle f rbufSize wbufSiz =
+data BufferedOutput_ = BufferedOutput_
+    { bufferOutout  :: Int -> Ptr Word8 -> IO ()
+    , bufferIndex   :: {-# UNPACK #-} !Int
+    , outputBuffer  :: {-# UNPACK #-} !(MutablePrimArray Word8)
+    }
 
--- | Perform buffered read on a 'Handle'
+type BufferedOutput = MVar BufferedOutput_
+
+
+newBufferedInput :: Input i => i -> Int -> IO BufferedInput
+newBufferedInput i bufSiz = do
+    buf <- newArr bufSiz
+    newMVar (BufferedInput_ (input i) 0 0 buf)
+
+
+-- | Request certain N bytes from 'BufferedInput'.
 --
--- The reading logic is simple: if we have
+--  If Internal buffer reach EOF, it will return less than N bytes.
 --
-read :: (FD f) => Handle f -> Int -> IO (Maybe Bytes)
-read Handle{..} = modifyMVar readBuf $ \ rbuf ->
+-- The buffering logic is quite subtle:
+--
+--  * If there's enough bytes in buffer and N < bufferSize/2, copy the bytes from buffer.
+--
+--  * If there's enough bytes in buffer and N >= bufferSize/2, freeze the old buffer.
+--
+--  * If there's no enough bytes left, we will allocate a new buffer of size N, and copy first M
+--    bytes from old buffer, then
+--
+--    1. If (N-M) < bufferSize/2, we use old buffer to receive new data, and copy N-M bytes afterwards.
+--    2. If (N-M) >= bufferSize/2, we directly use new buffer to receive data.
+--    3 .If enough bytes are received, we freeze the new buffer as input, otherwise go back to 1.
+--
+readExactly :: BufferedInput -> Int -> Int -> IO Bytes
+readExactly input len timeo = modifyMVar input $ \ BufferedInput_{..} -> do
     case rbuf of
         (x:xs) -> (xs, x)
         e -> do
@@ -52,8 +72,11 @@ read Handle{..} = modifyMVar readBuf $ \ rbuf ->
                     return (e, Just (PVector ba 0 0))
 
 
-push :: (FD f) => Handle f -> Bytes -> IO ()
-push Handle{..} x = modifyMVar_ readBuf $ \ rBuf -> return (x:rBuf)
+readChunk :: BufferedInput -> (Bytes -> (a, Bytes)) -> IO a
+readChunk
+
+bufInputText :: BufferedInput -> IO Text
+bufInputText
 
 -- | Write 'Bytes' into buffered handle.
 --

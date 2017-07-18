@@ -37,7 +37,6 @@ data File = File
     , filePath :: FilePath
     }
 
-
 instance Input File where
     input (File fd path) buf len = do
 #ifdef mingw32_HOST_OS
@@ -45,13 +44,16 @@ instance Input File where
         then blockingReadRawBufferPtr callStack dev fd buf 0 len
         else asyncReadRawBufferPtr    callStack dev fd buf 0 len
 #else
-        unsafe_read
+        unsafe_read  -- regular file read will never block
       where
         do_read call = fromIntegral `fmap`
                           throwErrnoIfMinus1RetryMayBlock callStack path call
                                 (threadWaitRead (fromIntegral fd))
         unsafe_read = do_read (c_read fd buf (fromIntegral len))
 #endif
+
+instance Output File where
+    output input (File fd path) buf len = do
 
 
 
