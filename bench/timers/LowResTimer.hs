@@ -11,7 +11,7 @@ main = do
 
     replicateM 100000 . forkIO $ do
          forM_ [1..10] $ \ i -> do
-            registerLowResTimer i (atomically $ modifyTVar' r (+1))
+            registerLowResTimer (i*10) (atomically $ modifyTVar' r (+1))
 
     atomically $ do
         r' <- readTVar r

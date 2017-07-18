@@ -1,5 +1,28 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+
+{-|
+Module      : System.LowResTimer
+Description : Low resolution (0.1s) timing wheel
+Copyright   : (c) Winterland, 2017
+License     : BSD
+Maintainer  : drkoster@qq.com
+Stability   : experimental
+Portability : non-portable
+
+This module provide low resolution (0.1s) timers using a single timing wheel of size 512, the timer thread will automatically
+started or stopped based on demannd. register or cancel a timeout is O(1), and each step only need scan n/512 items given
+timers are registered in an even fashion.
+
+This timer is particularly suitable for high concurrent approximated I/O timeout scheduling, and you should not rely on it to
+provide timing information since it's not accurate.
+
+Reference:
+
+    * <https://github.com/netty/netty/blob/4.1/common/src/main/java/io/netty/util/HashedWheelTimer.java>
+    * <http://www.cse.wustl.edu/~cdgill/courses/cs6874/TimingWheels.ppt>
+-}
 
 
 module System.LowResTimer
@@ -7,33 +30,18 @@ module System.LowResTimer
     registerLowResTimer
   ) where
 
-{-|
-Module      : System.LowResTimer
-Description : Low resolution (1s) timing wheel
-Copyright   : (c) Winterland, 2017
-License     : BSD
-Maintainer  : drkoster@qq.com
-Stability   : experimental
-Portability : non-portable
-
-This module provide low resolution (1s) timers using a single timing wheel of size 512, the timer thread will automatically
-started or stopped based on demannd. register or cancel a timeout is O(1), and each step only need scan n/512 items given
-timers are registered in an even fashion.
-
--}
-
 import Data.Array
 import GHC.Event
 import System.IO.Unsafe
 import Control.Concurrent.MVar
 import Control.Concurrent
 import Control.Monad
+import GHC.Conc
 import Data.IORef.Unboxed
 import Data.IORef
 import Data.Word
 import qualified Control.Exception as E
 
--- | Reference: https://github.com/netty/netty/blob/4.1/common/src/main/java/io/netty/util/HashedWheelTimer.java
 --
 queueSize :: Int
 queueSize = 512
@@ -70,10 +78,10 @@ getSystemLowResTimerManager = readIORef lowResTimerManager
 -- If the action could block, you may want to run it in another thread. Example to kill a thread after 10s:
 --
 -- @
---   registerLowResTimer 10 (forkIO $ killThread tid)
+--   registerLowResTimer 100 (forkIO $ killThread tid)
 -- @
 --
-registerLowResTimer :: Int          -- ^ timout in seconds
+registerLowResTimer :: Int          -- ^ timout in unit of 100 milliseconds / 0.1s
                     -> IO ()        -- ^ the action you want to perform, it should not block
                     -> IO (IO ())   -- ^ cancel action
 registerLowResTimer t action = do
@@ -99,7 +107,9 @@ registerLowResTimer t action = do
 ensureLowResTimerManager :: LowResTimerManager -> IO ()
 ensureLowResTimerManager lrtm@(LowResTimerManager _ _ _ runningLock) = do
     modifyMVar_ runningLock $ \ running -> do
-        unless running (void . forkIO $ startLowResTimerManager lrtm)
+        unless running $ do
+            tid <- forkIO (startLowResTimerManager lrtm)
+            labelThread tid "stdio: low resolution time manager"    -- make sure we can see it in GHC event log
         return True
 
 -- | Start low resolution timer loop, the loop is automatically stopped if there's no more new registrations.
@@ -113,7 +123,13 @@ startLowResTimerManager lrtm@(LowResTimerManager _ _ regCounter runningLock)  = 
             forkIO (fireLowResTimerQueue lrtm)  -- we offload the scanning to another thread to minimize
                                                 -- the time we holding runningLock
             htm <- getSystemTimerManager
-            registerTimeout htm 1000000 (startLowResTimerManager lrtm)
+            case () of
+                _
+#ifndef mingw32_HOST_OS
+                    | rtsSupportsBoundThreads ->
+                        void $ registerTimeout htm 100000 (startLowResTimerManager lrtm)
+#endif
+                    | otherwise -> threadDelay 100000 >> startLowResTimerManager lrtm
             return True
         else do
             return False -- if we haven't got any registered timeout, we stop the time manager
@@ -146,5 +162,3 @@ fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter running
                 atomicModifyIORef' tListRef $ \ tlist -> (TimerItem roundCounter action tlist, ())
                 go nextList tListRef regCounter
     go TimerNil _ _ = return ()
-
-

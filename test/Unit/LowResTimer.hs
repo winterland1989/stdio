@@ -17,7 +17,7 @@ unitLowResTimer = testGroup "low resolution timers" [
                 forM_ [1..10] $ \ i -> do
                     registerLowResTimer i (void $ atomicAddCounter c 1)
 
-            threadDelay 11000000 -- make sure all timers are fired
+            threadDelay 1100000 -- make sure all timers are fired
             c' <- readIORefU c
             assertEqual "" 100000 c'
     ]
