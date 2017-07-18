@@ -5,7 +5,9 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE UnboxedTuples #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 
 {-|
 Module      : Data.Array
@@ -34,10 +36,15 @@ module Data.Array (
   -- * Primitive array type
   , PrimArray(..)
   , MutablePrimArray(..)
+  , Prim(..)
   , newPinnedPrimArray, newAlignedPinnedPrimArray
   , primArrayContents, mutablePrimArrayContents
   , isPrimArrayPinned, isMutablePrimArrayPinned
   , copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr
+  -- * Unlifted array type
+  , UnliftedArray(..)
+  , MutableUnliftedArray(..)
+  , PrimUnlifted(..)
   -- * The 'ArrayException' type
   , ArrayException(..)
   ) where
@@ -48,6 +55,7 @@ import Control.Exception (ArrayException(..), throw)
 import Data.Primitive.PrimArray
 import Data.Primitive.Array
 import Data.Primitive.SmallArray
+import Data.Primitive.UnliftedArray
 import GHC.ST
 import GHC.Prim
 import GHC.Types (isTrue#)
@@ -385,3 +393,90 @@ instance Prim a => Arr MutablePrimArray PrimArray a where
 
     sameArr = samePrimArray
     {-# INLINE sameArr #-}
+
+#if MIN_VERSION_ghc_prim(0,6,2)
+instance PrimUnlifted a => Arr MutableUnliftedArray UnliftedArray a where
+    newArr n = newUnliftedArray n uninitialized
+    {-# INLINE newArr #-}
+    newArrWith = newUnliftedArray
+    {-# INLINE newArrWith #-}
+    readArr = readUnliftedArray
+    {-# INLINE readArr #-}
+    writeArr = writeUnliftedArray
+    {-# INLINE writeArr #-}
+    setArr marr s l x = go s
+      where
+        !sl = s + l
+        go !i | i >= sl = return ()
+              | otherwise = writeUnliftedArray marr i x >> go (i+1)
+    {-# INLINE setArr #-}
+    indexArr = indexUnliftedArray
+    {-# INLINE indexArr #-}
+    indexArrM = indexUnliftedArrayM
+    {-# INLINE indexArrM #-}
+    freezeArr = freezeUnliftedArray
+    {-# INLINE freezeArr #-}
+    thawArr = thawUnliftedArray
+    {-# INLINE thawArr #-}
+    unsafeFreezeArr = unsafeFreezeUnliftedArray
+    {-# INLINE unsafeFreezeArr #-}
+    unsafeThawArr (UnliftedArray arr#) = primitive ( \ s0# ->
+            let (# s1#, marr# #) = unsafeThawArray# (unsafeCoerce# arr#) s0#  -- ArrayArray# and Array# use the same representation
+            in (# s1#, MutableUnliftedArray (unsafeCoerce# arr#) #)           -- so this works
+        )
+    {-# INLINE unsafeThawArr #-}
+
+    copyArr = copyUnliftedArray
+    {-# INLINE copyArr #-}
+    copyMutableArr = copyMutableUnliftedArray
+    {-# INLINE copyMutableArr #-}
+
+    moveArr marr1 s1 marr2 s2 l
+        | l <= 0 = return ()
+        | sameMutableUnliftedArray marr1 marr2 =
+            case compare s1 s2 of
+                LT ->
+                    let !d = s2 - s1
+                        !s2l = s2 + l
+                        go !i | i >= s2l = return ()
+                              | otherwise = do x <- readUnliftedArray marr2 i
+                                               writeUnliftedArray marr1 (i-d) x
+                                               go (i+1)
+                    in go s2
+
+                EQ -> return ()
+
+                GT ->
+                    let !d = s1 - s2
+                        go !i | i < s2 = return ()
+                              | otherwise = do x <- readUnliftedArray marr2 i
+                                               writeUnliftedArray marr1 (i+d) x
+                                               go (i-1)
+                    in go (s2+l-1)
+        | otherwise = copyMutableUnliftedArray marr1 s1 marr2 s2 l
+    {-# INLINE moveArr #-}
+
+    cloneArr = cloneUnliftedArray
+    {-# INLINE cloneArr #-}
+    cloneMutableArr = cloneMutableUnliftedArray
+    {-# INLINE cloneMutableArr #-}
+
+    resizeMutableArr marr n = do
+        marr' <- newUnliftedArray n uninitialized
+        copyMutableUnliftedArray marr' 0 marr 0 (sizeofMutableUnliftedArray marr)
+        return marr'
+    {-# INLINE resizeMutableArr #-}
+    shrinkMutableArr _ _ = return ()
+    {-# INLINE shrinkMutableArr #-}
+
+    sameMutableArr = sameMutableUnliftedArray
+    {-# INLINE sameMutableArr #-}
+    sizeofArr = sizeofUnliftedArray
+    {-# INLINE sizeofArr #-}
+    sizeofMutableArr = return . sizeofMutableUnliftedArray
+    {-# INLINE sizeofMutableArr #-}
+
+    sameArr (UnliftedArray arr1#) (UnliftedArray arr2#) = isTrue# (
+        sameMutableArrayArray# (unsafeCoerce# arr1#) (unsafeCoerce# arr2#))
+    {-# INLINE sameArr #-}
+#endif
