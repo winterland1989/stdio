@@ -394,7 +394,11 @@ instance Show IOEInfo where
          (maybe "" (\errno -> "{errno:" ++ (showErrno errno) ++ ", ") merrno) ++
          "description:" ++ desc ++ ", " ++
          "device:" ++ dev ++ ", " ++
+#if MIN_VERSION_base(4,9,0)
          "callstack:" ++ prettyCallStack cstack ++ "}"
+#else
+         "callstack:" ++ showCallStack cstack ++ "}"
+#endif
 
 showErrno :: Errno -> String
 showErrno e

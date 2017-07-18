@@ -32,7 +32,9 @@ module System.LowResTimer
   ) where
 
 import Data.Array
+#ifndef mingw32_HOST_OS
 import GHC.Event
+#endif
 import System.IO.Unsafe
 import Control.Concurrent.MVar
 import Control.Concurrent
@@ -123,11 +125,11 @@ startLowResTimerManager lrtm@(LowResTimerManager _ _ regCounter runningLock)  = 
         then do
             forkIO (fireLowResTimerQueue lrtm)  -- we offload the scanning to another thread to minimize
                                                 -- the time we holding runningLock
-            htm <- getSystemTimerManager
             case () of
                 _
 #ifndef mingw32_HOST_OS
-                    | rtsSupportsBoundThreads ->
+                    | rtsSupportsBoundThreads -> do
+                        htm <- getSystemTimerManager
                         void $ registerTimeout htm 100000 (startLowResTimerManager lrtm)
 #endif
                     | otherwise -> threadDelay 100000 >> startLowResTimerManager lrtm

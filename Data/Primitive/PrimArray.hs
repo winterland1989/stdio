@@ -154,16 +154,15 @@ sizeofMutablePrimArray :: forall m a . (PrimMonad m, Prim a) => MutablePrimArray
 {-# INLINE sizeofMutablePrimArray #-}
 sizeofMutablePrimArray (MutablePrimArray mba) =
 #if MIN_VERSION_ghc_prim(0,5,0)
-    (`quot` siz) `fmap` getSizeofMutableByteArray mba
+    let getSizeofMutableByteArray (MutableByteArray mba#) = primitive (\ s# ->
+            let (# s'#, l# #) = getSizeofMutableByteArray# mba# s#
+            in (# s'#, (I# l#) #))
+    in (`quot` siz) `fmap` getSizeofMutableByteArray mba
 #else
     return (sizeofMutableByteArray mba `quot` siz)
 #endif
   where
     siz = sizeOf (undefined :: a)
-    getSizeofMutableByteArray (MutableByteArray mba#) = primitive (\ s# ->
-            let (# s'#, l# #) = getSizeofMutableByteArray# mba# s#
-            in (# s'#, (I# l#) #)
-        )
 
 -- | Read a primitive value from the primitive array. The offset is given in
 -- elements of type @a@.
