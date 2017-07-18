@@ -41,7 +41,7 @@ data TimerList = TimerItem {-# UNPACK #-} !Counter (IO ()) TimerList | TimerNil
 data LowResTimerManager = LowResTimerManager
     { lrTimerQueue :: Array (IORef TimerList)
     , lrIndexLock :: MVar Int
-    , lrNewRegisterCount :: Counter
+    , lrRegisterCount :: Counter
     , lrRunningLock :: MVar Bool
     }
 
@@ -49,13 +49,13 @@ lowResTimerManager :: IORef LowResTimerManager
 {-# NOINLINE lowResTimerManager #-}
 lowResTimerManager = unsafePerformIO $ do
     indexLock <- newMVar 0
-    rcount <- newCounter 0
+    regCounter <- newCounter 0
     runningLock <- newMVar False
     queue <- newArr queueSize
     forM [0..queueSize-1] $ \ i -> do
         writeArr queue i =<< newIORef TimerNil
     iqueue <- unsafeFreezeArr queue
-    newIORef (LowResTimerManager iqueue indexLock rcount runningLock)
+    newIORef (LowResTimerManager iqueue indexLock regCounter runningLock)
 
 getSystemLowResTimerManager :: IO LowResTimerManager
 getSystemLowResTimerManager = readIORef lowResTimerManager
@@ -73,22 +73,21 @@ registerLowResTimer :: Int          -- ^ timout in seconds
                     -> IO ()        -- ^ the action you want to perform, it should not block
                     -> IO (IO ())   -- ^ cancel action
 registerLowResTimer t action = do
-    lrtm@(LowResTimerManager queue indexLock rcount _) <- getSystemLowResTimerManager
+    lrtm@(LowResTimerManager queue indexLock regCounter _) <- getSystemLowResTimerManager
 
     let (round, tick) = (max 0 t) `quotRem` queueSize
     i <- readMVar indexLock
     tlistRef <- indexArrM queue ((i + tick) `rem` queueSize)
-    tlist <- readIORef tlistRef
     roundCounter <- newCounter round
-    let newList = TimerItem roundCounter action tlist
-
     E.mask_ $ do
-        atomicModifyIORef' tlistRef ( \ _ ->  (newList, ()) )
-        atomicAddCounter rcount 1
+        atomicModifyIORef' tlistRef $ \ tlist ->
+            let newList = TimerItem roundCounter action tlist
+            in (newList, ())
+        atomicAddCounter regCounter 1
 
     ensureLowResTimerManager lrtm
 
-    return (void $ atomicOrCounter roundCounter (-1))
+    return (void $ atomicOrCounter roundCounter (-1))  -- cancel is simple, just set the round number to -1.
 
 -- | Check if low resolution timer manager loop is running, start loop if not.
 --
@@ -101,9 +100,9 @@ ensureLowResTimerManager lrtm@(LowResTimerManager _ _ _ runningLock) = do
 -- | Start low resolution timer loop, the loop is automatically stopped if there's no more new registrations.
 --
 startLowResTimerManager :: LowResTimerManager ->IO ()
-startLowResTimerManager lrtm@(LowResTimerManager _ _ rcount runningLock)  = do
+startLowResTimerManager lrtm@(LowResTimerManager _ _ regCounter runningLock)  = do
     modifyMVar_ runningLock $ \ _ -> do
-        c <- readIORefU rcount
+        c <- readIORefU regCounter
         if c > 0
         then do
             forkIO (fireLowResTimerQueue lrtm)  -- we offload the scanning to another thread to minimize
@@ -120,28 +119,28 @@ startLowResTimerManager lrtm@(LowResTimerManager _ _ rcount runningLock)  = do
 -- | Scan the timeout queue in current tick index, and move tick index forward by one.
 --
 fireLowResTimerQueue :: LowResTimerManager -> IO ()
-fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock rcount runningLock) = do
-    (tList, tListRef) <- modifyMVar indexLock $ \ index -> do
+fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter runningLock) = do
+    (tList, tListRef) <- modifyMVar indexLock $ \ index -> do                 -- get the index lock
         tListRef <- indexArrM queue index
-        tList <- atomicModifyIORef' tListRef $ \ tList -> (TimerNil, tList)
-        let !index' = (index+1) `rem` queueSize
-        return (index', (tList, tListRef))
+        tList <- atomicModifyIORef' tListRef $ \ tList -> (TimerNil, tList)   -- swap current index list with an empty one
+        let !index' = (index+1) `rem` queueSize                               -- move index forward by 1
+        return (index', (tList, tListRef))                                    -- release the lock
 
-    go tList tListRef rcount
+    go tList tListRef regCounter
   where
-    go (TimerItem roundCounter action nextList) tListRef rcount = do
+    go (TimerItem roundCounter action nextList) tListRef regCounter = do
         r <- atomicSubCounter_ roundCounter 1
         case r `compare` 0 of
-            LT -> do
-                atomicSubCounter rcount 1
-                go nextList tListRef rcount
-            EQ -> do
-                atomicSubCounter rcount 1
+            LT -> do                                     -- if round number is less than 0, then it's a cancelled timer
+                atomicSubCounter regCounter 1
+                go nextList tListRef regCounter
+            EQ -> do                                     -- if round number is equal to 0, fire it
+                atomicSubCounter regCounter 1
                 action
-                go nextList tListRef rcount
-            GT -> do
-                atomicModifyIORef' tListRef $ \ tlist -> (TimerItem roundCounter action tlist, () )
-                go nextList tListRef rcount
+                go nextList tListRef regCounter
+            GT -> do                                     -- if round number is larger than 0, put it back for another round
+                atomicModifyIORef' tListRef $ \ tlist -> (TimerItem roundCounter action tlist, ())
+                go nextList tListRef regCounter
     go TimerNil _ _ = return ()
 
 

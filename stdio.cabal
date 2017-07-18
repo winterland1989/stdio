@@ -30,8 +30,8 @@ library
                             Data.Builder
 
                             System.IO.Exception 
-                            System.IO.File
-                            System.IO.Handle
+                  --          System.IO.File
+                  --          System.IO.Handle
                             System.LowResTimer
 
     -- other-modules:       
@@ -83,6 +83,8 @@ test-suite test
                   , tasty-quickcheck 
                   , tasty-hunit
                   , QuickCheck >= 2.10
+                  , async
+                  , unboxed-ref
 
 
     ghc-options:         -threaded
