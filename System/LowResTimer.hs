@@ -1,4 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+
 module System.LowResTimer
   ( -- * low resolution timers
     registerLowResTimer
@@ -13,14 +16,13 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : non-portable
 
-This module provide low resolution (1s) timers using a single timing wheel of size 128, the timer thread will automatically
-started or stopped based on demannd. register or cancel a timeout is O(1), and each step only need scan n/128 items given
+This module provide low resolution (1s) timers using a single timing wheel of size 512, the timer thread will automatically
+started or stopped based on demannd. register or cancel a timeout is O(1), and each step only need scan n/512 items given
 timers are registered in an even fashion.
 
 -}
 
 import Data.Array
-import Data.Primitive.MutVar
 import GHC.Event
 import System.IO.Unsafe
 import Control.Concurrent.MVar
@@ -31,8 +33,10 @@ import Data.IORef
 import Data.Word
 import qualified Control.Exception as E
 
+-- | Reference: https://github.com/netty/netty/blob/4.1/common/src/main/java/io/netty/util/HashedWheelTimer.java
+--
 queueSize :: Int
-queueSize = 128
+queueSize = 512
 
 -- | A simple timing wheel
 --
@@ -88,13 +92,14 @@ registerLowResTimer t action = do
     ensureLowResTimerManager lrtm
 
     return (void $ atomicOrCounter roundCounter (-1))  -- cancel is simple, just set the round number to -1.
+                                                       -- next scan will eventually release it
 
 -- | Check if low resolution timer manager loop is running, start loop if not.
 --
 ensureLowResTimerManager :: LowResTimerManager -> IO ()
 ensureLowResTimerManager lrtm@(LowResTimerManager _ _ _ runningLock) = do
     modifyMVar_ runningLock $ \ running -> do
-        unless running (void . forkIO $ threadDelay 1000 >> print "time manager started" >> startLowResTimerManager lrtm)
+        unless running (void . forkIO $ startLowResTimerManager lrtm)
         return True
 
 -- | Start low resolution timer loop, the loop is automatically stopped if there's no more new registrations.
@@ -111,7 +116,6 @@ startLowResTimerManager lrtm@(LowResTimerManager _ _ regCounter runningLock)  = 
             registerTimeout htm 1000000 (startLowResTimerManager lrtm)
             return True
         else do
-            print "timer manager stoped"
             return False -- if we haven't got any registered timeout, we stop the time manager
                          -- doing this can stop us from getting the way of idle GC
                          -- since we're still inside runningLock, we won't miss new registration.
@@ -128,7 +132,7 @@ fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter running
 
     go tList tListRef regCounter
   where
-    go (TimerItem roundCounter action nextList) tListRef regCounter = do
+    go (TimerItem roundCounter action nextList) tListRef regCounter = E.mask_ $ do
         r <- atomicSubCounter_ roundCounter 1
         case r `compare` 0 of
             LT -> do                                     -- if round number is less than 0, then it's a cancelled timer
@@ -136,7 +140,7 @@ fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter running
                 go nextList tListRef regCounter
             EQ -> do                                     -- if round number is equal to 0, fire it
                 atomicSubCounter regCounter 1
-                action
+                E.catch action ( \ (_ :: E.SomeException) -> return () )  -- well, we really don't want timers break our loop
                 go nextList tListRef regCounter
             GT -> do                                     -- if round number is larger than 0, put it back for another round
                 atomicModifyIORef' tListRef $ \ tlist -> (TimerItem roundCounter action tlist, ())
