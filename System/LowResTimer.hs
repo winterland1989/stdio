@@ -32,7 +32,7 @@ import Data.Word
 import qualified Control.Exception as E
 
 queueSize :: Int
-queueSize = 64
+queueSize = 128
 
 -- | A simple timing wheel
 --
