@@ -175,7 +175,9 @@ fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter running
 -- but doing that will stop system from being idle, which stop idle GC from running,
 -- and in turn disable deadlock detection, which is too bad. This function solves that.
 --
-debounce :: Int -> IO a -> IO (IO a)
+debounce :: Int     -- ^ cache time in unit of 100 milliseconds / 0.1s
+         -> IO a    -- ^ the original IO action
+         -> IO (IO a)  -- ^ debounced IO action
 debounce t action = do
     resultLock <- newEmptyMVar
     return $ do
