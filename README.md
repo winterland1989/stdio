@@ -10,6 +10,7 @@ This library is an effort trying to improve and standardize Haskell's IO interfa
 + Binary and textual `Parser` and `Builder` for compact bytes.
 + A UTF-8 based text type for text process.
 + A simpler `Handler` for IO, include file and network module.
++ A high performance approximated timer based on timing wheel.
 
 This package is designed from ground, with two goals: simplicity and performance, join in!
 
@@ -170,15 +171,16 @@ This part is under dev now
 
 This part is under dev now
 
-
 Roadmap
 -------
 
++ A unified array type. (100%)
 + A unified vector type. (80%)
 + Unpinned bytestring based on vector. (80%) 
 + `Foreign` module for bytes. (0%)
 + IO system for `Bytes`, new `Handler` design. (20%)
 + IO system for `Bytes`, file and network part. (20%)
++ High performance approximated timers. (100%)
 + `Builder` for `Bytes`, both binary and textual. (50%)
 + `Parser` for `Bytes`, both binary and textual. (10%)
 + Basic UTF-8 text processing (20%)

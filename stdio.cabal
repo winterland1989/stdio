@@ -3,8 +3,8 @@
 
 name:                stdio
 version:             0.1.0.0
--- synopsis:            
--- description:         
+synopsis:            Standard Input and Output for Haskell
+description:         Standard Input and Output for Haskell
 license:             BSD3
 license-file:        LICENSE
 author:              winter
