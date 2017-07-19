@@ -61,7 +61,13 @@ module Data.Primitive.PrimArray (
   sizeofPrimArray, sizeofMutablePrimArray, sameMutablePrimArray,
   primArrayContents, mutablePrimArrayContents,
   isPrimArrayPinned, isMutablePrimArrayPinned,
-  samePrimArray
+  samePrimArray,
+
+  -- * Prefetch
+  -- | Check <http://hackage.haskell.org/package/ghc-prim-0.3.1.0/docs/GHC-Prim.html#Prefetch> for more information.
+
+  prefetchPrimArray0, prefetchPrimArray1, prefetchPrimArray2, prefetchPrimArray3,
+  prefetchMutablePrimArray0, prefetchMutablePrimArray1, prefetchMutablePrimArray2, prefetchMutablePrimArray3
 
 ) where
 
@@ -323,6 +329,39 @@ samePrimArray :: PrimArray a -> PrimArray a -> Bool
 {-# INLINE samePrimArray #-}
 samePrimArray (PrimArray (ByteArray ba1#)) (PrimArray (ByteArray ba2#)) =
     isTrue# (sameMutableByteArray# (unsafeCoerce# ba1#) (unsafeCoerce# ba2#))
+
+--------------------------------------------------------------------------------
+
+prefetchPrimArray0, prefetchPrimArray1, prefetchPrimArray2, prefetchPrimArray3
+    :: PrimMonad m => PrimArray a -> Int -> m ()
+{-# INLINE prefetchPrimArray0 #-}
+{-# INLINE prefetchPrimArray1 #-}
+{-# INLINE prefetchPrimArray2 #-}
+{-# INLINE prefetchPrimArray3 #-}
+prefetchPrimArray0 (PrimArray (ByteArray ba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchByteArray0# ba# i# s# in (# s'#, () #))
+prefetchPrimArray1 (PrimArray (ByteArray ba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchByteArray1# ba# i# s# in (# s'#, () #))
+prefetchPrimArray2 (PrimArray (ByteArray ba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchByteArray2# ba# i# s# in (# s'#, () #))
+prefetchPrimArray3 (PrimArray (ByteArray ba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchByteArray3# ba# i# s# in (# s'#, () #))
+
+
+prefetchMutablePrimArray0, prefetchMutablePrimArray1, prefetchMutablePrimArray2, prefetchMutablePrimArray3
+    :: PrimMonad m => MutablePrimArray (PrimState m) a -> Int -> m ()
+{-# INLINE prefetchMutablePrimArray0 #-}
+{-# INLINE prefetchMutablePrimArray1 #-}
+{-# INLINE prefetchMutablePrimArray2 #-}
+{-# INLINE prefetchMutablePrimArray3 #-}
+prefetchMutablePrimArray0 (MutablePrimArray (MutableByteArray mba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchMutableByteArray0# mba# i# s# in (# s'#, () #))
+prefetchMutablePrimArray1 (MutablePrimArray (MutableByteArray mba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchMutableByteArray1# mba# i# s# in (# s'#, () #))
+prefetchMutablePrimArray2 (MutablePrimArray (MutableByteArray mba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchMutableByteArray2# mba# i# s# in (# s'#, () #))
+prefetchMutablePrimArray3 (MutablePrimArray (MutableByteArray mba#)) (I# i#) =
+    primitive ( \ s# -> let s'# = prefetchMutableByteArray3# mba# i# s# in (# s'#, () #))
 
 --------------------------------------------------------------------------------
 --

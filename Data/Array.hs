@@ -41,6 +41,8 @@ module Data.Array (
   , primArrayContents, mutablePrimArrayContents
   , isPrimArrayPinned, isMutablePrimArrayPinned
   , copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr
+  , prefetchPrimArray0, prefetchPrimArray1, prefetchPrimArray2, prefetchPrimArray3
+  , prefetchMutablePrimArray0, prefetchMutablePrimArray1, prefetchMutablePrimArray2, prefetchMutablePrimArray3
   -- * Unlifted array type
   , UnliftedArray(..)
   , MutableUnliftedArray(..)

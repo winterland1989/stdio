@@ -43,7 +43,7 @@ library
 
     -- other-modules:       
     -- other-extensions:    
-    build-depends:          base >=4.8 && <5.0
+    build-depends:          base >=4.7 && <5.0
                         ,   ghc-prim  >= 0.4
                         ,   primitive >= 0.6.2
                         ,   deepseq
