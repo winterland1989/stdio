@@ -11,12 +11,12 @@ Maintainer  : drkoster@qq.com
 Stability   : experimental
 Portability : non-portable
 
-This module provide low resolution (0.1s) timers using a single timing wheel of size 512, the timer thread will automatically
-started or stopped based on demannd. register or cancel a timeout is O(1), and each step only need scan n/512 items given
-timers are registered in an even fashion.
+This module provide low resolution (0.1s) timers using a timing wheel of size 128 per capability,
+each timer thread will automatically started or stopped based on demannd. register or cancel a timeout is O(1),
+and each step only need scan n/128 items given timers are registered in an even fashion.
 
-This timer is particularly suitable for high concurrent approximated I/O timeout scheduling, and you should not rely on it to
-provide timing information since it's not accurate.
+This timer is particularly suitable for high concurrent approximated I/O timeout scheduling.
+You should not rely on it to provide timing information since it's not very accurate.
 
 Reference:
 
@@ -28,7 +28,13 @@ Reference:
 module System.LowResTimer
   ( -- * low resolution timers
     registerLowResTimer
+  , registerLowResTimerOn
   , debounce
+    -- * low resolution timer manager
+  , LowResTimerManager
+  , getLowResTimerManager
+  , isLowResTimerManagerRunning
+  , lowResTimerManagerCapabilitiesChanged
   ) where
 
 import Data.Array
@@ -47,7 +53,7 @@ import qualified Control.Exception as E
 
 --
 queueSize :: Int
-queueSize = 512
+queueSize = 128
 
 -- | A simple timing wheel
 --
@@ -60,9 +66,8 @@ data LowResTimerManager = LowResTimerManager
     , lrRunningLock :: MVar Bool
     }
 
-lowResTimerManager :: IORef LowResTimerManager
-{-# NOINLINE lowResTimerManager #-}
-lowResTimerManager = unsafePerformIO $ do
+newLowResTimerManager :: IO LowResTimerManager
+newLowResTimerManager = do
     indexLock <- newMVar 0
     regCounter <- newCounter 0
     runningLock <- newMVar False
@@ -70,13 +75,62 @@ lowResTimerManager = unsafePerformIO $ do
     forM [0..queueSize-1] $ \ i -> do
         writeArr queue i =<< newIORef TimerNil
     iqueue <- unsafeFreezeArr queue
-    newIORef (LowResTimerManager iqueue indexLock regCounter runningLock)
+    return (LowResTimerManager iqueue indexLock regCounter runningLock)
 
-getSystemLowResTimerManager :: IO LowResTimerManager
-getSystemLowResTimerManager = readIORef lowResTimerManager
+lowResTimerManager :: IORef (Array LowResTimerManager)
+{-# NOINLINE lowResTimerManager #-}
+lowResTimerManager = unsafePerformIO $ do
+    numCaps <- getNumCapabilities
+    lrtmArray <- newArr numCaps
+    forM [0..numCaps-1] $ \ i -> do
+        writeArr lrtmArray i =<< newLowResTimerManager
+    ilrtmArray <- unsafeFreezeArr lrtmArray
+    newIORef ilrtmArray
 
+-- | Create new low resolution timer manager on capability change.
+--
+-- Since low resolution timer manager is not hooked into RTS, you're responsible to call this function
+-- after you call 'setNumCapabilities' to match timer manager array size with new capability number.
+--
+-- This is not a must though, when we fetch timer manager we always take a modulo.
+--
+lowResTimerManagerCapabilitiesChanged :: IO ()
+lowResTimerManagerCapabilitiesChanged = do
+    lrtmArray <- readIORef lowResTimerManager
+    let oldSize = sizeofArr lrtmArray
+    numCaps <- getNumCapabilities
+    when (numCaps /= oldSize) $ do
+        lrtmArray' <- newArr numCaps
 
--- | Register a new timer, start timing wheel if it's not turning.
+        if numCaps < oldSize
+        then do
+            forM [0..numCaps-1] $ \ i -> do
+                writeArr lrtmArray' i =<< indexArrM lrtmArray i
+        else do
+            forM [0..oldSize-1] $ \ i -> do
+                writeArr lrtmArray' i =<< indexArrM lrtmArray i
+            forM [oldSize..numCaps-1] $ \ i -> do
+                writeArr lrtmArray' i =<< newLowResTimerManager
+
+        ilrtmArray' <- unsafeFreezeArr lrtmArray'
+        atomicModifyIORef' lowResTimerManager $ \ _ -> (ilrtmArray', ())
+
+-- | Get a 'LowResTimerManager' for current thread.
+--
+getLowResTimerManager :: IO LowResTimerManager
+getLowResTimerManager = do
+    (cap, _) <- threadCapability =<< myThreadId
+    lrtmArray <- readIORef lowResTimerManager
+    indexArrM lrtmArray (cap `rem` sizeofArr lrtmArray)
+
+-- | Check if a timer manager's wheel is turning
+--
+-- This is mostly for testing purpose.
+--
+isLowResTimerManagerRunning :: LowResTimerManager -> IO Bool
+isLowResTimerManagerRunning (LowResTimerManager _ _ _ runningLock) = readMVar runningLock
+
+-- | Register a new timer on current capability's timer manager, start the timing wheel if it's not turning.
 --
 -- If the action could block, you may want to run it in another thread. Example to kill a thread after 10s:
 --
@@ -88,7 +142,16 @@ registerLowResTimer :: Int          -- ^ timout in unit of 100 milliseconds / 0.
                     -> IO ()        -- ^ the action you want to perform, it should not block
                     -> IO (IO ())   -- ^ cancel action
 registerLowResTimer t action = do
-    lrtm@(LowResTimerManager queue indexLock regCounter _) <- getSystemLowResTimerManager
+    lrtm <- getLowResTimerManager
+    registerLowResTimerOn lrtm t action
+
+-- | Same as 'registerLowResTimer', but allow you choose timer manager.
+--
+registerLowResTimerOn :: LowResTimerManager   -- ^ a low resolution timer manager
+                      -> Int          -- ^ timout in unit of 100 milliseconds / 0.1s
+                      -> IO ()        -- ^ the action you want to perform, it should not block
+                      -> IO (IO ())   -- ^ cancel action
+registerLowResTimerOn lrtm@(LowResTimerManager queue indexLock regCounter _) t action = do
 
     let (round, tick) = (max 0 t) `quotRem` queueSize
     i <- readMVar indexLock
@@ -132,7 +195,9 @@ startLowResTimerManager lrtm@(LowResTimerManager _ _ regCounter runningLock)  = 
                         htm <- getSystemTimerManager
                         void $ registerTimeout htm 100000 (startLowResTimerManager lrtm)
 #endif
-                    | otherwise -> threadDelay 100000 >> startLowResTimerManager lrtm
+                    | otherwise -> void . forkIO $ do   -- we have to fork another thread since we're holding runningLock,
+                        threadDelay 100000              -- this may affect accuracy, but on windows there're no other choices.
+                        startLowResTimerManager lrtm
             return True
         else do
             return False -- if we haven't got any registered timeout, we stop the time manager
@@ -171,15 +236,15 @@ fireLowResTimerQueue lrtm@(LowResTimerManager queue indexLock regCounter running
 -- | Cache result of an IO action for give time t.
 --
 -- This combinator is useful when you want to share IO result within a period, the action will be called
--- on demand, but will never be called more frequently than 1/t.
+-- on demand, and the result will be cached for t milliseconds.
 --
 -- One common way to get a shared periodical updated value is to start a seperate thread,
 -- but doing that will stop system from being idle, which stop idle GC from running,
 -- and in turn disable deadlock detection, which is too bad. This function solves that.
 --
-debounce :: Int     -- ^ cache time in unit of 100 milliseconds / 0.1s
-         -> IO a    -- ^ the original IO action
-         -> IO (IO a)  -- ^ debounced IO action
+debounce :: Int         -- ^ cache time in unit of 100 milliseconds / 0.1s
+         -> IO a        -- ^ the original IO action
+         -> IO (IO a)   -- ^ debounced IO action
 debounce t action = do
     resultLock <- newEmptyMVar
     return $ do

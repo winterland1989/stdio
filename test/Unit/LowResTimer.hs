@@ -15,9 +15,20 @@ unitLowResTimer = testGroup "low resolution timers" [
             replicateConcurrently_ 10000 $ do
                 forM_ [1..10] $ \ i -> do
                     registerLowResTimer i (void $ atomicAddCounter c 1)
+
+            lrtm <- getLowResTimerManager
+            running <- isLowResTimerManagerRunning lrtm
+            assertEqual "timer manager should start" True running
+
             threadDelay 1100000 -- make sure all timers are fired
             c' <- readIORefU c
             assertEqual "timers registration counter" 100000 c'
+
+            threadDelay 100000  -- another 0.1s
+
+            lrtm <- getLowResTimerManager
+            running <- isLowResTimerManagerRunning lrtm
+            assertEqual "timer manager should stopped" False running
 
     ,   testCase "debounce sh" $ do
             c <- newCounter 0
