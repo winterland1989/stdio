@@ -23,7 +23,12 @@ install:
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
  - travis_retry cabal update
  - cabal install Cabal
- - cabal install --only-dependencies --enable-tests --enable-benchmarks
+ - |
+    if [[ ${GHCVER} > 8 ]]; then   
+        cabal install --only-dependencies --enable-tests --enable-benchmarks
+    else
+        cabal install --only-dependencies # type application which only available on GHC > 8
+    fi
 
 # Here starts the actual work to be performed for the package under test; any command which exits with a non-zero exit code causes the build to fail.
 script:
@@ -32,7 +37,7 @@ script:
  - cabal build   # this builds all libraries and executables (including tests/benchmarks)
  - |
     if [[ ${GHCVER} > 8 ]]; then   
-        cabal test               # test use type application which only available on GHC > 8
+        cabal test               # type application which only available on GHC > 8
     fi
  - cabal check
  - cabal sdist   # tests that a source-distribution can be generated

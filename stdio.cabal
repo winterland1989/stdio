@@ -14,6 +14,13 @@ category:            Data
 build-type:          Simple
 extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
+homepage:            https://github.com/winterland1989/stdio
+bug-reports:         https://github.com/winterland1989/stdio/issues
+
+source-repository head
+  type:     git
+  location: git://github.com/winterland1989/stdio.git
+
 
 library
     exposed-modules:        Data.Primitive.PrimArray
