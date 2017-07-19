@@ -22,7 +22,7 @@ import Control.Monad.Managed
 import GHC.Conc.IO
 import System.Posix.Internals hiding (FD)
 import System.Posix.Types (CDev, CIno)
-import System.IO.Handle (Input(..), Output(..))
+import System.IO.Buffered (Input(..), Output(..))
 import Foreign.Marshal
 import Foreign.Ptr
 import Foreign.C
@@ -37,23 +37,27 @@ data File = File
     , filePath :: FilePath
     }
 
+
 instance Input File where
     input (File fd path) buf len = do
 #ifdef mingw32_HOST_OS
         if rtsSupportsBoundThreads
-        then blockingReadRawBufferPtr callStack dev fd buf 0 len
-        else asyncReadRawBufferPtr    callStack dev fd buf 0 len
-#else
-        unsafe_read  -- regular file read will never block
+        then throwErrnoIfMinus1Retry callStack path $
+                c_read fd buf (fromIntegral len)
+        else asyncReadRawBufferPtr callStack dev fd buf 0 len
       where
-        do_read call = fromIntegral `fmap`
-                          throwErrnoIfMinus1RetryMayBlock callStack path call
-                                (threadWaitRead (fromIntegral fd))
-        unsafe_read = do_read (c_read fd buf (fromIntegral len))
+        asyncWriteRawBufferPtr cstack dev !fd buf len = do
+            (l, rc) <- asyncWrite (fromIntegral fd) 0 (fromIntegral len) buf
+            if l == (-1)
+            then
+                throwOtherErrno cstack dev (Errno (fromIntegral rc))
+            else return (fromIntegral l)
+#else
+        fromIntegral `fmap` throwErrnoIfMinus1RetryMayBlock callStack path    -- In theory regular file shouldn't block
+            (c_read fd buf (fromIntegral len))                                -- but we use retryMayBlock anyway
+            (threadWaitRead (fromIntegral fd))
 #endif
 
-instance Output File where
-    output input (File fd path) buf len = do
 
 
 

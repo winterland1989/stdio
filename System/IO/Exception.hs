@@ -60,6 +60,7 @@ module System.IO.Exception
   , ResourceVanished(..)
   , Interrupted(..)
     -- * Throw io exceptions
+  , throwOtherErrno
   , throwErrno
   , throwErrorIf
   , throwErrnoIfMinus1
@@ -153,16 +154,24 @@ IOE(TimeExpired)
 IOE(ResourceVanished)
 IOE(Interrupted)
 
+
 -- | Throw io exception corresponding to the current value of 'getErrno'.
 --
 -- The mapping between errno and exception type are model after "Foreign.C.Error", if there's missing
 -- or wrong mapping, please report.
 --
 throwErrno :: CallStack -- callstack
-                 -> String    -- device info, such as filename, socket address, etc
-                 -> IO a
-throwErrno cstack dev = do
-    errno <- getErrno
+           -> String    -- device info, such as filename, socket address, etc
+           -> IO a
+throwErrno cstack dev = getErrno >>= throwOtherErrno cstack dev
+
+-- | Throw io exception corresponding to the given errno.
+--
+throwOtherErrno :: CallStack -- callstack
+                -> String    -- device info, such as filename, socket address, etc
+                -> Errno     -- custom errno
+                -> IO a
+throwOtherErrno cstack dev errno = do
     desc <- (strerror errno >>= peekCString)
     let info = IOEInfo (Just errno) desc dev cstack
     case () of

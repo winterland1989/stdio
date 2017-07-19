@@ -1,41 +1,60 @@
-module System.IO.Handle where
+{-# LANGUAGE BangPatterns #-}
+
+module System.IO.Buffered where
 
 
 import Control.Concurrent.MVar
+import GHC.Stack
+import Foreign.Ptr
+import Data.Word
+import Data.Array
+import Data.Vector
 
 -- | Input device
 --
 -- Convention: 'input' should return 0 on EOF.
 --
-class Input f where
-    input :: f -> Int -> Ptr Word8 -> IO Int
+class Input i where
+    input :: HasCallStack => i -> Int -> Ptr Word8 -> IO Int
+
+class Input i => InputWait i where
+    inputWithin :: HasCallStack
+                => i
+                -> Int
+                -> Int
+                -> Ptr Word8
+                -> IO Int
 
 -- | Output device
 --
-class Output f where
-    output :: f -> Ptr Word8 -> Int -> IO Int
+class Output o where
+    output :: o -> Ptr Word8 -> Int -> IO Int
 
+class Output o => OutputWait o where
+    outputWithin :: o
+                 -> Ptr Word8
+                 -> Int
+                 -> IO Int
 
-
-data BufferedInput_ = BufferedInput_
-    { bufferInput  :: Int -> Ptr Word8 -> IO Int
+data BufferedInput_ i = BufferedInput_
+    { bufferInput  :: i
     , bufferOffset :: {-# UNPACK #-} !Int
     , bufferLength :: {-# UNPACK #-} !Int
     , inputBuffer  :: {-# UNPACK #-} !(MutablePrimArray Word8)
     }
 
-type BufferedInput = MVar BufferedInput_
+type BufferedInput i = MVar BufferedInput_ i
 
-data BufferedOutput_ = BufferedOutput_
-    { bufferOutout  :: Int -> Ptr Word8 -> IO ()
+data BufferedOutput_ o = BufferedOutput_ o
+    { bufferOutout  :: o
     , bufferIndex   :: {-# UNPACK #-} !Int
     , outputBuffer  :: {-# UNPACK #-} !(MutablePrimArray Word8)
     }
 
-type BufferedOutput = MVar BufferedOutput_
+type BufferedOutput o = MVar BufferedOutput_ o
 
 
-newBufferedInput :: Input i => i -> Int -> IO BufferedInput
+newBufferedInput :: input -> Int -> IO (BufferedInput input)
 newBufferedInput i bufSiz = do
     buf <- newArr bufSiz
     newMVar (BufferedInput_ (input i) 0 0 buf)
@@ -58,8 +77,8 @@ newBufferedInput i bufSiz = do
 --    2. If (N-M) >= bufferSize/2, we directly use new buffer to receive data.
 --    3 .If enough bytes are received, we freeze the new buffer as input, otherwise go back to 1.
 --
-readExactly :: BufferedInput -> Int -> Int -> IO Bytes
-readExactly input len timeo = modifyMVar input $ \ BufferedInput_{..} -> do
+readExactly :: Input i => BufferedInput i -> Int -> IO Bytes
+readExactly input len = modifyMVar input $ \ BufferedInput_{..} -> do
     case rbuf of
         (x:xs) -> (xs, x)
         e -> do
@@ -73,18 +92,18 @@ readExactly input len timeo = modifyMVar input $ \ BufferedInput_{..} -> do
 
 
 readChunk :: BufferedInput -> (Bytes -> (a, Bytes)) -> IO a
-readChunk
+readChunk = undefined
 
 bufInputText :: BufferedInput -> IO Text
-bufInputText
+bufInputText = undefined
 
 -- | Write 'Bytes' into buffered handle.
 --
 -- Copy 'Bytes' to buffer if it can hold, otherwise
 -- write both buffer(if not empty) and 'Bytes'.
 --
-write :: (FD f) => Handle f -> Bytes -> IO ()
-write Handle{..} (PVector ba s l) = modifyMVar writeBufLen $ \ wBufLen ->
+write :: (FD f) => BufferedOutput o -> Bytes -> IO ()
+write BufferedOutput{..} (PrimVector ba s l) = modifyMVar writeBufLen $ \ wBufLen ->
     if wBufLen + l <= writeBufSize
     then do
         -- current buffer can hold it

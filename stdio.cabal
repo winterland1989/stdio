@@ -37,8 +37,8 @@ library
                             Data.Builder
 
                             System.IO.Exception 
-                  --          System.IO.File
-                  --          System.IO.Handle
+                            System.IO.File
+                            System.IO.Buffered
                             System.LowResTimer
 
     -- other-modules:       
