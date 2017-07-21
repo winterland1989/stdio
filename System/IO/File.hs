@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE CApiFFI #-}
 
 {-|
@@ -25,7 +26,6 @@ module System.IO.File
 
 import qualified Control.Exception as E
 import qualified System.IO.Exception as E
-import Control.Monad.Managed
 import GHC.Conc.IO
 import System.Posix.Internals hiding (FD)
 import System.Posix.Types (CDev, CIno)
@@ -38,6 +38,9 @@ import Data.Int
 import Data.Word
 import Data.Bits ((.|.))
 import GHC.Stack
+#if !MIN_VERSION_base(4,9,0)
+type HasCallStack = (?callStack :: CallStack)
+#endif
 
 data File = File
     { fileFd :: {-# UNPACK #-} !CInt  -- ^ the file descriptor

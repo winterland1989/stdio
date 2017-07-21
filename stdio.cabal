@@ -48,7 +48,6 @@ library
                         ,   primitive >= 0.6.2
                         ,   deepseq
                         ,   template-haskell 
-                        ,   managed
                         ,   unboxed-ref >= 0.4
 
     c-sources:          cbits/bytes.c

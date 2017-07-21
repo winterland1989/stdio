@@ -1,7 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-
+{-# LANGUAGE ImplicitParams #-}
 
 {-|
 Module      : System.IO.Buffered
@@ -24,7 +25,6 @@ import qualified System.IO.Exception as E
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.ST
-import GHC.Stack
 import GHC.Prim
 import Foreign.Ptr
 import Data.Word
@@ -35,6 +35,10 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Text.UTF8Codec as T
 
+import GHC.Stack
+#if !MIN_VERSION_base(4,9,0)
+type HasCallStack = (?callStack :: CallStack)
+#endif
 
 -- | Input device
 --
