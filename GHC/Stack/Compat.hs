@@ -14,7 +14,7 @@ module GHC.Stack.Compat
 import GHC.Stack
 
 #if !MIN_VERSION_base(4,9,0)
-type HasCallStack = (?callStack :: GHC.CallStack)
+type HasCallStack = (?callStack :: CallStack)
 
 callStack :: HasCallStack => CallStack
 {-# INLINE callStack #-}
