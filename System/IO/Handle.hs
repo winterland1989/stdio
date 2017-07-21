@@ -121,82 +121,9 @@ readHandle InputHandle{..} = do
         writeIORef bufPushBack V.empty
         return pb
 
-unReadHandle :: (HasCallStack, Input i) => V.Bytes -> InputHandle i -> IO ()
-unReadHandle pb' InputHandle{..} = do
-    modifyIORef' bufPushBack $ \ pb -> pb' `V.append` pb
-
--- | Read until a magic bytes
+-- | Read exactly N bytes
 --
-readToMagic :: (HasCallStack, Input i) => Word8 -> InputHandle i -> IO V.Bytes
-readToMagic magic h = V.concat `fmap` (go h magic)
-  where
-    go h magic = do
-        chunk <- readHandle h
-        case V.elemIndex magic chunk of
-            Just i -> do
-                let (lastChunk, rest) = V.splitAt (i+1) chunk
-                unReadHandle rest h
-                return [lastChunk]
-            Nothing -> do
-                chunks <- go h magic
-                return (chunk : chunks)
-
--- |
---
-readLine :: (HasCallStack, Input i) => InputHandle i -> IO T.Text
-readLine h = do
-    bs <- readToMagic (V.c2w '\n') h
-    case T.validateUTF8 bs of
-        T.Success t -> return t
-        r           -> E.throwIO (UTF8DecodeException r
-                        (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput h) callStack))
-
-
-readTextChunk :: (HasCallStack, Input i) => InputHandle i -> IO T.Text
-readTextChunk h@InputHandle{..} = do
-    chunk <- readHandle h
-    let (V.PrimVector vba vs vl) = chunk
-        minLen = T.decodeCharLen vba 0
-    if minLen > V.length chunk
-    then do
-        sbuf <- readIORef spareBuf
-        sbufSiz <- A.sizeofMutableArr sbuf
-        buf <- if sbufSiz == 0                 -- spare bufffer is empty
-            then A.newPinnedPrimArray bufSize  -- create a new one
-            else return sbuf
-        A.copyArr buf 0 vba vs vl
-        l <- readInput bufInput (A.mutablePrimArrayContents buf `plusPtr` vl) (bufSize - vl)
-        if l < bufSize `quot` 2                -- read less than half size
-        then do
-            mba <- A.newArr l                   -- copy result into new array
-            A.copyMutableArr mba 0 buf 0 l
-            ba <- A.unsafeFreezeArr mba
-            writeIORef spareBuf buf
-            decode (V.fromArr ba 0 l)
-        else do                                 -- freeze buf into result
-            when (sbufSiz /= 0) $ do
-                embuf <- A.newArr 0
-                writeIORef spareBuf embuf
-            ba <- A.unsafeFreezeArr buf
-            decode (V.fromArr ba 0 l)
-    else decode chunk
-  where
-    decode bs = case T.validateUTF8 bs of
-        T.Success t -> return t
-        T.PartialBytes t bs -> do
-            unReadHandle bs h
-            return t
-        r -> E.throwIO (UTF8DecodeException r
-                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput) callStack))
-
-
-data UTF8DecodeException = UTF8DecodeException T.UTF8DecodeResult E.IOEInfo deriving (Show, Typeable)
-instance E.Exception UTF8DecodeException where
-    toException = E.ioExceptionToException
-    fromException = E.ioExceptionFromException
-
-
--- |
+-- If EOF reached before N bytes read, a 'ShortReadException' will be thrown
 --
 readExactly :: (HasCallStack, Input i) => Int -> InputHandle i -> IO V.Bytes
 readExactly n h = V.concat `fmap` (go h n)
@@ -222,6 +149,118 @@ readExactly n h = V.concat `fmap` (go h n)
 data ShortReadException = ShortReadException E.IOEInfo deriving (Show, Typeable)
 
 instance E.Exception ShortReadException where
+    toException = E.ioExceptionToException
+    fromException = E.ioExceptionFromException
+
+
+-- | Push bytes back into handle
+--
+unReadHandle :: (HasCallStack, Input i) => V.Bytes -> InputHandle i -> IO ()
+unReadHandle pb' InputHandle{..} = do
+    modifyIORef' bufPushBack $ \ pb -> pb' `V.append` pb
+
+-- | Read until reach a magic bytes
+--
+-- If EOF reached before meet a magic byte, a 'ShortReadException' will be thrown.
+
+readToMagic :: (HasCallStack, Input i) => Word8 -> InputHandle i -> IO V.Bytes
+readToMagic magic h = V.concat `fmap` (go h magic)
+  where
+    go h magic = do
+        chunk <- readHandle h
+        if V.null chunk
+        then E.throwIO (ShortReadException
+            (E.IOEInfo Nothing "unexpected EOF reached" (inputInfo $ bufInput h) callStack))
+        else case V.elemIndex magic chunk of
+            Just i -> do
+                let (lastChunk, rest) = V.splitAt (i+1) chunk
+                unReadHandle rest h
+                return [lastChunk]
+            Nothing -> do
+                chunks <- go h magic
+                return (chunk : chunks)
+
+-- | Read a line
+--
+readLine :: (HasCallStack, Input i) => InputHandle i -> IO T.Text
+readLine h = do
+    bss <- go h (V.c2w '\n')
+    case T.validateUTF8 (V.concat bss) of
+        T.Success t -> return t
+        T.PartialBytes _ bs ->
+            E.throwIO (UTF8PartialBytesException bs
+                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput h) callStack))
+        T.InvalidBytes bs ->
+            E.throwIO (UTF8InvalidBytesException bs
+                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput h) callStack))
+  where
+    go h magic = do
+        chunk <- readHandle h
+        if V.null chunk
+        then return []
+        else case V.elemIndex magic chunk of
+            Just i -> do
+                let (lastChunk, rest) = V.splitAt (i+1) chunk
+                unReadHandle rest h
+                return [lastChunk]
+            Nothing -> do
+                chunks <- go h magic
+                return (chunk : chunks)
+
+
+-- | Read a chunk of text
+--
+readTextChunk :: (HasCallStack, Input i) => InputHandle i -> IO T.Text
+readTextChunk h@InputHandle{..} = do
+    chunk <- readHandle h
+    if V.null chunk
+    then return T.empty
+    else do
+        let (V.PrimVector vba vs vl) = chunk
+            minLen = T.decodeCharLen vba vs
+        if minLen > vl                              -- is this chunk partial?
+        then do                                     -- if so, try continue reading first
+            sbuf <- readIORef spareBuf
+            sbufSiz <- A.sizeofMutableArr sbuf
+            buf <- if sbufSiz == 0                  -- spare bufffer is empty
+                then A.newPinnedPrimArray bufSize   -- create a new one
+                else return sbuf
+            A.copyArr buf 0 vba vs vl               -- copy the partial chunk into buffer and try read new bytes
+            l <- readInput bufInput (A.mutablePrimArrayContents buf `plusPtr` vl) (bufSize - vl)
+            let l' = l + vl
+            if l' < bufSize `quot` 2                -- read less than half size
+            then if l' == vl
+                then do                             -- no new bytes read, partial before EOF
+                    E.throwIO (UTF8PartialBytesException chunk
+                        (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput) callStack))
+                else do
+                    mba <- A.newArr l'              -- copy result into new array
+                    A.copyMutableArr mba 0 buf 0 l'
+                    ba <- A.unsafeFreezeArr mba
+                    writeIORef spareBuf buf
+                    decode (V.fromArr ba 0 l')
+            else do                                 -- freeze buf into result
+                when (sbufSiz /= 0) $ do
+                    embuf <- A.newArr 0
+                    writeIORef spareBuf embuf
+                ba <- A.unsafeFreezeArr buf
+                decode (V.fromArr ba 0 l')
+        else decode chunk
+  where
+    decode bs = case T.validateUTF8 bs of
+        T.Success t -> return t
+        T.PartialBytes t bs -> do
+            unReadHandle bs h
+            return t
+        T.InvalidBytes bs -> E.throwIO (UTF8InvalidBytesException bs
+                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput) callStack))
+
+
+data UTF8DecodeException
+    = UTF8InvalidBytesException V.Bytes E.IOEInfo
+    | UTF8PartialBytesException V.Bytes E.IOEInfo
+  deriving (Show, Typeable)
+instance E.Exception UTF8DecodeException where
     toException = E.ioExceptionToException
     fromException = E.ioExceptionFromException
 
