@@ -53,7 +53,7 @@ instance Input File where
                 c_read fd buf (fromIntegral len)
         else asyncReadRawBufferPtr callStack path fd buf 0 len
       where
-        asyncWriteRawBufferPtr cstack path !fd buf len = do
+        asyncWriteRawBufferPtr cstack path fd buf len = do
             (l, rc) <- asyncWrite (fromIntegral fd) 0 (fromIntegral len) buf
             if l == (-1)
             then
