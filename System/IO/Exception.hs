@@ -110,7 +110,7 @@ import Foreign.C.Error hiding (
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Ptr
-import GHC.Stack
+import GHC.Stack.Compat
 
 -- | The root type of all io exceptions, you can catch all io exception by catching this root type.
 --
@@ -403,11 +403,7 @@ instance Show IOEInfo where
          (maybe "" (\errno -> "{errno:" ++ (showErrno errno) ++ ", ") merrno) ++
          "description:" ++ desc ++ ", " ++
          "device:" ++ dev ++ ", " ++
-#if MIN_VERSION_base(4,9,0)
          "callstack:" ++ prettyCallStack cstack ++ "}"
-#else
-         "callstack:" ++ showCallStack cstack ++ "}"
-#endif
 
 showErrno :: Errno -> String
 showErrno e

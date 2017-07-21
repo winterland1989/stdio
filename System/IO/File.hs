@@ -37,10 +37,7 @@ import Foreign.C.Types
 import Data.Int
 import Data.Word
 import Data.Bits ((.|.))
-import GHC.Stack
-#if !MIN_VERSION_base(4,9,0)
-type HasCallStack = (?callStack :: CallStack)
-#endif
+import GHC.Stack.Compat
 
 data File = File
     { fileFd :: {-# UNPACK #-} !CInt  -- ^ the file descriptor

@@ -36,6 +36,8 @@ library
                             Data.Binary
                             Data.Builder
 
+                            GHC.Stack.Compat
+
                             System.IO.Exception 
                             System.IO.File
                             System.IO.Handle

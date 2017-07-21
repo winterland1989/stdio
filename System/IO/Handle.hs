@@ -35,10 +35,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Text.UTF8Codec as T
 
-import GHC.Stack
-#if !MIN_VERSION_base(4,9,0)
-type HasCallStack = (?callStack :: CallStack)
-#endif
+import GHC.Stack.Compat
 
 -- | Input device
 --
