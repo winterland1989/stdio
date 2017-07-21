@@ -101,7 +101,6 @@ lowResTimerManagerCapabilitiesChanged = do
     numCaps <- getNumCapabilities
     when (numCaps /= oldSize) $ do
         lrtmArray' <- newArr numCaps
-
         if numCaps < oldSize
         then do
             forM [0..numCaps-1] $ \ i -> do

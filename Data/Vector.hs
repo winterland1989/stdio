@@ -107,7 +107,7 @@ module Data.Vector (
   -- ** Searching by equality
   , elem
   , notElem
-
+  , elemIndex
   -- ** Searching with a predicate
   , find
   , filter
@@ -1077,7 +1077,7 @@ slice s' l' (VecPat arr s l) | l'' == 0  = empty
                              | otherwise = fromArr arr s'' l''
   where
     s'' = rangeCut (s+s') s (s+l)
-    l'' = rangeCut l 0 (s+l-s'')
+    l'' = rangeCut l' 0 (s+l-s'')
 
 -- | /O(1)/ Extract a sub-range vector with give start and end, both start and end index
 -- can be negative which stand for counting from the end(similar to the slicing operator([..])
@@ -1103,10 +1103,10 @@ slice s' l' (VecPat arr s l) | l'' == 0  = empty
 -- | /O(1)/ 'splitAt' @n xs@ is equivalent to @('take' n xs, 'drop' n xs)@.
 splitAt :: Vec v a => Int -> v a -> (v a, v a)
 {-# INLINE splitAt #-}
-splitAt s' (VecPat arr s l) = let v1 = fromArr arr s'' (s''-s)
-                                  v2 = fromArr arr s'' (s+l-s'')
+splitAt z (VecPat arr s l) = let v1 = fromArr arr s z
+                                 v2 = fromArr arr (s+z) (l-z)
                               in v1 `seq` v2 `seq` (v1, v2)
-  where s'' = rangeCut (s+s') s (s+l)
+  where z' = rangeCut 0 z l
 
 --------------------------------------------------------------------------------
 -- * Searching vectors
@@ -1126,7 +1126,7 @@ elemIndex w (VecPat arr s l) = go s
     go !i
         | i >= end = Nothing
         | indexArr arr i == w =
-            let i' = i - s in i' `seq` Just i'
+            let !i' = i - s in Just i'
         | otherwise = go (i+1)
 
 elemIndexBytes :: Word8 -> Bytes -> Maybe Int

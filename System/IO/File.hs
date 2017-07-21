@@ -14,7 +14,14 @@ This module provide operations for regular file in platform independent way.
 
 -}
 
-module System.IO.File where
+module System.IO.File
+  ( File
+  , AccessMode(..)
+  , openFile
+  , closeFile
+  , SeekMode(..)
+  , seekFile
+  ) where
 
 import qualified Control.Exception as E
 import qualified System.IO.Exception as E
@@ -22,7 +29,7 @@ import Control.Monad.Managed
 import GHC.Conc.IO
 import System.Posix.Internals hiding (FD)
 import System.Posix.Types (CDev, CIno)
-import System.IO.Buffered (Input(..), Output(..))
+import System.IO.Handle (Input(..), Output(..))
 import Foreign.Marshal
 import Foreign.Ptr
 import Foreign.C
@@ -37,28 +44,25 @@ data File = File
     , filePath :: FilePath
     }
 
-
 instance Input File where
-    input (File fd path) buf len = do
+    readInput (File fd path) buf len = do
 #ifdef mingw32_HOST_OS
         if rtsSupportsBoundThreads
-        then throwErrnoIfMinus1Retry callStack path $
+        then E.throwErrnoIfMinus1Retry callStack path $
                 c_read fd buf (fromIntegral len)
-        else asyncReadRawBufferPtr callStack dev fd buf 0 len
+        else asyncReadRawBufferPtr callStack path fd buf 0 len
       where
-        asyncWriteRawBufferPtr cstack dev !fd buf len = do
+        asyncWriteRawBufferPtr cstack path !fd buf len = do
             (l, rc) <- asyncWrite (fromIntegral fd) 0 (fromIntegral len) buf
             if l == (-1)
             then
-                throwOtherErrno cstack dev (Errno (fromIntegral rc))
+                throwOtherErrno cstack path (Errno (fromIntegral rc))
             else return (fromIntegral l)
 #else
-        fromIntegral `fmap` throwErrnoIfMinus1RetryMayBlock callStack path    -- In theory regular file shouldn't block
+        fromIntegral `fmap` E.throwErrnoIfMinus1RetryMayBlock callStack path    -- In theory regular file shouldn't block
             (c_read fd buf (fromIntegral len))                                -- but we use retryMayBlock anyway
             (threadWaitRead (fromIntegral fd))
 #endif
-
-
 
 
 -- | OS provides seperated flag for file operations(O_CREAT, O_APPEND, O_WRONLY..), but we
@@ -90,37 +94,34 @@ data SeekMode
 -- `openFile` locks the file according to the Haskell 2010 single writer/multiple reader
 -- locking semantics, throw 'E.ResourceBusy' if locking failed.
 --
-openFile :: HasCallStack => FilePath -> AccessMode -> Managed File
-openFile fp mode = managed (E.bracket (open fp mode) closeFile)
-  where
-    open :: FilePath -> AccessMode -> IO File  -- inside mask only
-    open path mode =
-        withFilePath path $ \ f -> do
-            fd <- E.throwErrnoIfMinus1Retry callStack fp (c_open f oflags 0o666)
+openFile :: HasCallStack => FilePath -> AccessMode -> IO File
+openFile path mode =
+    withFilePath path $ \ f -> do
+        fd <- E.throwErrnoIfMinus1Retry callStack path (c_open f oflags 0o666)
 
-            (isRegularFile, dev, ino) <- (`E.onException` c_close fd) $ allocaBytes sizeof_stat $ \ p_stat -> do
-                throwErrnoIfMinus1Retry "c_fstat" $ do
-                    c_fstat fd p_stat
-                c_mode <- st_mode p_stat
-                dev <- st_dev p_stat
-                ino <- st_ino p_stat
-                return (s_isreg c_mode, dev, ino)
+        (isRegularFile, dev, ino) <- allocaBytes sizeof_stat $ \ p_stat -> do
+            E.throwErrnoIfMinus1Retry callStack path $ do
+                c_fstat fd p_stat
+            c_mode <- st_mode p_stat
+            dev <- st_dev p_stat
+            ino <- st_ino p_stat
+            return (s_isreg c_mode, dev, ino)
 
-            if isRegularFile
+        if isRegularFile
+        then do
+            (unique_dev, unique_ino) <- getUniqueFileInfo fd dev ino
+            let write = case mode of ReadMode -> False
+                                     _ -> True
+            r <- lockFile fd unique_dev unique_ino (fromBool write)
+            if (r == -1)
             then do
-                (unique_dev, unique_ino) <- getUniqueFileInfo fd dev ino
-                let write = case mode of ReadMode -> False
-                                         _ -> True
-                r <- lockFile fd unique_dev unique_ino (fromBool write)
-                if (r == -1)
-                then do
-                    c_close fd
-                    E.throwIO $ E.ResourceBusy (E.IOEInfo Nothing "file is locked" path callStack)
-                else return (File fd path)
-            else do
                 c_close fd
-                E.throwIO $ E.InappropriateType (E.IOEInfo Nothing "not a regular file" path callStack)
-
+                E.throwIO $ E.ResourceBusy (E.IOEInfo Nothing "file is locked" path callStack)
+            else return (File fd path)
+        else do
+            c_close fd
+            E.throwIO $ E.InappropriateType (E.IOEInfo Nothing "not a regular file" path callStack)
+  where
 #ifdef mingw32_HOST_OS
     commonFLAG = o_BINARY .|. o_NONBLOCK .|. o_NOCTTY
 #else
@@ -133,14 +134,14 @@ openFile fp mode = managed (E.bracket (open fp mode) closeFile)
         AppendMode ->    commonFLAG .|. o_CREAT .|. o_APPEND .|. o_WRONLY
         ReadWriteMode -> commonFLAG .|. o_CREAT .|. o_RDWR
 
-    closeFile :: File -> IO ()
-    closeFile (File fd path) = do
-        let closer fd =
-                E.throwErrnoIfMinus1Retry_ callStack path $ c_close (fromIntegral fd)
-        -- release the lock *first*, because otherwise if we're preempted
-        -- after closing but before releasing, the FD may have been reused.
-        unlockFile fd
-        closeFdWith closer (fromIntegral fd)
+closeFile :: File -> IO ()
+closeFile (File fd path) = do
+    let closer fd =
+            E.throwErrnoIfMinus1Retry_ callStack path $ c_close (fromIntegral fd)
+    -- release the lock *first*, because otherwise if we're preempted
+    -- after closing but before releasing, the FD may have been reused.
+    unlockFile fd
+    closeFdWith closer (fromIntegral fd)
 
 -- |
 --

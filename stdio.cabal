@@ -38,7 +38,7 @@ library
 
                             System.IO.Exception 
                             System.IO.File
-                            System.IO.Buffered
+                            System.IO.Handle
                             System.LowResTimer
 
     -- other-modules:       
