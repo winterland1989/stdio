@@ -45,6 +45,7 @@ data File = File
     }
 
 instance Input File where
+    inputInfo (File _ path) = path
     readInput (File fd path) buf len = do
 #ifdef mingw32_HOST_OS
         if rtsSupportsBoundThreads

@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 
 {-|
@@ -18,6 +19,8 @@ This module provide basic I/O interface stdio use.
 module System.IO.Handle where
 
 
+import qualified Control.Exception as E
+import qualified System.IO.Exception as E
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.ST
@@ -26,15 +29,19 @@ import GHC.Prim
 import Foreign.Ptr
 import Data.Word
 import Data.IORef
+import Data.Typeable
 import qualified Data.Array as A
 import qualified Data.Text as T
 import qualified Data.Vector as V
+import qualified Data.Text.UTF8Codec as T
+
 
 -- | Input device
 --
 -- Convention: 'input' should return 0 on EOF.
 --
 class Input i where
+    inputInfo :: i -> String
     readInput :: HasCallStack => i -> Ptr Word8 ->  Int -> IO Int
 
 class Input i => InputWait i where
@@ -118,6 +125,8 @@ unReadHandle :: (HasCallStack, Input i) => V.Bytes -> InputHandle i -> IO ()
 unReadHandle pb' InputHandle{..} = do
     modifyIORef' bufPushBack $ \ pb -> pb' `V.append` pb
 
+-- | Read until a magic bytes
+--
 readToMagic :: (HasCallStack, Input i) => Word8 -> InputHandle i -> IO V.Bytes
 readToMagic magic h = V.concat `fmap` (go h magic)
   where
@@ -132,14 +141,92 @@ readToMagic magic h = V.concat `fmap` (go h magic)
                 chunks <- go h magic
                 return (chunk : chunks)
 
-readLine :: (HasCallStack, Input i) => InputHandle i -> IO T.UTF8DecodeResult
-readLine h = T.validateUTF8 `fmap` readToMagic (V.c2w '\n') h
+-- |
+--
+readLine :: (HasCallStack, Input i) => InputHandle i -> IO T.Text
+readLine h = do
+    bs <- readToMagic (V.c2w '\n') h
+    case T.validateUTF8 bs of
+        T.Success t -> return t
+        r           -> E.throwIO (UTF8DecodeException r
+                        (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput h) callStack))
+
+
+readTextChunk :: (HasCallStack, Input i) => InputHandle i -> IO T.Text
+readTextChunk h@InputHandle{..} = do
+    chunk <- readHandle h
+    let (V.PrimVector vba vs vl) = chunk
+        minLen = T.decodeCharLen vba 0
+    if minLen > V.length chunk
+    then do
+        sbuf <- readIORef spareBuf
+        sbufSiz <- A.sizeofMutableArr sbuf
+        buf <- if sbufSiz == 0                 -- spare bufffer is empty
+            then A.newPinnedPrimArray bufSize  -- create a new one
+            else return sbuf
+        A.copyArr buf 0 vba vs vl
+        l <- readInput bufInput (A.mutablePrimArrayContents buf `plusPtr` vl) (bufSize - vl)
+        if l < bufSize `quot` 2                -- read less than half size
+        then do
+            mba <- A.newArr l                   -- copy result into new array
+            A.copyMutableArr mba 0 buf 0 l
+            ba <- A.unsafeFreezeArr mba
+            writeIORef spareBuf buf
+            decode (V.fromArr ba 0 l)
+        else do                                 -- freeze buf into result
+            when (sbufSiz /= 0) $ do
+                embuf <- A.newArr 0
+                writeIORef spareBuf embuf
+            ba <- A.unsafeFreezeArr buf
+            decode (V.fromArr ba 0 l)
+    else decode chunk
+  where
+    decode bs = case T.validateUTF8 bs of
+        T.Success t -> return t
+        T.PartialBytes t bs -> do
+            unReadHandle bs h
+            return t
+        r -> E.throwIO (UTF8DecodeException r
+                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput) callStack))
+
+
+data UTF8DecodeException = UTF8DecodeException T.UTF8DecodeResult E.IOEInfo deriving (Show, Typeable)
+instance E.Exception UTF8DecodeException where
+    toException = E.ioExceptionToException
+    fromException = E.ioExceptionFromException
+
+
+-- |
+--
+readExactly :: (HasCallStack, Input i) => Int -> InputHandle i -> IO V.Bytes
+readExactly n h = V.concat `fmap` (go h n)
+  where
+    go h n = do
+        chunk <- readHandle h
+        let l = V.length chunk
+        if l > n
+        then do
+            let (lastChunk, rest) = V.splitAt n chunk
+            unReadHandle rest h
+            return [lastChunk]
+        else if l == n
+            then return [chunk]
+            else if l == 0
+                then
+                    E.throwIO (ShortReadException
+                        (E.IOEInfo Nothing "unexpected EOF reached" (inputInfo $ bufInput h) callStack))
+                else do
+                    chunks <- go h (n - l)
+                    return (chunk : chunks)
+
+data ShortReadException = ShortReadException E.IOEInfo deriving (Show, Typeable)
+
+instance E.Exception ShortReadException where
+    toException = E.ioExceptionToException
+    fromException = E.ioExceptionFromException
+
 
 {-
-readExactly :: (HasCallStack, Input i) => Int -> InputHandle i -> IO V.Bytes
-readExactly n ihandle =
-
-
 -- | Write 'V.Bytes' into buffered handle.
 --
 -- Copy 'V.Bytes' to buffer if it can hold, otherwise
