@@ -18,7 +18,7 @@ type HasCallStack = (?callStack :: CallStack)
 
 callStack :: HasCallStack => CallStack
 {-# INLINE callStack #-}
-callStack = drop 1 $ getCallStack ?callStack
+callStack = ?callStack
 
 prettyCallStack :: CallStack -> String
 prettyCallStack = showCallStack
