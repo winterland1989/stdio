@@ -24,6 +24,11 @@ module System.IO.File
   , seekFile
   ) where
 
+#ifdef mingw32_HOST_OS
+import Control.Concurrent
+import Control.Monad (liftM2)
+import Foreign.Storable (peek)
+#endif
 import qualified Control.Exception as E
 import qualified System.IO.Exception as E
 import GHC.Conc.IO
@@ -50,21 +55,20 @@ instance Input File where
 #ifdef mingw32_HOST_OS
         if rtsSupportsBoundThreads
         then E.throwErrnoIfMinus1Retry callStack path $
-                c_read fd buf (fromIntegral len)
-        else asyncReadRawBufferPtr callStack path fd buf 0 len
+                (fromIntegral <$>) $ c_read fd buf (fromIntegral len)
+        else asyncReadRawBufferPtr callStack path fd buf len
       where
-        asyncWriteRawBufferPtr cstack path fd buf len = do
-            (l, rc) <- asyncWrite (fromIntegral fd) 0 (fromIntegral len) buf
+        asyncReadRawBufferPtr cstack path fd buf len = do
+            (l, rc) <- asyncRead (fromIntegral fd) 0 (fromIntegral len) buf
             if l == (-1)
             then
-                throwOtherErrno cstack path (Errno (fromIntegral rc))
+                E.throwOtherErrno cstack path (Errno (fromIntegral rc))
             else return (fromIntegral l)
 #else
         fromIntegral `fmap` E.throwErrnoIfMinus1RetryMayBlock callStack path    -- In theory regular file shouldn't block
             (c_read fd buf (fromIntegral len))                                -- but we use retryMayBlock anyway
             (threadWaitRead (fromIntegral fd))
 #endif
-
 
 -- | OS provides seperated flag for file operations(O_CREAT, O_APPEND, O_WRONLY..), but we
 -- only provide several combination here for convenience. Notably:
