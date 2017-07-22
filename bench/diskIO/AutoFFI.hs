@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Main where
 
 import System.Posix.Internals (c_read, c_open, c_close, c_write, o_RDWR, o_CREAT, o_NONBLOCK)
@@ -26,7 +27,7 @@ main = do
         let file' = file ++ "-" ++ show i
         withCString file $ \ fp -> do
             withCString file' $ \ fp' -> do
-#if !defined(mingw32_HOST_OS)
+#if defined(mingw32_HOST_OS)
                 fd <- c_open (castPtr fp) (o_RDWR .|. o_NONBLOCK) 0o666
                 fd' <- c_open (castPtr fp') (o_CREAT .|. o_RDWR .|. o_NONBLOCK) 0o666
 #else
