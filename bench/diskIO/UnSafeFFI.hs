@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Main where
 
 import System.Posix.Internals (c_read, c_open, c_close, c_write, o_RDWR, o_CREAT, o_NONBLOCK)
@@ -7,6 +8,9 @@ import Control.Monad
 import Control.Concurrent.Async (forConcurrently_)
 import System.Environment
 import Data.Bits
+#if defined(mingw32_HOST_OS)
+import Foreign.Ptr (castPtr)
+#endif
 
 main :: IO ()
 main = do
@@ -15,8 +19,13 @@ main = do
         let file' = file ++ "-" ++ show i
         withCString file $ \ fp -> do
             withCString file' $ \ fp' -> do
+#if defined(mingw32_HOST_OS)
+                fd <- c_open (castPtr fp) (o_RDWR .|. o_NONBLOCK) 0o666
+                fd' <- c_open (castPtr fp') (o_CREAT .|. o_RDWR .|. o_NONBLOCK) 0o666
+#else
                 fd <- c_open fp (o_RDWR .|. o_NONBLOCK) 0o666
                 fd' <- c_open fp' (o_CREAT .|. o_RDWR .|. o_NONBLOCK) 0o666
+#endif
                 loop fd fd'
                 c_close fd
                 c_close fd'
