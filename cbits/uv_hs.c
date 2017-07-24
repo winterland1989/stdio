@@ -1,0 +1,37 @@
+#include <uv.h>
+
+typedef struct {
+    char** buffer_table;
+    size_t* buffer_size_table;
+    size_t* result_table;
+    int* event_counter;
+    int* event_queue;
+} loop_data;
+
+void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
+    int slot = (size_t)handle->data;
+    loop_data* loop_data = handle->loop->data;
+
+    buf->base = loop_data->buffer_table[slot];      // fetch buffer from buffer table
+    buf->len = loop_data->buffer_size_table[slot];  // we ignore suggested_size completely
+}
+
+void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
+    int slot = (size_t)stream->data;
+    loop_data* loop_data = stream->loop->data;
+    loop_data->result_table[slot] = nread;                        // save the read result
+    loop_data->event_queue[(*loop_data->event_counter)++] = slot; // push the slot to event queue
+}
+
+int hs_read_start(uv_stream_t* stream){
+    return uv_read_start(stream, hs_alloc_cb ,hs_read_cb);
+}
+
+
+void hs_fs_cb(uv_fs_t* req){
+    loop_data* d = req->loop->data;
+}
+
+int uv_fs_open_hs(uv_loop_t* loop, uv_fs_t* req, const char* path, int flags, int mode){
+    uv_fs_open(loop, req, path, flags, mode, hs_fs_cb);
+}
