@@ -31,6 +31,7 @@ import Data.Word
 import Data.IORef
 import Data.Typeable
 import qualified Data.Array as A
+import qualified Data.Primitive.PrimArray as A
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Text.UTF8Codec as T

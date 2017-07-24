@@ -27,6 +27,7 @@ It exports exactly same APIs so that you can switch between without pain.
 module Data.Array (
   -- * Arr typeclass
     Arr(..)
+  , RealWorld
   -- * Boxed array type
   , Array(..)
   , MutableArray(..)
@@ -38,11 +39,7 @@ module Data.Array (
   , MutablePrimArray(..)
   , Prim(..)
   , newPinnedPrimArray, newAlignedPinnedPrimArray
-  , primArrayContents, mutablePrimArrayContents
-  , isPrimArrayPinned, isMutablePrimArrayPinned
   , copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr
-  , prefetchPrimArray0, prefetchPrimArray1, prefetchPrimArray2, prefetchPrimArray3
-  , prefetchMutablePrimArray0, prefetchMutablePrimArray1, prefetchMutablePrimArray2, prefetchMutablePrimArray3
   -- * Unlifted array type
   , UnliftedArray(..)
   , MutableUnliftedArray(..)
