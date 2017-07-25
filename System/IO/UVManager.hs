@@ -44,25 +44,25 @@ data UVLoopData = UVLoopData
     , uvLoopWriteBufferSizeTable  :: Ptr CSize          -- a list to keep write buffer's size
     , uvLoopResultTable  :: Ptr CSize                   -- a list to keep callback's return value
                                                         -- such as file or read bytes number
-    }
+    } deriving Show
 
 peekUVLoopuEvent :: Ptr UVLoopData -> IO (Int, Ptr Int)
 peekUVLoopuEvent p = do
     let pp = castPtr p
-    c <- peek pp :: IO CSize
-    q <- peek (pp `plusPtr` 1) :: IO (Ptr a)
+    c <- peekElemOff pp 0 :: IO CSize
+    q <- peekElemOff pp 1
     return (fromIntegral c, q)
 
 peekResultTable :: Ptr UVLoopData -> IO (Ptr CSize)
 peekResultTable p = do
     let pp = castPtr p
-    peek (pp `plusPtr` 6)
+    peekElemOff pp 6
 
 peekReadBuffer :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
 peekReadBuffer p = do
     let pp = castPtr p
-    b <- peek (pp `plusPtr` 2) :: IO (Ptr a)
-    s <- peek (pp `plusPtr` 3) :: IO (Ptr a)
+    b <- peekElemOff pp 2
+    s <- peekElemOff pp 3
     return (castPtr b, s)
 
 
@@ -74,24 +74,24 @@ instance Storable UVLoopData where
     alignment _ = alignment (undefined :: Word)
     poke p (UVLoopData p1 p2 p3 p4 p5 p6 p7) = do
         let pp = castPtr p
-        poke pp p1
-        poke (pp `plusPtr` 1) p2
-        poke (pp `plusPtr` 2) p3
-        poke (pp `plusPtr` 3) p4
-        poke (pp `plusPtr` 4) p5
-        poke (pp `plusPtr` 5) p6
-        poke (pp `plusPtr` 6) p7
+        pokeElemOff pp 0 p1
+        pokeElemOff pp 1 p2
+        pokeElemOff pp 2 p3
+        pokeElemOff pp 3 p4
+        pokeElemOff pp 4 p5
+        pokeElemOff pp 5 p6
+        pokeElemOff pp 6 p7
 
     peek p =
         let pp = castPtr p
         in UVLoopData
-            <$> peek pp
-            <*> peek (pp `plusPtr` 1)
-            <*> peek (pp `plusPtr` 2)
-            <*> peek (pp `plusPtr` 3)
-            <*> peek (pp `plusPtr` 4)
-            <*> peek (pp `plusPtr` 5)
-            <*> peek (pp `plusPtr` 6)
+            <$> peekElemOff pp 0
+            <*> peekElemOff pp 1
+            <*> peekElemOff pp 2
+            <*> peekElemOff pp 3
+            <*> peekElemOff pp 4
+            <*> peekElemOff pp 5
+            <*> peekElemOff pp 6
 
 --------------------------------------------------------------------------------
 
@@ -170,6 +170,7 @@ newUVManager siz cap = do
     poke uvLoopData (UVLoopData 0
         eventQueue readBufferTable readBufferSizeTable
         writeBufferTable writeBufferSizeTable resultTable)
+
     poke uvLoop (UVLoop uvLoopData)
 
     uv_loop_init uvLoop
@@ -186,7 +187,7 @@ newUVManager siz cap = do
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable slot
                 tryPutMVar lock ()
-        threadDelay 100
+        threadDelay 5000000
         yield
 
     _ <- mkWeakMVar freeSlotList $ do

@@ -227,7 +227,6 @@ foreign import ccall unsafe uv_fs_close       :: Ptr UVLoop -> Ptr UVFs -> UVFil
 foreign import ccall unsafe uv_fs_open_hs     :: Ptr UVLoop -> Ptr UVFs -> CString -> CInt -> CInt -> IO ()
 
 
-
 --------------------------------------------------------------------------------
 -- uv_pipe_t
 
@@ -272,6 +271,9 @@ instance Storable UVTTY where
         <$> (#{peek uv_tty_t, data               } p)
         <*> (#{peek uv_tty_t, loop               } p)
         <*> (#{peek uv_tty_t, write_queue_size   } p)
+
+poke_uv_tty_data :: Ptr UVTTY -> Int -> IO ()
+poke_uv_tty_data p slot =  #{poke uv_tty_t, data} p slot 
 
 foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVTTY -> UVFile -> CInt -> IO ()
 
