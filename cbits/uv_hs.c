@@ -1,19 +1,21 @@
 #include <uv.h>
 
 typedef struct {
-    char** buffer_table;
-    size_t* buffer_size_table;
+    size_t* event_counter;
+    size_t* event_queue;
+    char** read_buffer_table;
+    size_t* read_buffer_size_table;
+    char** write_buffer_table;
+    size_t* write_buffer_size_table;
     size_t* result_table;
-    int* event_counter;
-    int* event_queue;
 } loop_data;
 
 void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
     int slot = (size_t)handle->data;
     loop_data* loop_data = handle->loop->data;
 
-    buf->base = loop_data->buffer_table[slot];      // fetch buffer from buffer table
-    buf->len = loop_data->buffer_size_table[slot];  // we ignore suggested_size completely
+    buf->base = loop_data->read_buffer_table[slot];      // fetch buffer from buffer table
+    buf->len = loop_data->read_buffer_size_table[slot];  // we ignore suggested_size completely
 }
 
 void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){

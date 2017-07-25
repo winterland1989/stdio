@@ -44,8 +44,10 @@ library
                             System.LowResTimer
 
                             System.IO.UVManager
+                            System.IO.TTY
+                            System.IO.UV
 
-    other-modules:          System.IO.UV
+    -- other-modules:          System.IO.UV
     -- other-extensions:    
     extra-libraries:         uv
     build-depends:          base >=4.7 && <5.0

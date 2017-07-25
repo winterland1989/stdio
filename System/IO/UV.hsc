@@ -7,34 +7,6 @@ import Foreign.C
 
 #include <uv.h>
 
-data UVLoopData = UVLoopData 
-    { uvLoopBufferTable  :: Ptr (Ptr Word8)
-    , uvLoopBufferSizeTable  :: Ptr CSize
-    , uvLoopResultTable  :: Ptr CSize 
-    , uVLoopEventCounter :: Ptr CSize
-    , uvLoopEventQueue   :: Ptr CSize
-    }
-
-instance Storable UVLoopData where
-    sizeOf _ = sizeOf (undefined :: Word) * 2
-    alignment _ = alignment (undefined :: Word)
-    poke p (UVLoopData p1 p2 p3 p4 p5) = do
-        let pp = castPtr p
-        poke pp p1
-        poke (pp `plusPtr` 1) p2
-        poke (pp `plusPtr` 2) p3
-        poke (pp `plusPtr` 3) p4
-        poke (pp `plusPtr` 3) p5
-
-    peek p = 
-        let pp = castPtr p
-        in UVLoopData 
-            <$> peek pp 
-            <*> peek (pp `plusPtr` 1)
-            <*> peek (pp `plusPtr` 2)
-            <*> peek (pp `plusPtr` 4)
-            <*> peek (pp `plusPtr` 5)
-
 data UVLoop = forall a. UVLoop { uvLoopData :: Ptr a }
 
 instance Storable UVLoop where
@@ -50,12 +22,12 @@ instance Storable UVLoop where
   uV_RUN_ONCE    = UV_RUN_ONCE,
   uV_RUN_NOWAIT  = UV_RUN_NOWAIT}
 
-foreign import ccall unsafe "uv_loop_init"      uvLoopInit :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe "uv_loop_close"     uvLoopClose :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe "uv_run"            uvRun :: Ptr UVLoop -> CInt -> IO CInt
-foreign import ccall unsafe "uv_loop_alive"     uvLoopAlive :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe "uv_backend_fd"     uvBackendFd :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe "uv_now"            uvNow :: Ptr UVLoop -> IO CInt
+foreign import ccall unsafe uv_loop_init      :: Ptr UVLoop -> IO CInt
+foreign import ccall unsafe uv_loop_close     :: Ptr UVLoop -> IO CInt
+foreign import ccall unsafe uv_run            :: Ptr UVLoop -> CInt -> IO CInt
+foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO CInt
+foreign import ccall unsafe uv_backend_fd     :: Ptr UVLoop -> IO CInt
+foreign import ccall unsafe uv_now            :: Ptr UVLoop -> IO CInt
 
 
 data UVHandle = UVHandle
@@ -100,7 +72,7 @@ instance Storable UVHandle where
 --------------------------------------------------------------------------------
 -- uv_stream_t
 
-foreign import ccall unsafe "hs_read_start"  uvReadStart :: Ptr stream -> IO ()
+foreign import ccall unsafe hs_read_start :: Ptr stream -> IO ()
 
 
 --------------------------------------------------------------------------------
@@ -250,9 +222,9 @@ instance Storable UVFs where
         <*> (#{peek uv_fs_t, statbuf} p)
         <*> (#{peek uv_fs_t, ptr    } p)
 
-foreign import ccall unsafe "uv_fs_req_cleanup" uvFsReqCleanUp :: Ptr UVFs -> IO ()
-foreign import ccall unsafe "uv_fs_close" uvFsClose :: Ptr UVLoop -> Ptr UVFs -> UVFile -> IO ()
-foreign import ccall unsafe "uv_fs_open_hs" uvFsOpen :: Ptr UVLoop -> Ptr UVFs -> CString -> CInt -> CInt -> IO ()
+foreign import ccall unsafe uv_fs_req_cleanup :: Ptr UVFs -> IO ()
+foreign import ccall unsafe uv_fs_close       :: Ptr UVLoop -> Ptr UVFs -> UVFile -> IO ()
+foreign import ccall unsafe uv_fs_open_hs     :: Ptr UVLoop -> Ptr UVFs -> CString -> CInt -> CInt -> IO ()
 
 
 
@@ -277,8 +249,8 @@ instance Storable UVPipe where
         <*> (#{peek uv_pipe_t, loop               } p)
         <*> (#{peek uv_pipe_t, write_queue_size   } p)
 
-foreign import ccall unsafe "uv_pipe_init" uvPipeInit :: Ptr UVLoop -> Ptr UVPipe -> CInt -> IO ()
-foreign import ccall unsafe "uv_pipe_open" uvPipeOpen :: Ptr UVPipe -> UVFile -> IO ()
+foreign import ccall unsafe uv_pipe_init  :: Ptr UVLoop -> Ptr UVPipe -> CInt -> IO ()
+foreign import ccall unsafe uv_pipe_open  :: Ptr UVPipe -> UVFile -> IO ()
     
 --------------------------------------------------------------------------------
 -- uv_tty_t
@@ -301,12 +273,12 @@ instance Storable UVTTY where
         <*> (#{peek uv_tty_t, loop               } p)
         <*> (#{peek uv_tty_t, write_queue_size   } p)
 
-foreign import ccall unsafe "uv_tty_init" uvTTYInit :: Ptr UVLoop -> Ptr UVTTY -> UVFile -> CInt -> IO ()
+foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVTTY -> UVFile -> CInt -> IO ()
 
 --------------------------------------------------------------------------------
 
 
-type UVFile = CSize
+type UVFile = CInt
 
 
 
