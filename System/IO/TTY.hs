@@ -11,7 +11,7 @@ import Control.Concurrent.MVar
 import Data.Array
 
 data TTY = TTY
-    { ttyPtr  :: ForeignPtr UVHandle
+    { ttyPtr  :: Ptr UVHandle
     , ttyLoop :: Ptr UVLoop
     , ttySlot :: Int
     , ttyUVManager :: UVManager
@@ -22,10 +22,9 @@ newTTY fd readable = do
     uvm <- getUVManager
     slot <- allocSlot uvm
     let loop = (uvmLoop uvm)
-    tty <- mallocUVHandle uV_TTY
-    withForeignPtr tty $ \ p -> do
-        uv_tty_init loop p fd (if readable then 1 else 0)
-        poke_uv_handle_data p slot
+    tty <- hs_handle_init uV_TTY
+    uv_tty_init loop tty fd (if readable then 1 else 0)
+    poke_uv_handle_data tty (fromIntegral slot)
     return (TTY tty loop slot uvm)
 
 instance Input TTY where
@@ -36,7 +35,7 @@ instance Input TTY where
             (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
             pokeElemOff bufTable slot buf
             pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-            withForeignPtr tty $ \ p -> hs_read_start p
+            hs_read_start tty
         btable <- readIORef $ uvmBlockTable uvm
         takeMVar (indexArr btable slot)
         rTable <- peekResultTable (uvmLoopData uvm)

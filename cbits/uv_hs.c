@@ -2,7 +2,106 @@
 #include <stdio.h>
 #include "uv_hs.h"
 #include <assert.h>
+#include <stdlib.h>
 
+
+/********************************************************************************/
+
+// initialize a loop with its data to give slot size. return NULL on fail.
+uv_loop_t* hs_loop_init(size_t siz){
+
+    uv_loop_t* loop = malloc(sizeof(uv_loop_t));
+    uv_loop_init(loop);
+
+    hs_loop_data* loop_data = malloc(sizeof(hs_loop_data));
+    if (loop_data == NULL) return NULL; 
+        
+    size_t* event_queue = malloc(siz*sizeof(size_t));
+    if (event_queue == NULL) return NULL;
+
+    char** read_buffer_table = malloc(siz*sizeof(char*));
+    if (read_buffer_table == NULL) return NULL;
+
+    size_t* read_buffer_size_table = malloc(siz*sizeof(size_t));
+    if (read_buffer_size_table == NULL) return NULL;
+
+    char** write_buffer_table = malloc(siz*sizeof(char*));
+    if (write_buffer_table == NULL) return NULL; 
+
+    size_t* write_buffer_size_table = malloc(siz*sizeof(size_t));
+    if (write_buffer_size_table == NULL) return NULL;
+
+    size_t* result_table = malloc(siz*sizeof(size_t));
+    if (result_table == NULL) return NULL;
+
+    loop_data->event_queue             = event_queue;
+    loop_data->read_buffer_table       = read_buffer_table;
+    loop_data->read_buffer_size_table  = read_buffer_size_table;
+    loop_data->write_buffer_table      = write_buffer_table;
+    loop_data->write_buffer_size_table = write_buffer_size_table;
+    loop_data->result_table            = result_table;
+
+    loop->data = loop_data;
+    return loop;
+}
+
+// resize a loop's data to given slot size, return NULL on fail.
+uv_loop_t* hs_loop_resize(uv_loop_t* loop, size_t siz){
+
+    hs_loop_data* loop_data = loop->data;
+    size_t* event_queue_new             = realloc(loop_data->event_queue, (siz*sizeof(size_t)));
+    if (event_queue_new == NULL) return NULL; 
+    char** read_buffer_table_new        = realloc(loop_data->read_buffer_table, (siz*sizeof(char*)));
+    if (read_buffer_table_new == NULL) return NULL; 
+    size_t* read_buffer_size_table_new  = realloc(loop_data->read_buffer_size_table, (siz*sizeof(size_t)));
+    if (read_buffer_size_table_new == NULL) return NULL; 
+    char** write_buffer_table_new       = realloc(loop_data->write_buffer_table, (siz*sizeof(char*)));
+    if (write_buffer_table_new == NULL) return NULL; 
+    size_t* write_buffer_size_table_new = realloc(loop_data->write_buffer_size_table, (siz*sizeof(size_t)));
+    if (write_buffer_size_table_new == NULL) return NULL; 
+    size_t* result_table_new            = realloc(loop_data->result_table, (siz*sizeof(size_t)));
+    if (result_table_new == NULL) return NULL; 
+
+    loop_data->event_queue             = event_queue_new;
+    loop_data->read_buffer_table       = read_buffer_table_new;
+    loop_data->read_buffer_size_table  = read_buffer_size_table_new;
+    loop_data->write_buffer_table      = write_buffer_table_new;
+    loop_data->write_buffer_size_table = write_buffer_size_table_new;
+    loop_data->result_table            = result_table_new;
+
+    return loop;
+}
+
+// This function release all the memory related to a uv_loop_t, it could block.
+void hs_loop_close(uv_loop_t* loop){
+    while(uv_loop_close(loop) == UV_EBUSY);
+
+    hs_loop_data* loop_data = loop->data;
+    free(loop);
+    free(loop_data->event_queue);
+    free(loop_data->read_buffer_table);
+    free(loop_data->read_buffer_size_table);
+    free(loop_data->write_buffer_table);
+    free(loop_data->write_buffer_size_table);
+    free(loop_data->result_table);
+}
+
+// Initialize a uv_handle_t with give type, return NULL on fail.
+uv_handle_t* hs_handle_init(uv_handle_type typ){
+    return malloc(uv_handle_size(typ));
+}
+
+void hs_free_handle_callback(uv_handle_t* handle){
+    free(handle);
+}
+
+// Close a uv_handle_t, free its memory.
+void hs_handle_close(uv_handle_t* handle){
+    uv_close(handle, hs_free_handle_callback);
+}
+
+
+/********************************************************************************/
 
 void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
     size_t slot = (size_t)handle->data;
@@ -24,10 +123,7 @@ int hs_read_start(uv_stream_t* stream){
     return uv_read_start(stream, hs_alloc_cb ,hs_read_cb);
 }
 
-
-int hs_timer_start_no_callback(uv_timer_t* handle, uint64_t timeout){
-    return uv_timer_start(handle, NULL, timeout, 0);
-}
+/********************************************************************************/
 
 void uv_timer_cb_stop_loop(uv_timer_t* handle){
     uv_stop(handle->loop);
@@ -37,17 +133,12 @@ int hs_timer_start_stop_loop(uv_timer_t* handle, uint64_t timeout){
     return uv_timer_start(handle, uv_timer_cb_stop_loop, timeout, 0);
 }
 
+/********************************************************************************/
+
 int hs_async_init_no_callback(uv_loop_t* loop, uv_async_t* async){
     return uv_async_init(loop, async, NULL);
 }
 
-void dummy_signal_cb(uv_signal_t* handle, int signum){
-    uv_signal_stop(handle);
-}
-
-int hs_signal_start_no_callback(uv_signal_t* signal, int signum){
-    return uv_signal_start(signal, dummy_signal_cb, signum);
-}
 
 void hs_fs_cb(uv_fs_t* req){
     hs_loop_data* d = req->loop->data;

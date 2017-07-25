@@ -43,10 +43,12 @@ library
                             System.IO.Handle
                             System.LowResTimer
 
-                            System.IO.UVManager
                             System.IO.TTY
                             System.IO.UV
-                            System.IO.UVErrno
+                            System.IO.UV.Errno
+                            System.IO.UV.Exception
+                            System.IO.UV.FFI
+                            System.IO.UV.Manager
                             System.IO.TCP
 
     -- other-modules:          System.IO.UV

@@ -9,11 +9,11 @@ import qualified Data.ByteString as B
 
 main :: IO ()
 main = do
-    replicateConcurrently_ 500 $ do
+    replicateConcurrently_ 200 $ do
         sock <- socket AF_INET Stream defaultProtocol
-        connect sock $ SockAddrInet 8081 (tupleToHostAddress (127,0,0,1))
-        send sock "GET /1m HTTP/1.1\r\n"
-        send sock "Host: localhost\r\n"
+        connect sock $ SockAddrInet 80 (tupleToHostAddress (220,181,112,244))
+        send sock "GET / HTTP/1.1\r\n"
+        send sock "Host: www.baidu.com\r\n"
         send sock "\r\n"
         recv sock 4096
 

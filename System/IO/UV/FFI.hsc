@@ -1,6 +1,6 @@
 {-# LANGUAGE ExistentialQuantification #-}
 
-module System.IO.UV where
+module System.IO.UV.FFI where
 
 import Foreign
 import Foreign.C
@@ -50,7 +50,6 @@ clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
 clearUVLoopuEventCounter p = do
     #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
 
-
 instance Storable UVLoopData where
     sizeOf _ = #size hs_loop_data
     alignment _ = #alignment hs_loop_data
@@ -73,27 +72,23 @@ instance Storable UVLoopData where
 
 --------------------------------------------------------------------------------
 
-data UVLoop = forall a. UVLoop { uvLoopData :: Ptr a }
-
-instance Storable UVLoop where
-    sizeOf _ = #size uv_loop_t
-    alignment _ = #alignment uv_loop_t
-    poke p (UVLoop dataPtr) = do
-        #{poke uv_loop_t, data} p $ dataPtr
-    peek p = UVLoop 
-        <$> (#{peek uv_loop_t, data} p)
+data UVLoop
 
 #{enum CInt, CInt, 
   uV_RUN_DEFAULT = UV_RUN_DEFAULT,
   uV_RUN_ONCE    = UV_RUN_ONCE,
   uV_RUN_NOWAIT  = UV_RUN_NOWAIT}
 
+foreign import ccall unsafe hs_loop_init      :: CSize -> IO (Ptr UVLoop)
+foreign import ccall safe hs_loop_close     :: Ptr UVLoop -> IO ()
+foreign import ccall unsafe hs_loop_resize    :: Ptr UVLoop -> CSize -> IO (Ptr UVLoop)
+
+peek_uv_loop_data :: Ptr UVLoop -> IO (Ptr UVLoopData)
+peek_uv_loop_data p = #{peek uv_loop_t, data} p
+
 foreign import ccall unsafe uv_run            :: Ptr UVLoop -> CInt -> IO CInt
 foreign import ccall safe "uv_run" uv_run_safe :: Ptr UVLoop -> CInt -> IO CInt
 
-
-foreign import ccall unsafe uv_loop_init      :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe uv_loop_close     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_backend_fd     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_now            :: Ptr UVLoop -> IO CULong
@@ -108,15 +103,11 @@ data UVHandle = UVHandle
 poke_uv_handle_data :: Ptr UVHandle -> CSize -> IO ()
 poke_uv_handle_data p slot =  #{poke uv_handle_t, data} p slot 
 
-foreign import ccall uv_ref :: Ptr UVHandle -> IO ()
-foreign import ccall uv_unref :: Ptr UVHandle -> IO ()
-foreign import ccall uv_close :: Ptr UVHandle -> FunPtr a -> IO ()
+foreign import ccall unsafe hs_handle_init :: UVHandleType -> IO (Ptr UVHandle)
+foreign import ccall unsafe hs_handle_close :: Ptr UVHandle -> IO ()
 
-foreign import ccall uv_handle_size :: CInt -> IO CSize
-
-mallocUVHandle :: UVHandleType -> IO (ForeignPtr UVHandle)
-mallocUVHandle (UVHandleType typ) = 
-    mallocForeignPtrBytes . fromIntegral =<< uv_handle_size typ
+foreign import ccall unsafe uv_ref :: Ptr UVHandle -> IO ()
+foreign import ccall unsafe uv_unref :: Ptr UVHandle -> IO ()
 
 newtype UVHandleType = UVHandleType { getUVHandleType :: CInt } deriving (Show, Eq, Ord)
 

@@ -17,8 +17,8 @@ cabal-version:       >=1.10
 
 executable libuv
   main-is:             LibUV.hs
-  other-modules:        System.IO.UV
-                        System.IO.UVErrno
+  other-modules:        System.IO.UV.FFI
+                        System.IO.UV.Errno
   -- other-extensions:    
   c-sources:          ../../cbits/bytes.c
                       ../../cbits/win32.c
@@ -39,7 +39,7 @@ executable libuv
   includes:           uv_hs.h
   hs-source-dirs:       ./
                         ../../
-  ghc-options:         -O2 -threaded -with-rtsopts=-N4
+  ghc-options:         -O2 -threaded -eventlog -with-rtsopts=-N4
   default-language:    Haskell2010
 
 
@@ -53,5 +53,5 @@ executable mio
                     ,   async
                     ,   bytestring
   hs-source-dirs:       ./
-  ghc-options:         -O2 -threaded -with-rtsopts=-N4
+  ghc-options:         -O2 -threaded -eventlog -with-rtsopts=-N4
   default-language:    Haskell2010

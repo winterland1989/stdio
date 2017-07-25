@@ -1,4 +1,4 @@
-module System.IO.UVErrno where
+module System.IO.UV.Errno where
 
 import Foreign.C
 

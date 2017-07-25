@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 
 {-|
-Module      : System.IO.UVManager
+Module      : System.IO.UV.Manager
 Description : I/O manager based on libuv
 Copyright   : (c) Winterland, 2017
 License     : BSD
@@ -13,10 +13,12 @@ This module provide I/O manager which bridge libuv's async interface with ghc's 
 
 -}
 
-module System.IO.UVManager where
+module System.IO.UV.Manager where
 
-import System.IO.UV
-import System.IO.UVErrno
+import System.IO.UV.FFI
+import System.IO.UV.Exception
+import GHC.Stack.Compat
+import qualified System.IO.Exception as E
 import Data.Array
 import Data.Primitive.PrimArray
 import Data.Word
@@ -86,7 +88,7 @@ getUVManager = do
     uvmArray <- readIORef uvManager
     indexArrM uvmArray (cap `rem` sizeofArr uvmArray)
 
-newUVManager :: Int -> Int -> IO UVManager
+newUVManager :: HasCallStack => Int -> Int -> IO UVManager
 newUVManager siz cap = do
 
     blockTable <- newArr siz
@@ -97,47 +99,20 @@ newUVManager siz cap = do
 
     freeSlotList <- newMVar [0..siz-1]
 
-    readBufferTable <- mallocBytes siz'
-    readBufferSizeTable <- mallocBytes siz''
-    writeBufferTable <- mallocBytes siz'
-    writeBufferSizeTable <- mallocBytes siz''
-    resultTable <- mallocBytes siz''
+    uvLoop <- E.throwOOMIfNull callStack "malloc loop and data for uv manager" $ hs_loop_init (fromIntegral siz)
 
-    eventQueue <- mallocBytes siz''
-
-    uvLoop <- malloc
-    uvLoopData <- malloc
-
-    uv_loop_init uvLoop                 -- init will clear the data field, so init first
-
-    poke uvLoop (UVLoop uvLoopData)
-    poke uvLoopData (UVLoopData 0
-        eventQueue readBufferTable readBufferSizeTable
-        writeBufferTable writeBufferSizeTable resultTable)
+    uvLoopData <- peek_uv_loop_data uvLoop
 
     uvmRunning <- newIORef False
 
-    blockTimer <- mallocBytes . fromIntegral  =<< uv_handle_size (getUVHandleType uV_TIMER)
+    blockTimer <- E.throwOOMIfNull callStack "malloc block timer for uv manager" $ hs_handle_init uV_TIMER
     uv_timer_init uvLoop blockTimer
 
     _ <- mkWeakMVar freeSlotList $ do
-        r <- uv_loop_close uvLoop
-        when (UVErrno r /= uV_EBUSY) $ do -- TODO: retry
-            free uvLoop
-            free uvLoopData
-            free readBufferTable
-            free readBufferSizeTable
-            free writeBufferTable
-            free writeBufferSizeTable
-            free resultTable
-            free eventQueue
-            free blockTimer
+        hs_handle_close blockTimer
+        hs_loop_close uvLoop
 
     return (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning cap blockTimer)
-
-  where
-    siz' = siz * sizeOf (undefined :: Ptr ())
-    siz'' = siz * sizeOf (undefined :: CSize)
 
 ensureUVMangerRunning :: UVManager -> IO ()
 ensureUVMangerRunning uvm = do
@@ -145,67 +120,54 @@ ensureUVMangerRunning uvm = do
     unless isRunning $ do
         forkOn (uvmCap uvm) $ do
             loop False
-                (step (uvmFreeSlotList uvm) (uvmLoopData uvm) (uvmLoop uvm) (uvmBlockTable uvm) (uvmBlockTimer uvm))
+                (step uvm)
         return ()
   where
     loop block step = do
         yield
-        (r, c) <- step block
-        when (r > 0) $ loop (c == 0) step
+        (more, c) <- step block
+        when more $ loop (c == 0) step
 
-    step :: MVar [Int] -> Ptr UVLoopData -> Ptr UVLoop -> IORef (Array (MVar ())) -> Ptr UVHandle -> Bool -> IO (CInt, CSize)
-    step freeSlotList uvLoopData uvLoop iBlockTableRef blockTimer block = do
+    step :: UVManager -> Bool -> IO (Bool, CSize)
+    step (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning _ blockTimer) block = do
         withMVar freeSlotList $ \ _ -> do             -- now let's begin
             blockTable <- readIORef iBlockTableRef
             let siz = sizeofArr blockTable
             clearUVLoopuEventCounter uvLoopData
-            r <- if block then do
-                                hs_timer_start_stop_loop blockTimer 2                     -- a temp walkaround to reduce CPU usage
-                                uv_run_safe uvLoop uV_RUN_ONCE       -- when we wait for some long block event
-                          else uv_run uvLoop uV_RUN_NOWAIT
+            r <- if block
+                then do
+                    hs_timer_start_stop_loop blockTimer 10 -- start a timer to end the blocking wait for non-threaded RTS
+                    uv_run_safe uvLoop uV_RUN_ONCE
+                else uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
             (c, q) <- peekEventQueue uvLoopData
-            forM_ [0..(fromIntegral c-1)] $ \ i -> do       -- convert CSize to int first, otherwise (c-1) may overflow
+            forM_ [0..(fromIntegral c-1)] $ \ i -> do      -- convert CSize to int first, otherwise (c-1) may overflow
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)
                 tryPutMVar lock ()
                 return ()
-            return (r, c)
+            when (r == 0) (writeIORef uvmRunning False)
+            return (r /= 0, c)
 
 allocSlot :: UVManager -> IO Int
 allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _ _) = do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do        -- free list is empty, we double it
-            (UVLoopData eventCounter eventQueue readBufferTable readBufferSizeTable
-                writeBufferTable writeBufferSizeTable resultTable) <- peek uvLoopData  -- peek old data back
 
             blockTable <- readIORef blockTableRef
             let oldSiz = sizeofArr blockTable
-                siz = oldSiz * 2
-                siz' = siz * sizeOf (undefined :: Ptr ())
-                siz'' = siz * sizeOf (undefined :: CSize)
-
-            blockTable' <- newArr siz
+                newSiz = oldSiz * 2
+            blockTable' <- newArr newSiz
             copyArr blockTable' 0 blockTable 0 oldSiz
-            forM_ [oldSiz..siz-1] $ \ i ->
+            forM_ [oldSiz..newSiz-1] $ \ i ->
                 writeArr blockTable' i =<< newEmptyMVar
             !iBlockTable' <- unsafeFreezeArr blockTable'
             writeIORef blockTableRef iBlockTable'
 
-            readBufferTable' <- reallocBytes readBufferTable siz'
-            readBufferSizeTable' <- reallocBytes readBufferSizeTable siz''
-            writeBufferTable' <- reallocBytes writeBufferTable siz'
-            writeBufferSizeTable' <- reallocBytes writeBufferSizeTable siz''
-            resultTable' <- reallocBytes resultTable siz''
+            hs_loop_resize uvLoop (fromIntegral newSiz)
 
-            eventQueue' <- reallocBytes eventQueue siz''
-
-            poke uvLoopData $ UVLoopData eventCounter
-                eventQueue' readBufferTable' readBufferSizeTable'
-                writeBufferTable' writeBufferSizeTable' resultTable'
-
-            return ([oldSiz+1..siz-1], oldSiz)    -- fill the free slot list
+            return ([oldSiz+1..newSiz-1], oldSiz)    -- fill the free slot list
 
 freeSlot :: Int -> UVManager -> IO ()
 freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _) =

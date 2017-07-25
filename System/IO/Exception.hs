@@ -61,6 +61,7 @@ module System.IO.Exception
   , Interrupted(..)
     -- * Throw io exceptions
   , throwOtherErrno
+  , throwOOMIfNull
   , throwErrno
   , throwErrorIf
   , throwErrnoIfMinus1
@@ -278,6 +279,19 @@ throwOtherErrno cstack dev errno = do
             | errno == eXDEV           -> throwIO (UnsupportedOperation    info)
             | otherwise                -> throwIO (OtherError              info)
 
+--------------------------------------------------------------------------------
+
+-- | Throw 'ResourceExhausted' if action return a 'nullPtr'.
+--
+throwOOMIfNull :: CallStack     -- ^ callstack
+               -> String        -- ^ a descrition of what you are doing
+               -> IO (Ptr a)    -- ^ the action
+               -> IO (Ptr a)
+throwOOMIfNull cstack info f = do
+   addr <- f
+   if addr == nullPtr
+      then throwIO (ResourceExhausted (IOEInfo Nothing "out of memory" info cstack))
+      else return addr
 
 --------------------------------------------------------------------------------
 

@@ -1,7 +1,8 @@
 module System.IO.TCP where
 
-import System.IO.UV
-import System.IO.UVManager
+import System.IO.UV.FFI
+import System.IO.UV.Manager
+import System.IO.UV.Exception
 import System.IO.Handle
 import Foreign
 import Foreign.C
@@ -14,7 +15,6 @@ import Data.Array
 
 data TCP = TCP
     { tcpHandle :: Ptr UVHandle
-    , tcpLoop  :: Ptr UVLoop
     , tcpSlot  :: Int
     , tcpManager :: UVManager
     , tcpReadLock :: MVar ()
@@ -25,7 +25,7 @@ newTCP fd = do
     uvm <- getUVManager
     slot <- allocSlot uvm
     let loop = (uvmLoop uvm)
-    p <- mallocBytes . fromIntegral  =<< uv_handle_size (getUVHandleType uV_TCP)
+    p <- hs_handle_init uV_TCP
     readLock <- newMVar ()
 
     uv_tcp_init loop p
@@ -33,11 +33,14 @@ newTCP fd = do
     uv_stream_set_blocking p 0
     poke_uv_handle_data p (fromIntegral slot)
 
-    return (TCP p loop slot uvm readLock)
+    return (TCP p slot uvm readLock)
+
+closeTCP :: TCP -> IO ()
+closeTCP = undefined
 
 instance Input TCP where
     inputInfo _ = "tcp"
-    readInput (TCP tcp loop slot uvm readLock) buf bufSiz = withMVar readLock $ \ _ -> do
+    readInput (TCP tcp slot uvm readLock) buf bufSiz = withMVar readLock $ \ _ -> do
         ensureUVMangerRunning uvm
         (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
         withMVar (uvmFreeSlotList uvm) $ \ _ -> do
