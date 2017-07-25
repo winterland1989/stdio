@@ -167,13 +167,12 @@ newUVManager siz cap = do
     uvLoop <- malloc
     uvLoopData <- malloc
 
+    uv_loop_init uvLoop                 -- init will clear the data field, so init first
+
+    poke uvLoop (UVLoop uvLoopData)
     poke uvLoopData (UVLoopData 0
         eventQueue readBufferTable readBufferSizeTable
         writeBufferTable writeBufferSizeTable resultTable)
-
-    poke uvLoop (UVLoop uvLoopData)
-
-    uv_loop_init uvLoop
 
     forkOn cap . forever $ do
         withMVar freeSlotList $ \ _ -> do             -- now let's begin

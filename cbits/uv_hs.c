@@ -23,7 +23,8 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
     int slot = (size_t)stream->data;
     loop_data* loop_data = stream->loop->data;
     loop_data->result_table[slot] = nread;                        // save the read result
-    loop_data->event_queue[(loop_data->event_counter)++] = slot; // push the slot to event queue
+    loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+    loop_data->event_counter += 1;
 }
 
 int hs_read_start(uv_stream_t* stream){
