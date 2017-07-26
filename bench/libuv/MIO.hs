@@ -14,5 +14,5 @@ main = do
         send sock "GET /index.html HTTP/1.1\r\n"
         send sock "Host: localhost\r\n"
         send sock "\r\n"
-        recv sock 500
+        recv sock 4096
 

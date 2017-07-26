@@ -46,6 +46,7 @@ library
                             System.IO.UVManager
                             System.IO.TTY
                             System.IO.UV
+                            System.IO.UVErrno
                             System.IO.TCP
 
     -- other-modules:          System.IO.UV
@@ -57,7 +58,9 @@ library
                         ,   deepseq
                         ,   template-haskell 
                         ,   unboxed-ref >= 0.4
-
+                        ,   unix
+    include-dirs:       include
+    includes:           uv_hs.h
     c-sources:          cbits/bytes.c
                         cbits/win32.c
                         cbits/uv_hs.c

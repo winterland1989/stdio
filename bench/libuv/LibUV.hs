@@ -19,8 +19,10 @@ main = do
         send sock "\r\n"
         let fd = fdSocket sock
         tcp <- newTCP fd
-        h <- newInputHandle tcp 500
+        h <- newInputHandle tcp 4096
         readHandle h
+
+
 
 
 

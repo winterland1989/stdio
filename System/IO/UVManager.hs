@@ -16,6 +16,7 @@ This module provide I/O manager which bridge libuv's async interface with ghc's 
 module System.IO.UVManager where
 
 import System.IO.UV
+import System.IO.UVErrno
 import Data.Array
 import Data.Primitive.PrimArray
 import Data.Word
@@ -27,70 +28,7 @@ import Control.Concurrent
 import Control.Monad
 import Data.Primitive.Addr
 import System.IO.Unsafe
-
---------------------------------------------------------------------------------
-
--- | This is data structure attach to uv_loop_t 's data field. It should be mirrored
--- to c struct in hs_uv.c.
---
-data UVLoopData = UVLoopData
-    { uVLoopEventCounter :: CSize                       -- These two fields compose a special data structure
-    , uvLoopEventQueue   :: Ptr CSize                   -- to keep trace of events during a uv_run
-                                                        -- before each uv_run the counter should be cleared
-                                                        --
-    , uvLoopReadBufferTable  :: Ptr (Ptr Word8)         -- a list to keep read buffer's refrerence
-    , uvLoopReadBufferSizeTable :: Ptr CSize            -- a list to keep read buffer's size
-    , uvLoopWriteBufferTable  :: Ptr (Ptr Word8)        -- a list to keep write buffer's refrerence
-    , uvLoopWriteBufferSizeTable  :: Ptr CSize          -- a list to keep write buffer's size
-    , uvLoopResultTable  :: Ptr CSize                   -- a list to keep callback's return value
-                                                        -- such as file or read bytes number
-    } deriving Show
-
-peekUVLoopuEvent :: Ptr UVLoopData -> IO (Int, Ptr Int)
-peekUVLoopuEvent p = do
-    let pp = castPtr p
-    c <- peekElemOff pp 0 :: IO CSize
-    q <- peekElemOff pp 1
-    return (fromIntegral c, q)
-
-peekResultTable :: Ptr UVLoopData -> IO (Ptr CSize)
-peekResultTable p = do
-    let pp = castPtr p
-    peekElemOff pp 6
-
-peekReadBuffer :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
-peekReadBuffer p = do
-    let pp = castPtr p
-    b <- peekElemOff pp 2
-    s <- peekElemOff pp 3
-    return (castPtr b, s)
-
-clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
-clearUVLoopuEventCounter p = let pp = castPtr p in pokeElemOff pp 0 (0 :: CSize)
-
-instance Storable UVLoopData where
-    sizeOf _ = sizeOf (undefined :: Word) * 7
-    alignment _ = alignment (undefined :: Word)
-    poke p (UVLoopData p1 p2 p3 p4 p5 p6 p7) = do
-        let pp = castPtr p
-        pokeElemOff pp 0 p1
-        pokeElemOff pp 1 p2
-        pokeElemOff pp 2 p3
-        pokeElemOff pp 3 p4
-        pokeElemOff pp 4 p5
-        pokeElemOff pp 5 p6
-        pokeElemOff pp 6 p7
-
-    peek p =
-        let pp = castPtr p
-        in UVLoopData
-            <$> peekElemOff pp 0
-            <*> peekElemOff pp 1
-            <*> peekElemOff pp 2
-            <*> peekElemOff pp 3
-            <*> peekElemOff pp 4
-            <*> peekElemOff pp 5
-            <*> peekElemOff pp 6
+import System.Posix.Signals (sigVTALRM)
 
 --------------------------------------------------------------------------------
 
@@ -127,6 +65,7 @@ data UVManager = UVManager
 
     , uvmRunning     :: IORef Bool                  -- is uv manager running?
     , uvmCap         :: Int                         -- the capability uv manager is runnig on
+    , uvmBlockTimer  :: Ptr UVHandle
     }
 
 initTableSize :: Int
@@ -178,18 +117,23 @@ newUVManager siz cap = do
 
     uvmRunning <- newIORef False
 
-    _ <- mkWeakMVar freeSlotList $ do
-        free readBufferTable
-        free readBufferSizeTable
-        free writeBufferTable
-        free writeBufferSizeTable
-        free resultTable
-        free eventQueue
-        free uvLoopData
-        uv_loop_close uvLoop
-        free uvLoop
+    blockTimer <- mallocBytes . fromIntegral  =<< uv_handle_size (getUVHandleType uV_TIMER)
+    uv_timer_init uvLoop blockTimer
 
-    return (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning cap)
+    _ <- mkWeakMVar freeSlotList $ do
+        r <- uv_loop_close uvLoop
+        when (UVErrno r /= uV_EBUSY) $ do -- TODO: retry
+            free uvLoop
+            free uvLoopData
+            free readBufferTable
+            free readBufferSizeTable
+            free writeBufferTable
+            free writeBufferSizeTable
+            free resultTable
+            free eventQueue
+            free blockTimer
+
+    return (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning cap blockTimer)
 
   where
     siz' = siz * sizeOf (undefined :: Ptr ())
@@ -200,7 +144,7 @@ ensureUVMangerRunning uvm = do
     isRunning <- readIORef (uvmRunning uvm)
     unless isRunning $ do
         forkOn (uvmCap uvm) $ loop False
-            (step (uvmFreeSlotList uvm) (uvmLoopData uvm) (uvmLoop uvm) (uvmBlockTable uvm))
+            (step (uvmFreeSlotList uvm) (uvmLoopData uvm) (uvmLoop uvm) (uvmBlockTable uvm) (uvmBlockTimer uvm))
         return ()
   where
     loop block step = do
@@ -208,28 +152,24 @@ ensureUVMangerRunning uvm = do
         (r, c) <- step block
         when (r > 0) $ loop (c == 0) step
 
-    step :: MVar [Int] -> Ptr UVLoopData -> Ptr UVLoop -> IORef (Array (MVar ())) -> Bool -> IO (CInt, Int)
-    step freeSlotList uvLoopData uvLoop iBlockTableRef block = do
+    step :: MVar [Int] -> Ptr UVLoopData -> Ptr UVLoop -> IORef (Array (MVar ())) -> Ptr UVHandle -> Bool -> IO (CInt, CSize)
+    step freeSlotList uvLoopData uvLoop iBlockTableRef blockTimer block = do
         withMVar freeSlotList $ \ _ -> do             -- now let's begin
             clearUVLoopuEventCounter uvLoopData
-            t <- mallocUVHandle uV_TIMER
-            withForeignPtr t $ \ tp -> do
-                uv_timer_init uvLoop tp
-                hs_timer_start_no_callback tp 2                     -- a temp walkaround to reduce CPU usage
+            hs_timer_start_no_callback blockTimer 10                     -- a temp walkaround to reduce CPU usage
             r <- if block then uv_run_safe uvLoop uV_RUN_ONCE       -- when we wait for some long block event
                           else uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
-            (c, q) <- peekUVLoopuEvent uvLoopData
-
+            (c, q) <- peekEventQueue uvLoopData
             blockTable <- readIORef iBlockTableRef
-            forM_ [0..c-1] $ \ i -> do
+            forM_ [0..(fromIntegral c-1)] $ \ i -> do       -- convert CSize to int first, otherwise (c-1) may overflow
                 slot <- peekElemOff q i
-                lock <- indexArrM blockTable slot
+                lock <- indexArrM blockTable (fromIntegral slot)
                 tryPutMVar lock ()
             return (r, c)
 
 allocSlot :: UVManager -> IO Int
-allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _) = do
+allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _ _) = do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do        -- free list is empty, we double it
@@ -264,7 +204,7 @@ allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _) = do
             return ([oldSiz+1..siz-1], oldSiz)    -- fill the free slot list
 
 freeSlot :: Int -> UVManager -> IO ()
-freeSlot slot  (UVManager _ freeSlotList _ _ _ _) =
+freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)
 
 

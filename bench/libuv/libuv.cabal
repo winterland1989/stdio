@@ -18,6 +18,7 @@ cabal-version:       >=1.10
 executable libuv
   main-is:             LibUV.hs
   other-modules:        System.IO.UV
+                        System.IO.UVErrno
   -- other-extensions:    
   c-sources:          ../../cbits/bytes.c
                       ../../cbits/win32.c
@@ -32,7 +33,10 @@ executable libuv
                     ,   template-haskell
                     ,   deepseq
                     ,   async
+                    ,   unix
 
+  include-dirs:       ../../include
+  includes:           uv_hs.h
   hs-source-dirs:       ./
                         ../../
   ghc-options:         -O2 -threaded -with-rtsopts=-N4
