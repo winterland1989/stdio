@@ -39,8 +39,8 @@ instance Input TCP where
     inputInfo _ = "tcp"
     readInput (TCP tcp loop slot uvm readLock) buf bufSiz = withMVar readLock $ \ _ -> do
         ensureUVMangerRunning uvm
+        (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
         withMVar (uvmFreeSlotList uvm) $ \ _ -> do
-            (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
             resultTable <- peekResultTable (uvmLoopData uvm)
             pokeElemOff bufTable slot buf
             pokeElemOff bufSizTable slot (fromIntegral bufSiz)
@@ -48,5 +48,4 @@ instance Input TCP where
             hs_read_start tcp
         btable <- readIORef $ uvmBlockTable uvm
         takeMVar (indexArr btable slot)
-        rTable <- peekResultTable (uvmLoopData uvm)
-        fromIntegral `fmap` peekElemOff rTable slot
+        fromIntegral `fmap` peekElemOff bufSizTable slot

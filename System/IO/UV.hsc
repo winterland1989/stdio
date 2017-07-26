@@ -42,7 +42,9 @@ peekReadBuffer p = (,)
     <*> (#{peek hs_loop_data, read_buffer_size_table     } p)
 
 clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
-clearUVLoopuEventCounter p = let pp = castPtr p in pokeElemOff pp 0 (0 :: CSize)
+clearUVLoopuEventCounter p = do
+    #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
+
 
 instance Storable UVLoopData where
     sizeOf _ = #size hs_loop_data
@@ -140,6 +142,7 @@ newtype UVHandleType = UVHandleType { getUVHandleType :: CInt } deriving (Show, 
 foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
 foreign import ccall unsafe hs_timer_start_no_callback :: Ptr UVHandle -> CULong -> IO CInt
 foreign import ccall unsafe uv_timer_stop :: Ptr UVHandle -> IO CInt
+foreign import ccall unsafe hs_timer_start_stop_loop :: Ptr UVHandle -> CULong -> IO CInt
 
 --------------------------------------------------------------------------------
 -- uv_async_t

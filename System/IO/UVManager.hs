@@ -143,8 +143,9 @@ ensureUVMangerRunning :: UVManager -> IO ()
 ensureUVMangerRunning uvm = do
     isRunning <- readIORef (uvmRunning uvm)
     unless isRunning $ do
-        forkOn (uvmCap uvm) $ loop False
-            (step (uvmFreeSlotList uvm) (uvmLoopData uvm) (uvmLoop uvm) (uvmBlockTable uvm) (uvmBlockTimer uvm))
+        forkOn (uvmCap uvm) $ do
+            loop False
+                (step (uvmFreeSlotList uvm) (uvmLoopData uvm) (uvmLoop uvm) (uvmBlockTable uvm) (uvmBlockTimer uvm))
         return ()
   where
     loop block step = do
@@ -155,17 +156,20 @@ ensureUVMangerRunning uvm = do
     step :: MVar [Int] -> Ptr UVLoopData -> Ptr UVLoop -> IORef (Array (MVar ())) -> Ptr UVHandle -> Bool -> IO (CInt, CSize)
     step freeSlotList uvLoopData uvLoop iBlockTableRef blockTimer block = do
         withMVar freeSlotList $ \ _ -> do             -- now let's begin
+            blockTable <- readIORef iBlockTableRef
+            let siz = sizeofArr blockTable
             clearUVLoopuEventCounter uvLoopData
-            hs_timer_start_no_callback blockTimer 10                     -- a temp walkaround to reduce CPU usage
-            r <- if block then uv_run_safe uvLoop uV_RUN_ONCE       -- when we wait for some long block event
+            r <- if block then do
+                                hs_timer_start_stop_loop blockTimer 2                     -- a temp walkaround to reduce CPU usage
+                                uv_run_safe uvLoop uV_RUN_ONCE       -- when we wait for some long block event
                           else uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
             (c, q) <- peekEventQueue uvLoopData
-            blockTable <- readIORef iBlockTableRef
             forM_ [0..(fromIntegral c-1)] $ \ i -> do       -- convert CSize to int first, otherwise (c-1) may overflow
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)
                 tryPutMVar lock ()
+                return ()
             return (r, c)
 
 allocSlot :: UVManager -> IO Int
