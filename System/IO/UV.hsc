@@ -5,6 +5,11 @@ module System.IO.UV where
 import Foreign
 import Foreign.C
 
+-- The macro `#alignment` exists since GHC 8.0
+#if __GLASGOW_HASKELL < 800
+# let alignment t = "%lu", (unsigned long)offsetof(struct {char x__; t (y__); }, y__)
+#endif
+
 #include <uv.h>
 #include <uv_hs.h>
 
