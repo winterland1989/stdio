@@ -22,9 +22,11 @@ instance Storable UVLoop where
   uV_RUN_ONCE    = UV_RUN_ONCE,
   uV_RUN_NOWAIT  = UV_RUN_NOWAIT}
 
+foreign import ccall unsafe uv_run            :: Ptr UVLoop -> CInt -> IO CInt
+foreign import ccall safe "uv_run" uv_run_safe :: Ptr UVLoop -> CInt -> IO CInt
+
 foreign import ccall unsafe uv_loop_init      :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_loop_close     :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe uv_run            :: Ptr UVLoop -> CInt -> IO CInt
 foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_backend_fd     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_now            :: Ptr UVLoop -> IO CInt
@@ -36,19 +38,21 @@ data UVHandle = UVHandle
     , uvHandleLoop :: Ptr UVLoop
     }
 
-instance Storable UVHandle where
-    sizeOf _ = #size uv_handle_t
-    alignment _ = #alignment uv_handle_t
-    poke p uvhandle = do
-        #{poke uv_handle_t, data} p $ uvHandleData uvhandle
-        #{poke uv_handle_t, type} p $ uvHandleType uvhandle
-        #{poke uv_handle_t, loop} p $ uvHandleLoop uvhandle
-    peek p = UVHandle 
-        <$> (#{peek uv_handle_t, data} p)
-        <*> (#{peek uv_handle_t, type} p)
-        <*> (#{peek uv_handle_t, loop} p)
+poke_uv_handle_data :: Ptr UVHandle -> Int -> IO ()
+poke_uv_handle_data p slot =  #{poke uv_handle_t, data} p slot 
 
-#{enum CInt, CInt,
+foreign import ccall uv_ref :: Ptr UVHandle -> IO ()
+foreign import ccall uv_unref :: Ptr UVHandle -> IO ()
+
+foreign import ccall uv_handle_size :: CInt -> IO CSize
+
+mallocUVHandle :: UVHandleType -> IO (ForeignPtr UVHandle)
+mallocUVHandle (UVHandleType typ) = 
+    mallocForeignPtrBytes . fromIntegral =<< uv_handle_size typ
+
+newtype UVHandleType = UVHandleType CInt deriving (Show, Eq, Ord)
+
+#{enum UVHandleType, UVHandleType,
    uV_UNKNOWN_HANDLE  = UV_UNKNOWN_HANDLE,
    uV_ASYNC           = UV_ASYNC,
    uV_CHECK           = UV_CHECK,
@@ -70,9 +74,20 @@ instance Storable UVHandle where
    uV_HANDLE_TYPE_MAX = UV_HANDLE_TYPE_MAX }
 
 --------------------------------------------------------------------------------
+-- uv_timer_t
+
+foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO ()
+foreign import ccall unsafe hs_timer_start_no_callback :: Ptr UVHandle -> CULong -> IO ()
+foreign import ccall unsafe uv_timer_stop :: Ptr UVHandle -> IO ()
+
+
+--------------------------------------------------------------------------------
 -- uv_stream_t
 
-foreign import ccall unsafe hs_read_start :: Ptr stream -> IO ()
+foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO ()
+
+--------------------------------------------------------------------------------
+-- uv_tcp_t
 
 
 --------------------------------------------------------------------------------
@@ -254,28 +269,7 @@ foreign import ccall unsafe uv_pipe_open  :: Ptr UVPipe -> UVFile -> IO ()
 --------------------------------------------------------------------------------
 -- uv_tty_t
 
-data UVTTY = UVTTY
-    { uvTTYData :: CInt
-    , uvTTYLoop :: Ptr UVLoop
-    , uvTTYWriteQueueSize :: CSize
-    }
-
-instance Storable UVTTY where
-    sizeOf _ = #size uv_tty_t
-    alignment _ = #alignment uv_tty_t
-    poke p uvtty = do
-        #{poke uv_tty_t, data               } p $ uvTTYData uvtty
-        #{poke uv_tty_t, loop               } p $ uvTTYLoop uvtty
-        #{poke uv_tty_t, write_queue_size   } p $ uvTTYWriteQueueSize uvtty
-    peek p = UVTTY 
-        <$> (#{peek uv_tty_t, data               } p)
-        <*> (#{peek uv_tty_t, loop               } p)
-        <*> (#{peek uv_tty_t, write_queue_size   } p)
-
-poke_uv_tty_data :: Ptr UVTTY -> Int -> IO ()
-poke_uv_tty_data p slot =  #{poke uv_tty_t, data} p slot 
-
-foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVTTY -> UVFile -> CInt -> IO ()
+foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> UVFile -> CInt -> IO ()
 
 --------------------------------------------------------------------------------
 

@@ -65,7 +65,6 @@ peekReadBuffer p = do
     s <- peekElemOff pp 3
     return (castPtr b, s)
 
-
 clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
 clearUVLoopuEventCounter p = let pp = castPtr p in poke pp (0 :: CSize)
 
@@ -125,6 +124,9 @@ data UVManager = UVManager
     , uvmLoop        :: Ptr UVLoop                  -- the uv loop refrerence
                                                     --
                                                     -- close and freed when free slot list run out of scope
+
+    , uvmRunning     :: IORef Bool                  -- is uv manager running?
+    , uvmCap         :: Int                         -- the capability uv manager is runnig on
     }
 
 initTableSize :: Int
@@ -174,20 +176,7 @@ newUVManager siz cap = do
         eventQueue readBufferTable readBufferSizeTable
         writeBufferTable writeBufferSizeTable resultTable)
 
-    forkOn cap . forever $ do
-        withMVar freeSlotList $ \ _ -> do             -- now let's begin
-            clearUVLoopuEventCounter uvLoopData
-            r <- uv_run uvLoop uV_RUN_NOWAIT
-            -- TODO, handle exception
-            (c, q) <- peekUVLoopuEvent uvLoopData
-
-            blockTable <- readIORef iBlockTableRef
-            forM_ [0..c-1] $ \ i -> do
-                slot <- peekElemOff q i
-                lock <- indexArrM blockTable slot
-                tryPutMVar lock ()
-        threadDelay 5000000
-        yield
+    uvmRunning <- newIORef False
 
     _ <- mkWeakMVar freeSlotList $ do
         free readBufferTable
@@ -200,14 +189,45 @@ newUVManager siz cap = do
         uv_loop_close uvLoop
         free uvLoop
 
-    return (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop)
+    return (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning cap)
 
   where
     siz' = siz * sizeOf (undefined :: Ptr ())
     siz'' = siz * sizeOf (undefined :: CSize)
 
+ensureUVMangerRunning :: UVManager -> IO ()
+ensureUVMangerRunning uvm = do
+    isRunning <- readIORef (uvmRunning uvm)
+    unless isRunning $ do
+        forkOn (uvmCap uvm) $ loop
+            (step (uvmFreeSlotList uvm) (uvmLoopData uvm) (uvmLoop uvm) (uvmBlockTable uvm))
+        return ()
+  where
+    loop step = do
+        more <- step
+        when more (loop step)
+
+    step :: MVar [Int] -> Ptr UVLoopData -> Ptr UVLoop -> IORef (Array (MVar ())) -> IO Bool
+    step freeSlotList uvLoopData uvLoop iBlockTableRef = do
+        withMVar freeSlotList $ \ _ -> do             -- now let's begin
+            clearUVLoopuEventCounter uvLoopData
+            t <- mallocUVHandle uV_TIMER
+            withForeignPtr t $ \ tp -> do
+                uv_timer_init uvLoop tp
+                hs_timer_start_no_callback tp 1         -- a temp walkaround to reduce CPU usage
+            r <- uv_run uvLoop uV_RUN_ONCE              -- when we wait for some long block event
+            -- TODO, handle exception
+            (c, q) <- peekUVLoopuEvent uvLoopData
+
+            blockTable <- readIORef iBlockTableRef
+            forM_ [0..c-1] $ \ i -> do
+                slot <- peekElemOff q i
+                lock <- indexArrM blockTable slot
+                tryPutMVar lock ()
+            return (r > 0)
+
 allocSlot :: UVManager -> IO Int
-allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop) = do
+allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _) = do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do        -- free list is empty, we double it
@@ -242,7 +262,7 @@ allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop) = do
             return ([oldSiz+1..siz-1], oldSiz)    -- fill the free slot list
 
 freeSlot :: Int -> UVManager -> IO ()
-freeSlot slot  (UVManager _ freeSlotList _ _) =
+freeSlot slot  (UVManager _ freeSlotList _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)
 
 

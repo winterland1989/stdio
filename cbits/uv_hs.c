@@ -25,12 +25,17 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
     loop_data->result_table[slot] = nread;                        // save the read result
     loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
     loop_data->event_counter += 1;
+    uv_read_stop(stream);
 }
 
 int hs_read_start(uv_stream_t* stream){
     return uv_read_start(stream, hs_alloc_cb ,hs_read_cb);
 }
 
+
+int hs_timer_start_no_callback(uv_timer_t* handle, uint64_t timeout){
+    return uv_timer_start(handle, NULL, timeout, 0);
+}
 
 void hs_fs_cb(uv_fs_t* req){
     loop_data* d = req->loop->data;
