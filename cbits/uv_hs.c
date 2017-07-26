@@ -37,6 +37,10 @@ int hs_timer_start_no_callback(uv_timer_t* handle, uint64_t timeout){
     return uv_timer_start(handle, NULL, timeout, 0);
 }
 
+int hs_async_init_no_callback(uv_loop_t* loop, uv_async_t* async){
+    return uv_async_init(loop, async, NULL);
+}
+
 void hs_fs_cb(uv_fs_t* req){
     loop_data* d = req->loop->data;
 }

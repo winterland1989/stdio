@@ -25,6 +25,7 @@ instance Storable UVLoop where
 foreign import ccall unsafe uv_run            :: Ptr UVLoop -> CInt -> IO CInt
 foreign import ccall safe "uv_run" uv_run_safe :: Ptr UVLoop -> CInt -> IO CInt
 
+
 foreign import ccall unsafe uv_loop_init      :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_loop_close     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO CInt
@@ -43,6 +44,7 @@ poke_uv_handle_data p slot =  #{poke uv_handle_t, data} p slot
 
 foreign import ccall uv_ref :: Ptr UVHandle -> IO ()
 foreign import ccall uv_unref :: Ptr UVHandle -> IO ()
+foreign import ccall uv_close :: Ptr UVHandle -> FunPtr a -> IO ()
 
 foreign import ccall uv_handle_size :: CInt -> IO CSize
 
@@ -80,14 +82,27 @@ foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO ()
 foreign import ccall unsafe hs_timer_start_no_callback :: Ptr UVHandle -> CULong -> IO ()
 foreign import ccall unsafe uv_timer_stop :: Ptr UVHandle -> IO ()
 
+--------------------------------------------------------------------------------
+-- uv_async_t
+
+foreign import ccall unsafe hs_async_init_no_callback :: Ptr UVLoop -> Ptr UVHandle -> IO ()
+foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO ()
 
 --------------------------------------------------------------------------------
 -- uv_stream_t
 
 foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO ()
+foreign import ccall unsafe uv_stream_set_blocking :: Ptr UVHandle -> CInt -> IO ()
+
 
 --------------------------------------------------------------------------------
 -- uv_tcp_t
+
+foreign import ccall unsafe uv_tcp_init :: Ptr UVLoop -> Ptr UVHandle -> IO ()
+foreign import ccall unsafe uv_tcp_init_ex :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO ()
+foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO ()
+
+
 
 
 --------------------------------------------------------------------------------

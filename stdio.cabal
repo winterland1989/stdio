@@ -46,6 +46,7 @@ library
                             System.IO.UVManager
                             System.IO.TTY
                             System.IO.UV
+                            System.IO.TCP
 
     -- other-modules:          System.IO.UV
     -- other-extensions:    

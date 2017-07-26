@@ -66,7 +66,7 @@ peekReadBuffer p = do
     return (castPtr b, s)
 
 clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
-clearUVLoopuEventCounter p = let pp = castPtr p in poke pp (0 :: CSize)
+clearUVLoopuEventCounter p = let pp = castPtr p in pokeElemOff pp 0 (0 :: CSize)
 
 instance Storable UVLoopData where
     sizeOf _ = sizeOf (undefined :: Word) * 7
@@ -199,23 +199,25 @@ ensureUVMangerRunning :: UVManager -> IO ()
 ensureUVMangerRunning uvm = do
     isRunning <- readIORef (uvmRunning uvm)
     unless isRunning $ do
-        forkOn (uvmCap uvm) $ loop
+        forkOn (uvmCap uvm) $ loop False
             (step (uvmFreeSlotList uvm) (uvmLoopData uvm) (uvmLoop uvm) (uvmBlockTable uvm))
         return ()
   where
-    loop step = do
-        more <- step
-        when more (loop step)
+    loop block step = do
+        yield
+        (r, c) <- step block
+        when (r > 0) $ loop (c == 0) step
 
-    step :: MVar [Int] -> Ptr UVLoopData -> Ptr UVLoop -> IORef (Array (MVar ())) -> IO Bool
-    step freeSlotList uvLoopData uvLoop iBlockTableRef = do
+    step :: MVar [Int] -> Ptr UVLoopData -> Ptr UVLoop -> IORef (Array (MVar ())) -> Bool -> IO (CInt, Int)
+    step freeSlotList uvLoopData uvLoop iBlockTableRef block = do
         withMVar freeSlotList $ \ _ -> do             -- now let's begin
             clearUVLoopuEventCounter uvLoopData
             t <- mallocUVHandle uV_TIMER
             withForeignPtr t $ \ tp -> do
                 uv_timer_init uvLoop tp
-                hs_timer_start_no_callback tp 1         -- a temp walkaround to reduce CPU usage
-            r <- uv_run uvLoop uV_RUN_ONCE              -- when we wait for some long block event
+                hs_timer_start_no_callback tp 2                     -- a temp walkaround to reduce CPU usage
+            r <- if block then uv_run_safe uvLoop uV_RUN_ONCE       -- when we wait for some long block event
+                          else uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
             (c, q) <- peekUVLoopuEvent uvLoopData
 
@@ -224,7 +226,7 @@ ensureUVMangerRunning uvm = do
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable slot
                 tryPutMVar lock ()
-            return (r > 0)
+            return (r, c)
 
 allocSlot :: UVManager -> IO Int
 allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _) = do
