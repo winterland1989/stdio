@@ -109,7 +109,6 @@ newtype UVHandleType = UVHandleType { getUVHandleType :: CInt } deriving (Show, 
 -- uv_timer_t
 
 foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
-foreign import ccall unsafe hs_timer_start_no_callback :: Ptr UVHandle -> CULong -> IO CInt
 foreign import ccall unsafe uv_timer_stop :: Ptr UVHandle -> IO CInt
 foreign import ccall unsafe hs_timer_start_stop_loop :: Ptr UVHandle -> CULong -> IO CInt
 
@@ -123,13 +122,12 @@ foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO CInt
 -- uv_signal_t
 
 foreign import ccall unsafe uv_signal_init :: Ptr UVLoop -> Ptr UVHandle -> IO ()
-foreign import ccall unsafe hs_signal_start_no_callback :: Ptr UVHandle -> CInt -> IO ()
 
 --------------------------------------------------------------------------------
 -- uv_stream_t
 
-foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
 foreign import ccall unsafe uv_stream_set_blocking :: Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
 
 
 --------------------------------------------------------------------------------
