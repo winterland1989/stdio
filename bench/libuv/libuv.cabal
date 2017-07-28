@@ -33,7 +33,6 @@ executable libuv
                     ,   template-haskell
                     ,   deepseq
                     ,   async
-                    ,   unix
 
   include-dirs:       ../../include
   includes:           uv_hs.h

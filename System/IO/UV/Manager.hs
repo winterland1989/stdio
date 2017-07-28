@@ -30,7 +30,6 @@ import Control.Concurrent
 import Control.Monad
 import Data.Primitive.Addr
 import System.IO.Unsafe
-import System.Posix.Signals (sigVTALRM)
 
 --------------------------------------------------------------------------------
 
@@ -56,14 +55,9 @@ data UVManager = UVManager
                                                     -- I/O manager by attaching finalizers to it with 'mkWeakMVar'
 
 
-    , uvmLoopData    :: Ptr UVLoopData              -- This is the pointer we pass to uv_loop_t as
-                                                    -- data field, it contains above fields
+    , uvmLoopData    :: Ptr UVLoopData              -- This is the pointer to uv_loop_t's data field
                                                     --
-                                                    -- freed when free slot list run out of scope
-
     , uvmLoop        :: Ptr UVLoop                  -- the uv loop refrerence
-                                                    --
-                                                    -- close and freed when free slot list run out of scope
 
     , uvmRunning     :: IORef Bool                  -- is uv manager running?
     , uvmCap         :: Int                         -- the capability uv manager is runnig on
@@ -136,7 +130,8 @@ ensureUVMangerRunning uvm = do
             clearUVLoopuEventCounter uvLoopData
             r <- if block
                 then do
-                    hs_timer_start_stop_loop blockTimer 10 -- start a timer to end the blocking wait for non-threaded RTS
+                    unless rtsSupportsBoundThreads -- start a timer to end the blocking wait for non-threaded RTS
+                        (hs_timer_start_stop_loop blockTimer 1 >> return ())
                     uv_run_safe uvLoop uV_RUN_ONCE
                 else uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
@@ -146,7 +141,7 @@ ensureUVMangerRunning uvm = do
                 lock <- indexArrM blockTable (fromIntegral slot)
                 tryPutMVar lock ()
                 return ()
-            when (r == 0) (writeIORef uvmRunning False)
+            when (r == 0) (atomicWriteIORef uvmRunning False) -- not sure if we really need atomic since we're holding a lock
             return (r /= 0, c)
 
 allocSlot :: UVManager -> IO Int

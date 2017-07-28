@@ -60,7 +60,7 @@ library
                         ,   deepseq
                         ,   template-haskell 
                         ,   unboxed-ref >= 0.4
-                        ,   unix
+
     include-dirs:       include
     includes:           uv_hs.h
     c-sources:          cbits/bytes.c

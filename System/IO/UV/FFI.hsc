@@ -59,6 +59,7 @@ foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_backend_fd     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_now            :: Ptr UVLoop -> IO CULong
 
+--------------------------------------------------------------------------------
 
 data UVHandle = UVHandle
     { uvHandleData :: Int           -- the slot number
