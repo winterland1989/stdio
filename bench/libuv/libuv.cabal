@@ -18,7 +18,7 @@ cabal-version:       >=1.10
 executable libuv
   main-is:             LibUV.hs
   other-modules:        System.IO.UV.FFI
-                        System.IO.UV.Errno
+                        System.IO.UV.Exception
   -- other-extensions:    
   c-sources:          ../../cbits/bytes.c
                       ../../cbits/win32.c

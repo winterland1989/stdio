@@ -14,6 +14,12 @@ import Foreign.C
 #include <uv_hs.h>
 
 --------------------------------------------------------------------------------
+-- uv errno
+
+foreign import ccall unsafe uv_strerror :: CInt -> IO CString
+foreign import ccall unsafe uv_err_name :: CInt -> IO CString
+
+--------------------------------------------------------------------------------
 
 data UVLoopData
 

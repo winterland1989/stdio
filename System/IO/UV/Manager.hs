@@ -18,12 +18,13 @@ module System.IO.UV.Manager where
 import System.IO.UV.FFI
 import System.IO.UV.Exception
 import GHC.Stack.Compat
+import qualified System.IO.UV.Exception as E
 import qualified System.IO.Exception as E
 import Data.Array
 import Data.Primitive.PrimArray
 import Data.Word
 import Data.IORef
-import Foreign
+import Foreign hiding (void)
 import Foreign.C
 import Control.Concurrent.MVar
 import Control.Concurrent
@@ -108,7 +109,7 @@ newUVManager siz cap = do
 
     return (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning cap blockTimer)
 
-ensureUVMangerRunning :: UVManager -> IO ()
+ensureUVMangerRunning :: HasCallStack => UVManager -> IO ()
 ensureUVMangerRunning uvm = do
     isRunning <- readIORef (uvmRunning uvm)
     unless isRunning $ do
@@ -130,10 +131,13 @@ ensureUVMangerRunning uvm = do
             clearUVLoopuEventCounter uvLoopData
             r <- if block
                 then do
-                    unless rtsSupportsBoundThreads -- start a timer to end the blocking wait for non-threaded RTS
-                        (hs_timer_start_stop_loop blockTimer 1 >> return ())
-                    uv_run_safe uvLoop uV_RUN_ONCE
-                else uv_run uvLoop uV_RUN_NOWAIT
+                    unless rtsSupportsBoundThreads
+                        (void . E.throwUVErrno callStack "start timer to unblock uv loop for non-threaded RTS" $
+                            hs_timer_start_stop_loop blockTimer 1)
+                    E.throwUVErrno callStack "blocking uv loop on non-threaded RTS" $
+                        uv_run_safe uvLoop uV_RUN_ONCE
+                else E.throwUVErrno callStack "blocking uv loop on threaded RTS" $
+                        uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
             (c, q) <- peekEventQueue uvLoopData
             forM_ [0..(fromIntegral c-1)] $ \ i -> do      -- convert CSize to int first, otherwise (c-1) may overflow

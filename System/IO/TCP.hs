@@ -2,7 +2,8 @@ module System.IO.TCP where
 
 import System.IO.UV.FFI
 import System.IO.UV.Manager
-import System.IO.UV.Exception
+import qualified System.IO.UV.Exception as E
+import qualified System.IO.Exception as E
 import System.IO.Handle
 import Foreign
 import Foreign.C
@@ -20,27 +21,29 @@ data TCP = TCP
     , tcpReadLock :: MVar ()
     }
 
-newTCP :: CInt -> IO TCP
+newTCP :: HasCallStack => CInt -> IO TCP
 newTCP fd = do
     uvm <- getUVManager
     slot <- allocSlot uvm
     let loop = (uvmLoop uvm)
-    p <- hs_handle_init uV_TCP
+        dev = "tcp FD:" ++ show fd
+    p <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_TCP
     readLock <- newMVar ()
 
-    uv_tcp_init loop p
-    uv_tcp_open p fd
-    uv_stream_set_blocking p 0
-    poke_uv_handle_data p (fromIntegral slot)
+    withMVar (uvmFreeSlotList uvm) $ \ _ -> do
+        E.throwUVErrno callStack dev $ uv_tcp_init loop p
 
+    E.throwUVErrno callStack dev $ uv_tcp_open p fd
+
+    poke_uv_handle_data p (fromIntegral slot)
     return (TCP p slot uvm readLock)
 
 closeTCP :: TCP -> IO ()
 closeTCP = undefined
 
 instance Input TCP where
-    inputInfo _ = "tcp"
-    readInput (TCP tcp slot uvm readLock) buf bufSiz = withMVar readLock $ \ _ -> do
+    inputInfo tcp = "tcp" -- TODO: make it detailed
+    readInput tcp@(TCP uvhandle slot uvm readLock) buf bufSiz = withMVar readLock $ \ _ -> do
         ensureUVMangerRunning uvm
         (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
         withMVar (uvmFreeSlotList uvm) $ \ _ -> do
@@ -48,7 +51,7 @@ instance Input TCP where
             pokeElemOff bufTable slot buf
             pokeElemOff bufSizTable slot (fromIntegral bufSiz)
             pokeElemOff resultTable slot 0
-            hs_read_start tcp
+            E.throwUVErrno callStack  (inputInfo tcp) $ hs_read_start uvhandle
         btable <- readIORef $ uvmBlockTable uvm
         takeMVar (indexArr btable slot)
         fromIntegral `fmap` peekElemOff bufSizTable slot

@@ -143,7 +143,7 @@ readExactly n h = V.concat `fmap` (go h n)
             else if l == 0
                 then
                     E.throwIO (ShortReadException
-                        (E.IOEInfo Nothing "unexpected EOF reached" (inputInfo $ bufInput h) callStack))
+                        (E.IOEInfo E.NoErrno "unexpected EOF reached" (inputInfo $ bufInput h) callStack))
                 else do
                     chunks <- go h (n - l)
                     return (chunk : chunks)
@@ -172,7 +172,7 @@ readToMagic magic h = V.concat `fmap` (go h magic)
         chunk <- readHandle h
         if V.null chunk
         then E.throwIO (ShortReadException
-            (E.IOEInfo Nothing "unexpected EOF reached" (inputInfo $ bufInput h) callStack))
+            (E.IOEInfo E.NoErrno "unexpected EOF reached" (inputInfo $ bufInput h) callStack))
         else case V.elemIndex magic chunk of
             Just i -> do
                 let (lastChunk, rest) = V.splitAt (i+1) chunk
@@ -191,10 +191,10 @@ readLine h = do
         T.Success t -> return t
         T.PartialBytes _ bs ->
             E.throwIO (UTF8PartialBytesException bs
-                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput h) callStack))
+                (E.IOEInfo E.NoErrno "utf8 decode error" (inputInfo $ bufInput h) callStack))
         T.InvalidBytes bs ->
             E.throwIO (UTF8InvalidBytesException bs
-                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput h) callStack))
+                (E.IOEInfo E.NoErrno "utf8 decode error" (inputInfo $ bufInput h) callStack))
   where
     go h magic = do
         chunk <- readHandle h
@@ -234,7 +234,7 @@ readTextChunk h@InputHandle{..} = do
             then if l' == vl
                 then do                             -- no new bytes read, partial before EOF
                     E.throwIO (UTF8PartialBytesException chunk
-                        (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput) callStack))
+                        (E.IOEInfo E.NoErrno "utf8 decode error" (inputInfo $ bufInput) callStack))
                 else do
                     mba <- A.newArr l'              -- copy result into new array
                     A.copyMutableArr mba 0 buf 0 l'
@@ -255,7 +255,7 @@ readTextChunk h@InputHandle{..} = do
             unReadHandle bs h
             return t
         T.InvalidBytes bs -> E.throwIO (UTF8InvalidBytesException bs
-                (E.IOEInfo Nothing "utf8 decode error" (inputInfo $ bufInput) callStack))
+                (E.IOEInfo E.NoErrno "utf8 decode error" (inputInfo $ bufInput) callStack))
 
 
 data UTF8DecodeException

@@ -45,7 +45,6 @@ library
 
                             System.IO.TTY
                             System.IO.UV
-                            System.IO.UV.Errno
                             System.IO.UV.Exception
                             System.IO.UV.FFI
                             System.IO.UV.Manager

@@ -121,11 +121,11 @@ openFile path mode =
             if (r == -1)
             then do
                 c_close fd
-                E.throwIO $ E.ResourceBusy (E.IOEInfo Nothing "file is locked" path callStack)
+                E.throwIO $ E.ResourceBusy (E.IOEInfo E.NoErrno "file is locked" path callStack)
             else return (File fd path)
         else do
             c_close fd
-            E.throwIO $ E.InappropriateType (E.IOEInfo Nothing "not a regular file" path callStack)
+            E.throwIO $ E.InappropriateType (E.IOEInfo E.NoErrno "not a regular file" path callStack)
   where
 #ifdef mingw32_HOST_OS
     commonFLAG = o_BINARY .|. o_NONBLOCK .|. o_NOCTTY

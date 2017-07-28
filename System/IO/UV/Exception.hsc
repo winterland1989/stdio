@@ -1,10 +1,19 @@
-module System.IO.UV.Errno where
+module System.IO.UV.Exception where
 
 import Foreign.C
+import System.IO.Unsafe (unsafeDupablePerformIO)
+import GHC.Stack.Compat
+import System.IO.Exception
+import System.IO.UV.FFI
 
 #include "uv.h"
 
-newtype UVErrno = UVErrno CInt deriving (Show, Eq, Ord)
+newtype UVErrno = UVErrno CInt deriving (Eq, Ord)
+
+instance IOErrno UVErrno where
+    showErrno (UVErrno errno) = unsafeDupablePerformIO $ uv_err_name errno >>= peekCString
+    fromErrnoValue v = UVErrno v
+    toErrnoValue (UVErrno v) = v
 
 -- | argument list too long                         
 #{enum UVErrno, UVErrno, uV_E2BIG          = UV_E2BIG          } 
@@ -156,3 +165,90 @@ newtype UVErrno = UVErrno CInt deriving (Show, Eq, Ord)
 #{enum UVErrno, UVErrno, uV_ENXIO          = UV_ENXIO          } 
 -- | too many links                                 
 #{enum UVErrno, UVErrno, uV_EMLINK         = UV_EMLINK         }       
+
+
+--------------------------------------------------------------------------------
+
+throwUVErrno :: CallStack -> String -> IO CInt -> IO CInt
+throwUVErrno cstack dev f = do
+    errno <- f
+    desc <- (uv_strerror errno >>= peekCString)
+    let uverrno = UVErrno errno
+        info = IOEInfo uverrno desc dev cstack
+    case () of
+        _
+            | uverrno == uV_EOF             -> return errno
+            | uverrno == uV_E2BIG           -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_EACCES          -> throwIO (PermissionDenied        info)
+            | uverrno == uV_EADDRINUSE      -> throwIO (ResourceBusy            info)
+            | uverrno == uV_EADDRNOTAVAIL   -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EAFNOSUPPORT    -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EAGAIN          -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_EAI_ADDRFAMILY  -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EAI_AGAIN       -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_EAI_BADFLAGS    -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EAI_BADHINTS    -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EAI_CANCELED    -> throwIO (ResourceVanished        info)
+            | uverrno == uV_EAI_FAIL        -> throwIO (OtherError              info)
+            | uverrno == uV_EAI_FAMILY      -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EAI_MEMORY      -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_EAI_NODATA      -> throwIO (NoSuchThing             info)
+            | uverrno == uV_EAI_NONAME      -> throwIO (NoSuchThing             info)
+            | uverrno == uV_EAI_OVERFLOW    -> throwIO (InvalidArgument         info)
+            | uverrno == uV_EAI_PROTOCOL    -> throwIO (ProtocolError           info)
+            | uverrno == uV_EAI_SERVICE     -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EAI_SOCKTYPE    -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EALREADY        -> throwIO (AlreadyExists           info)
+            | uverrno == uV_EBADF           -> throwIO (InvalidArgument         info)
+            | uverrno == uV_EBUSY           -> throwIO (ResourceBusy            info)
+            | uverrno == uV_ECANCELED       -> throwIO (ResourceVanished        info)
+            | uverrno == uV_ECHARSET        -> throwIO (OtherError              info)
+            | uverrno == uV_ECONNABORTED    -> throwIO (ResourceVanished        info)
+            | uverrno == uV_ECONNREFUSED    -> throwIO (NoSuchThing             info)
+            | uverrno == uV_ECONNRESET      -> throwIO (ResourceVanished        info)
+            | uverrno == uV_EDESTADDRREQ    -> throwIO (InvalidArgument         info)
+            | uverrno == uV_EEXIST          -> throwIO (AlreadyExists           info)
+            | uverrno == uV_EFAULT          -> throwIO (OtherError              info)
+            | uverrno == uV_EFBIG           -> throwIO (PermissionDenied        info)
+            | uverrno == uV_EHOSTUNREACH    -> throwIO (NoSuchThing             info)
+            | uverrno == uV_EINTR           -> throwIO (Interrupted             info)
+            | uverrno == uV_EINVAL          -> throwIO (InvalidArgument         info)
+            | uverrno == uV_EIO             -> throwIO (HardwareFault           info)
+            | uverrno == uV_EISCONN         -> throwIO (AlreadyExists           info)
+            | uverrno == uV_EISDIR          -> throwIO (InappropriateType       info)
+            | uverrno == uV_ELOOP           -> throwIO (InvalidArgument         info)
+            | uverrno == uV_EMFILE          -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_EMSGSIZE        -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_ENAMETOOLONG    -> throwIO (InvalidArgument         info)
+            | uverrno == uV_ENETDOWN        -> throwIO (ResourceVanished        info)
+            | uverrno == uV_ENETUNREACH     -> throwIO (NoSuchThing             info)
+            | uverrno == uV_ENFILE          -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_ENOBUFS         -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_ENODEV          -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_ENOENT          -> throwIO (NoSuchThing             info)
+            | uverrno == uV_ENOMEM          -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_ENOPROTOOPT     -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_ENOSPC          -> throwIO (ResourceExhausted       info)
+            | uverrno == uV_ENOSYS          -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_ENOTCONN        -> throwIO (InvalidArgument         info)
+            | uverrno == uV_ENOTDIR         -> throwIO (InappropriateType       info)
+            | uverrno == uV_ENOTEMPTY       -> throwIO (UnsatisfiedConstraints  info)
+            | uverrno == uV_ENOTSOCK        -> throwIO (InvalidArgument         info)
+            | uverrno == uV_ENOTSUP         -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EPERM           -> throwIO (PermissionDenied        info)
+            | uverrno == uV_EPIPE           -> throwIO (ResourceVanished        info)
+            | uverrno == uV_EPROTO          -> throwIO (ProtocolError           info)
+            | uverrno == uV_EPROTONOSUPPORT -> throwIO (ProtocolError           info)
+            | uverrno == uV_EPROTOTYPE      -> throwIO (ProtocolError           info)
+            | uverrno == uV_ERANGE          -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_EROFS           -> throwIO (PermissionDenied        info)
+            | uverrno == uV_ESHUTDOWN       -> throwIO (IllegalOperation        info)
+            | uverrno == uV_ESPIPE          -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_ESRCH           -> throwIO (NoSuchThing             info)
+            | uverrno == uV_ETIMEDOUT       -> throwIO (TimeExpired             info)
+            | uverrno == uV_ETXTBSY         -> throwIO (ResourceBusy            info)
+            | uverrno == uV_EXDEV           -> throwIO (UnsupportedOperation    info)
+            | uverrno == uV_UNKNOWN         -> throwIO (OtherError              info)
+            | uverrno == uV_ENXIO           -> throwIO (NoSuchThing             info)
+            | uverrno == uV_EMLINK          -> throwIO (ResourceExhausted       info)
+            | otherwise                   -> throwIO (OtherError              info)
