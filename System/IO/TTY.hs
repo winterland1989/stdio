@@ -1,8 +1,8 @@
 module System.IO.TTY where
 
-import System.IO.UV
 import System.IO.Handle
-import System.IO.UVManager
+import System.IO.UV.FFI
+import System.IO.UV.Manager
 import Foreign
 import Foreign.C
 import GHC.Stack

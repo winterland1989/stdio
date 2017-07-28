@@ -15,21 +15,7 @@ import Foreign.C
 
 --------------------------------------------------------------------------------
 
--- | This is data structure attach to uv_loop_t 's data field. It should be mirrored
--- to c struct in hs_uv.c.
---
-data UVLoopData = UVLoopData
-    { uVLoopEventCounter                       :: CSize           -- These two fields compose a special data structure
-    , uvLoopEventQueue                         :: Ptr CSize       -- to keep trace of events during a uv_run
-                                                                  -- before each uv_run the counter should be cleared
-                                                                  --
-    , uvLoopReadBufferTable                    :: Ptr (Ptr Word8) -- a list to keep read buffer's refrerence
-    , uvLoopReadBufferSizeTable                :: Ptr CSize       -- a list to keep read buffer's size
-    , uvLoopWriteBufferTable                   :: Ptr (Ptr Word8) -- a list to keep write buffer's refrerence
-    , uvLoopWriteBufferSizeTable               :: Ptr CSize       -- a list to keep write buffer's size
-    , uvLoopResultTable                        :: Ptr CSize       -- a list to keep callback's return value
-                                                                  -- such as file or read bytes number
-    } deriving Show
+data UVLoopData
 
 peekEventQueue :: Ptr UVLoopData -> IO (CSize, Ptr CSize)
 peekEventQueue p = (,)
@@ -49,26 +35,6 @@ peekReadBuffer p = (,)
 clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
 clearUVLoopuEventCounter p = do
     #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
-
-instance Storable UVLoopData where
-    sizeOf _ = #size hs_loop_data
-    alignment _ = #alignment hs_loop_data
-    poke p d = do
-        #{poke hs_loop_data, event_counter          } p $ uVLoopEventCounter          d
-        #{poke hs_loop_data, event_queue            } p $ uvLoopEventQueue            d
-        #{poke hs_loop_data, read_buffer_table      } p $ uvLoopReadBufferTable       d
-        #{poke hs_loop_data, read_buffer_size_table } p $ uvLoopReadBufferSizeTable   d
-        #{poke hs_loop_data, write_buffer_table     } p $ uvLoopWriteBufferTable      d
-        #{poke hs_loop_data, write_buffer_size_table} p $ uvLoopWriteBufferSizeTable  d
-        #{poke hs_loop_data, result_table           } p $ uvLoopResultTable           d
-    peek p = UVLoopData 
-        <$> (#{peek hs_loop_data, event_counter          } p)
-        <*> (#{peek hs_loop_data, event_queue            } p)
-        <*> (#{peek hs_loop_data, read_buffer_table      } p)
-        <*> (#{peek hs_loop_data, read_buffer_size_table } p)
-        <*> (#{peek hs_loop_data, write_buffer_table     } p)
-        <*> (#{peek hs_loop_data, write_buffer_size_table} p)
-        <*> (#{peek hs_loop_data, result_table           } p)
 
 --------------------------------------------------------------------------------
 

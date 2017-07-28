@@ -172,6 +172,3 @@ allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _ _) = do
 freeSlot :: Int -> UVManager -> IO ()
 freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)
-
-
-
