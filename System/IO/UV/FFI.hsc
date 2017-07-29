@@ -136,7 +136,7 @@ foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
 foreign import ccall unsafe uv_tcp_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
 foreign import ccall unsafe uv_tcp_init_ex :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
 foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
-
+foreign import ccall unsafe hs_tcp_open_win32 :: Ptr UVHandle -> CInt -> IO CInt
 
 --------------------------------------------------------------------------------
 

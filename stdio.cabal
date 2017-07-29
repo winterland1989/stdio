@@ -44,7 +44,7 @@ library
                             System.LowResTimer
 
                             System.IO.TTY
-                            System.IO.UV
+                            
                             System.IO.UV.Exception
                             System.IO.UV.FFI
                             System.IO.UV.Manager

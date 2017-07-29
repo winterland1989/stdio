@@ -123,6 +123,34 @@ int hs_read_start(uv_stream_t* stream){
     return uv_read_start(stream, hs_alloc_cb ,hs_read_cb);
 }
 
+#define UV_HANDLE_READING                       0x00000100
+#define UV_HANDLE_BOUND                         0x00000200
+#define UV_HANDLE_LISTENING                     0x00000800
+#define UV_HANDLE_CONNECTION                    0x00001000
+#define UV_HANDLE_READABLE                      0x00008000
+#define UV_HANDLE_WRITABLE                      0x00010000
+
+void uv_connection_init(uv_stream_t* handle){
+  handle->flags |= UV_HANDLE_CONNECTION;
+  handle->stream.conn.write_reqs_pending = 0;
+  (&handle->read_req)->type = UV_READ;                                                        \
+  (&handle->read_req)->u.io.overlapped.Internal = 0;  /* SET_REQ_SUCCESS() */ 
+  handle->read_req.event_handle = NULL;
+  handle->read_req.wait_handle = INVALID_HANDLE_VALUE;
+  handle->read_req.data = handle;
+  handle->stream.conn.shutdown_req = NULL;
+}
+
+int hs_tcp_open_win32(uv_tcp_t* handle, uv_os_sock_t sock) {
+  int r = uv_tcp_open(handle, sock);
+  if (r == 0) {
+    uv_connection_init((uv_stream_t*)handle);
+    handle->flags |= UV_HANDLE_BOUND | UV_HANDLE_READABLE | UV_HANDLE_WRITABLE;
+  }
+
+  return r;
+}
+
 /********************************************************************************/
 
 void uv_timer_cb_stop_loop(uv_timer_t* handle){

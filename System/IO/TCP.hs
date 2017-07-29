@@ -33,7 +33,7 @@ newTCP fd = do
     withMVar (uvmFreeSlotList uvm) $ \ _ -> do
         E.throwUVErrno callStack dev $ uv_tcp_init loop p
 
-    E.throwUVErrno callStack dev $ uv_tcp_open p fd
+    E.throwUVErrno callStack dev $ hs_tcp_open_win32 p fd
 
     poke_uv_handle_data p (fromIntegral slot)
     return (TCP p slot uvm readLock)
@@ -46,12 +46,13 @@ instance Input TCP where
     readInput tcp@(TCP uvhandle slot uvm readLock) buf bufSiz = withMVar readLock $ \ _ -> do
         ensureUVMangerRunning uvm
         (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
+        resultTable <- peekResultTable (uvmLoopData uvm)
         withMVar (uvmFreeSlotList uvm) $ \ _ -> do
-            resultTable <- peekResultTable (uvmLoopData uvm)
+            
             pokeElemOff bufTable slot buf
             pokeElemOff bufSizTable slot (fromIntegral bufSiz)
             pokeElemOff resultTable slot 0
             E.throwUVErrno callStack  (inputInfo tcp) $ hs_read_start uvhandle
         btable <- readIORef $ uvmBlockTable uvm
         takeMVar (indexArr btable slot)
-        fromIntegral `fmap` peekElemOff bufSizTable slot
+        fromIntegral `fmap` peekElemOff resultTable slot

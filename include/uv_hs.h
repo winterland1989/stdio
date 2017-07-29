@@ -9,3 +9,4 @@ typedef struct {
    size_t*   write_buffer_size_table;
    size_t*   result_table;          
 } hs_loop_data;
+

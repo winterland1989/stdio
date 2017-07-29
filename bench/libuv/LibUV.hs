@@ -8,6 +8,7 @@ import Network.Socket.ByteString
 import Control.Concurrent.Async
 import Foreign
 import qualified Data.Vector as V
+import Data.Word
 
 main :: IO ()
 main = do
