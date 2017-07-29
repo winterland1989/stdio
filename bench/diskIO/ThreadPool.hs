@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Main where
 
 import System.Posix.Internals (c_read, c_open, c_close, c_write, o_RDWR, o_CREAT, o_NONBLOCK)
@@ -16,6 +17,9 @@ import Foreign.Ptr
 import Foreign.C.Types
 import GHC.Prim (Any)
 import Unsafe.Coerce (unsafeCoerce)
+#if defined(mingw32_HOST_OS)
+import Foreign.Ptr (castPtr)
+#endif
 
 data Job = Job (MVar (IO Any)) (MVar Any)
 
@@ -55,8 +59,13 @@ main = do
                                     _ -> j3
         withCString file $ \ fp -> do
             withCString file' $ \ fp' -> submitJob job $ do
+#if defined(mingw32_HOST_OS)
+                fd <- c_open (castPtr fp) (o_RDWR .|. o_NONBLOCK) 0o666
+                fd' <- c_open (castPtr fp') (o_CREAT .|. o_RDWR .|. o_NONBLOCK) 0o666
+#else
                 fd <- c_open fp (o_RDWR .|. o_NONBLOCK) 0o666
                 fd' <- c_open fp' (o_CREAT .|. o_RDWR .|. o_NONBLOCK) 0o666
+#endif
                 loop fd fd'
                 c_close fd
                 c_close fd'
