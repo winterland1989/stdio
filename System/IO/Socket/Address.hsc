@@ -5,12 +5,12 @@ module System.IO.Socket.Address
     SocketAddress(..)
   , RawSockAddr 
   , SockAddrInet(..)
-  , HostAddress
-  , hostAddressToTuple
-  , tupleToHostAddress
-  , HostAddress6
-  , hostAddress6ToTuple
-  , tupleToHostAddress6
+  , InetAddr
+  , inetAddrToTuple
+  , tupleToInetAddr
+  , Inet6Addr
+  , inet6AddrToTuple
+  , tupleToInet6Addr
   , FlowInfo
   , ScopeID
   -- * address to name
@@ -18,8 +18,8 @@ module System.IO.Socket.Address
   , AddrInfoFlag
   -- * port numbber
   , PortNumber 
-  , htonl
-  , ntohl
+  , htons
+  , ntohs
   ) where
 
 import System.IO.Socket.Types
@@ -29,6 +29,7 @@ import qualified System.IO.Exception as E
 import GHC.Stack.Compat
 import qualified Data.List as List
 import Data.Bits
+import Numeric (showHex)
 import Data.Typeable
 import Data.Ratio
 import System.IO.Unsafe (unsafeDupablePerformIO)
@@ -80,66 +81,88 @@ withRawSockAddr (RawSockAddr fptr) f =  withForeignPtr fptr $ \ ptr -> f ptr
 -- 
 data SockAddrInet 
     = SockAddrInet
-        PortNumber  -- sin_port  (network byte order)
-        HostAddress -- sin_addr  (ditto)
+        {-# UNPACK #-} !PortNumber  -- sin_port  (network byte order)
+        {-# UNPACK #-} !InetAddr    -- sin_addr  (ditto)
     | SockAddrInet6
-        PortNumber      -- sin6_port (network byte order)
-        FlowInfo        -- sin6_flowinfo (ditto)
-        HostAddress6    -- sin6_addr (ditto)
-        ScopeID         -- sin6_scope_id (ditto)
+        {-# UNPACK #-} !PortNumber  -- sin6_port (network byte order)
+        {-# UNPACK #-} !FlowInfo    -- sin6_flowinfo (ditto)
+        {-# UNPACK #-} !Inet6Addr   -- sin6_addr (ditto)
+        {-# UNPACK #-} !ScopeID     -- sin6_scope_id (ditto)
+  deriving (Show, Eq, Ord)
 
 type FlowInfo = Word32
 type ScopeID = Word32
 
--- | The raw network byte order number is read using host byte order.
--- Therefore on little-endian architectures the byte order is swapped. For
--- example @127.0.0.1@ is represented as @0x0100007f@ on little-endian hosts
--- and as @0x7f000001@ on big-endian hosts.
+-- | Independent of endianness. For example @127.0.0.1@ is stored as @(127, 0, 0, 1)@.
 --
--- For direct manipulation prefer 'hostAddressToTuple' and 'tupleToHostAddress'.
+-- For direct manipulation prefer 'inetAddrToTuple' and 'tupleToInetAddr'.
 --
-type HostAddress = Word32
+newtype InetAddr = InetAddr Word32 deriving (Eq, Ord)
+instance Show InetAddr where
+    showsPrec _ ia = 
+        let (a,b,c,d) = inetAddrToTuple ia
+        in ("InetAddr " ++) . shows a . ('.':)
+                            . shows b . ('.':)
+                            . shows c . ('.':)
+                            . shows d
+
+instance Storable InetAddr where
+    sizeOf _ = #size uint32_t
+    alignment _ = #alignment uint32_t 
+    peek p = (InetAddr . ntohl) `fmap` peekByteOff p 0
+    poke p (InetAddr ia) = pokeByteOff p 0 (htonl ia)
 
 -- | Converts 'HostAddress' to representation-independent IPv4 quadruple.
--- For example for @127.0.0.1@ the function will return @(0x7f, 0, 0, 1)@
+-- For example for @127.0.0.1@ the function will return @(127, 0, 0, 1)@
 -- regardless of host endianness.
-hostAddressToTuple :: HostAddress -> (Word8, Word8, Word8, Word8)
-hostAddressToTuple ha' =
-    let ha = htonl ha'
-        byte i = fromIntegral (ha `shiftR` i) :: Word8
+inetAddrToTuple :: InetAddr -> (Word8, Word8, Word8, Word8)
+inetAddrToTuple (InetAddr ia) =
+    let byte i = fromIntegral (ia `shiftR` i) :: Word8
     in (byte 24, byte 16, byte 8, byte 0)
 
 -- | Converts IPv4 quadruple to 'HostAddress'.
-tupleToHostAddress :: (Word8, Word8, Word8, Word8) -> HostAddress
-tupleToHostAddress (b3, b2, b1, b0) =
+tupleToInetAddr :: (Word8, Word8, Word8, Word8) -> InetAddr
+tupleToInetAddr (b3, b2, b1, b0) =
     let x `sl` i = fromIntegral x `shiftL` i :: Word32
-    in ntohl $ (b3 `sl` 24) .|. (b2 `sl` 16) .|. (b1 `sl` 8) .|. (b0 `sl` 0)
+    in InetAddr $ (b3 `sl` 24) .|. (b2 `sl` 16) .|. (b1 `sl` 8) .|. (b0 `sl` 0)
 
 -- | Independent of endianness. For example @::1@ is stored as @(0, 0, 0, 1)@.
 --
--- For direct manipulation prefer 'hostAddress6ToTuple' and 'tupleToHostAddress6'.
+-- For direct manipulation prefer 'inet6AddrToTuple' and 'tupleToInet6Addr'.
 --
-data HostAddress6 = HostAddress6 {-# UNPACK #-}!Word32
-                                 {-# UNPACK #-}!Word32
-                                 {-# UNPACK #-}!Word32
-                                 {-# UNPACK #-}!Word32 deriving (Show, Eq, Ord)
+data Inet6Addr = Inet6Addr {-# UNPACK #-}!Word32
+                           {-# UNPACK #-}!Word32
+                           {-# UNPACK #-}!Word32
+                           {-# UNPACK #-}!Word32 deriving (Eq, Ord)
 
-hostAddress6ToTuple :: HostAddress6 -> (Word16, Word16, Word16, Word16,
+instance Show Inet6Addr where
+    showsPrec _ i6a = 
+        let (a,b,c,d,e,f,g,h) = inet6AddrToTuple i6a
+        in ("Inet6Addr " ++) . showHex a . (':':)
+                             . showHex b . (':':)
+                             . showHex c . (':':)
+                             . showHex d . (':':)
+                             . showHex e . (':':)
+                             . showHex f . (':':)
+                             . showHex g . (':':)
+                             . showHex h
+
+inet6AddrToTuple :: Inet6Addr -> (Word16, Word16, Word16, Word16,
                                         Word16, Word16, Word16, Word16)
-hostAddress6ToTuple (HostAddress6 w3 w2 w1 w0) =
+inet6AddrToTuple (Inet6Addr w3 w2 w1 w0) =
     let high, low :: Word32 -> Word16
         high w = fromIntegral (w `shiftR` 16)
         low w = fromIntegral w
     in (high w3, low w3, high w2, low w2, high w1, low w1, high w0, low w0)
 
-tupleToHostAddress6 :: (Word16, Word16, Word16, Word16,
-                        Word16, Word16, Word16, Word16) -> HostAddress6
-tupleToHostAddress6 (w7, w6, w5, w4, w3, w2, w1, w0) =
+tupleToInet6Addr :: (Word16, Word16, Word16, Word16,
+                        Word16, Word16, Word16, Word16) -> Inet6Addr
+tupleToInet6Addr (w7, w6, w5, w4, w3, w2, w1, w0) =
     let add :: Word16 -> Word16 -> Word32
         high `add` low = (fromIntegral high `shiftL` 16) .|. (fromIntegral low)
-    in  HostAddress6 (w7 `add` w6) (w5 `add` w4) (w3 `add` w2) (w1 `add` w0)
+    in  Inet6Addr (w7 `add` w6) (w5 `add` w4) (w3 `add` w2) (w1 `add` w0)
 
-instance Storable HostAddress6 where
+instance Storable Inet6Addr where
     sizeOf _    = #const sizeof(struct in6_addr)
     alignment _ = #alignment struct in6_addr
 
@@ -148,9 +171,9 @@ instance Storable HostAddress6 where
         b <- peek32 p 1
         c <- peek32 p 2
         d <- peek32 p 3
-        return $ HostAddress6 a b c d
+        return $ Inet6Addr a b c d
 
-    poke p (HostAddress6 a b c d) = do
+    poke p (Inet6Addr a b c d) = do
         poke32 p 0 a
         poke32 p 1 b
         poke32 p 2 c
