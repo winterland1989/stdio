@@ -21,7 +21,6 @@ executable libuv
                         System.IO.UV.Exception
   -- other-extensions:    
   c-sources:          ../../cbits/bytes.c
-                      ../../cbits/win32.c
                       ../../cbits/uv_hs.c
   extra-libraries:         uv
   build-depends:       base >=4.9 && <5.0

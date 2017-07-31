@@ -48,7 +48,11 @@ library
                             System.IO.UV.Exception
                             System.IO.UV.FFI
                             System.IO.UV.Manager
-                            System.IO.TCP
+                            -- System.IO.TCP
+                            -- System.IO.Socket
+                            System.IO.Socket.Types
+                            System.IO.Socket.Address
+
 
     -- other-modules:          System.IO.UV
     -- other-extensions:    
@@ -56,6 +60,7 @@ library
     build-depends:          base >=4.7 && <5.0
                         ,   ghc-prim  >= 0.4
                         ,   primitive >= 0.6.2
+                        ,   network
                         ,   deepseq
                         ,   template-haskell 
                         ,   unboxed-ref >= 0.4
@@ -63,7 +68,6 @@ library
     include-dirs:       include
     includes:           uv_hs.h
     c-sources:          cbits/bytes.c
-                        cbits/win32.c
                         cbits/uv_hs.c
 
 

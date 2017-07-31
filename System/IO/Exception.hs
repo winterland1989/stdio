@@ -63,7 +63,7 @@ module System.IO.Exception
   , Interrupted(..)
     -- * Throw io exceptions
   , throwIO
-  , throwOtherErrno
+  , throwStdErrno
   , throwOOMIfNull
   , throwErrno
   , throwErrorIf
@@ -166,15 +166,15 @@ IOE(Interrupted)
 throwErrno :: CallStack -- callstack
            -> String    -- device info, such as filename, socket address, etc
            -> IO a
-throwErrno cstack dev = getErrno >>= throwOtherErrno cstack dev
+throwErrno cstack dev = getErrno >>= throwStdErrno cstack dev
 
--- | Throw io exception corresponding to the given errno.
+-- | Throw io exception corresponding to a standard unix errno.
 --
-throwOtherErrno :: CallStack -- callstack
-                -> String    -- device info, such as filename, socket address, etc
-                -> Errno     -- custom errno
-                -> IO a
-throwOtherErrno cstack dev errno = do
+throwStdErrno :: CallStack -- callstack
+              -> String    -- device info, such as filename, socket address, etc
+              -> Errno     -- custom errno
+              -> IO a
+throwStdErrno cstack dev errno = do
     desc <- (strerror errno >>= peekCString)
     let info = IOEInfo errno desc dev cstack
     case () of

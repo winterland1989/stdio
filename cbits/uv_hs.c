@@ -123,6 +123,14 @@ int hs_read_start(uv_stream_t* stream){
     return uv_read_start(stream, hs_alloc_cb ,hs_read_cb);
 }
 
+/* on windows uv_tcp_open doesn't work propery for sockets that are not
+ * connected or accepted by libuv because the lack of some state initialization,
+ * so we do it by manually set those flags
+ *
+ * referenes:   https://github.com/libuv/libuv/issues/397
+ *              https://github.com/libuv/libuv/pull/1150
+ */
+#if defined(mingw32_HOST_OS)
 #define UV_HANDLE_READING                       0x00000100
 #define UV_HANDLE_BOUND                         0x00000200
 #define UV_HANDLE_LISTENING                     0x00000800
@@ -150,6 +158,7 @@ int hs_tcp_open_win32(uv_tcp_t* handle, uv_os_sock_t sock) {
 
   return r;
 }
+#endif
 
 /********************************************************************************/
 

@@ -194,6 +194,6 @@ getUniqueFileInfo _ dev ino = return (fromIntegral dev, fromIntegral ino)
 #endif
 
 #ifdef mingw32_HOST_OS
-foreign import ccall unsafe "get_unique_file_info"
+foreign import ccall unsafe "HsBase.h get_unique_file_info"
     c_getUniqueFileInfo :: CInt -> Ptr Word64 -> Ptr Word64 -> IO ()
 #endif

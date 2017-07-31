@@ -1,13 +1,11 @@
-{-# LANGUAGE ExistentialQuantification #-}
-
 module System.IO.UV.FFI where
 
 import Foreign
 import Foreign.C
 
 -- The macro `#alignment` exists since GHC 8.0
-#if __GLASGOW_HASKELL < 800
-# let alignment t = "%lu", (unsigned long)offsetof(struct {char x__; t (y__); }, y__)
+#if __GLASGOW_HASKELL__ < 800
+#let alignment t = "%lu", (unsigned long)offsetof(struct {char x__; t (y__); }, y__)
 #endif
 
 #include <uv.h>
@@ -135,8 +133,13 @@ foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
 
 foreign import ccall unsafe uv_tcp_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
 foreign import ccall unsafe uv_tcp_init_ex :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
+
+-- see notes in cbits/uv_hs.c
+#if defined(mingw32_HOST_OS)
+foreign import ccall unsafe "hs_tcp_open_win32" uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
+#else
 foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
-foreign import ccall unsafe hs_tcp_open_win32 :: Ptr UVHandle -> CInt -> IO CInt
+#endif
 
 --------------------------------------------------------------------------------
 
