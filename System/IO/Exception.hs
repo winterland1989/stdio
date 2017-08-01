@@ -447,7 +447,7 @@ instance IOErrno Errno where
         | e == eADV            = "EADV"
         | e == eAFNOSUPPORT    = "EAFNOSUPPORT"
         | e == eAGAIN          = "EAGAIN"
-        | e == eALREADY        = "EALREADY"
+        | e == eALREADY        = "EADY"
         | e == eBADF           = "EBADF"
         | e == eBADMSG         = "EBADMSG"
         | e == eBADRPC         = "EBADRPC"

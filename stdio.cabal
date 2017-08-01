@@ -46,13 +46,12 @@ library
 
                             System.IO.TTY
                             
-                            System.IO.UV.Errno
+                            System.IO.UV.Exception
                             System.IO.UV.FFI
                             System.IO.UV.Manager
                             -- System.IO.TCP
                             -- System.IO.Socket
-                            System.IO.Socket.Errno
-                            System.IO.Socket.Types
+                            System.IO.Socket.Exception
                             System.IO.Socket.Address
 
 

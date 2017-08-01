@@ -15,8 +15,6 @@ This module provide I/O manager which bridge libuv's async interface with ghc's 
 
 module System.IO.UV.Manager where
 
-import System.IO.UV.FFI
-import System.IO.UV.Exception
 import GHC.Stack.Compat
 import qualified System.IO.UV.Exception as E
 import qualified System.IO.Exception as E

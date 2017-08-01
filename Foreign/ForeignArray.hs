@@ -14,3 +14,4 @@ data MutableForeignArray s a = MutableForeignArray {-# UNPACK #-} !Int {-# UNPAC
 newForeignArray :: Prim a => Int -> ForeignArray a
 
 importForeignArray :: Prim a => Int -> ForeignPtr a -> ForeignArray a
+
