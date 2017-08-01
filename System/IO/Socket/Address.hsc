@@ -33,6 +33,9 @@ import Numeric (showHex)
 import Data.Typeable
 import Data.Ratio
 import System.IO.Unsafe (unsafeDupablePerformIO)
+import qualified Data.Vector as V
+import Foreign.PrimVector
+import Network (withSocketsDo)
 
 #include "HsNet.h" 
 
@@ -107,8 +110,8 @@ instance Show InetAddr where
                             . shows d
 
 instance Storable InetAddr where
-    sizeOf _ = #size uint32_t
-    alignment _ = #alignment uint32_t 
+    sizeOf _ = sizeOf (undefined :: Word32)
+    alignment _ = alignment (undefined :: Word32) 
     peek p = (InetAddr . ntohl) `fmap` peekByteOff p 0
     poke p (InetAddr ia) = pokeByteOff p 0 (htonl ia)
 
@@ -366,7 +369,7 @@ data AddrInfo = AddrInfo
     , addrSocketType :: SocketType
     , addrProtocol :: SocketProtocol
     , addrAddressRaw :: RawSockAddr
-    , addrCanonName :: Maybe String
+    , addrCanonName :: Maybe V.Bytes
     } deriving (Eq, Show, Typeable)
 
 data AddrInfoHint = AddrInfoHint 
@@ -376,3 +379,90 @@ data AddrInfoHint = AddrInfoHint
     , addrHintProtocol :: SocketProtocol
     } deriving (Show, Eq)
 
+    
+-- | Resolve a host or service name to one or more addresses.
+-- The 'AddrInfo' values that this function returns contain 'SockAddr'
+-- values that you can pass directly to 'connect' or
+-- 'bind'.
+--
+-- This function is protocol independent.  It can return both IPv4 and
+-- IPv6 address information.
+--
+-- The 'AddrInfo' argument specifies the preferred query behaviour,
+-- socket options, or protocol.  You can override these conveniently
+-- using Haskell's record update syntax on 'defaultHints', for example
+-- as follows:
+--
+-- >>> let hints = defaultHints { addrFlags = [AI_NUMERICHOST], addrSocketType = Stream }
+--
+-- You must provide a 'Just' value for at least one of the 'HostName'
+-- or 'ServiceName' arguments.  'HostName' can be either a numeric
+-- network address (dotted quad for IPv4, colon-separated hex for
+-- IPv6) or a hostname.  In the latter case, its addresses will be
+-- looked up unless 'AI_NUMERICHOST' is specified as a hint.  If you
+-- do not provide a 'HostName' value /and/ do not set 'AI_PASSIVE' as
+-- a hint, network addresses in the result will contain the address of
+-- the loopback interface.
+--
+-- If the query fails, this function throws an IO exception instead of
+-- returning an empty list.  Otherwise, it returns a non-empty list
+-- of 'AddrInfo' values.
+--
+-- There are several reasons why a query might result in several
+-- values.  For example, the queried-for host could be multihomed, or
+-- the service might be available via several protocols.
+--
+-- Note: the order of arguments is slightly different to that defined
+-- for @getaddrinfo@ in RFC 2553.  The 'AddrInfo' parameter comes first
+-- to make partial application easier.
+--
+-- >>> addr:_ <- getAddrInfo (Just hints) (Just "127.0.0.1") (Just "http")
+-- >>> addrAddress addr
+-- 127.0.0.1:80
+
+getAddrInfo :: Maybe AddrInfoHint -- ^ preferred socket type or protocol
+            -> Maybe V.Bytes        -- ^ host name to look up
+            -> Maybe V.Bytes        -- ^ service name to look up
+            -> IO [AddrInfo]      -- ^ resolved addresses, with "best" first
+
+getAddrInfo hints node service = withSocketsDo $
+    maybeWith withPrimVector node $ \ c_node ->
+    maybeWith withPrimVector service $ \c_service ->
+    maybeWith with filteredHints $ \c_hints ->
+        alloca $ \ptr_ptr_addrs -> do
+          ret <- c_getaddrinfo c_node c_service c_hints ptr_ptr_addrs
+          case ret of
+            0 -> do ptr_addrs <- peek ptr_ptr_addrs
+                    ais <- followAddrInfo ptr_addrs
+                    c_freeaddrinfo ptr_addrs
+                    return ais
+            _ -> do err <- gai_strerror ret
+                    ioError (ioeSetErrorString
+                             (mkIOError NoSuchThing "Network.Socket.getAddrInfo" Nothing
+                              Nothing) err)
+    -- Leaving out the service and using AI_NUMERICSERV causes a
+    -- segfault on OS X 10.8.2. This code removes AI_NUMERICSERV
+    -- (which has no effect) in that case.
+  where
+#if defined(darwin_HOST_OS)
+    filteredHints = case service of
+        Nothing -> fmap (\ h -> h { addrFlags = delete AI_NUMERICSERV (addrFlags h) }) hints
+        _       -> hints
+#else
+    filteredHints = hints
+#endif
+
+followAddrInfo :: Ptr AddrInfo -> IO [AddrInfo]
+
+followAddrInfo ptr_ai | ptr_ai == nullPtr = return []
+                      | otherwise = do
+    a <- peek ptr_ai
+    as <- (#peek struct addrinfo, ai_next) ptr_ai >>= followAddrInfo
+    return (a:as)
+
+foreign import ccall safe "hsnet_getaddrinfo"
+    c_getaddrinfo :: CString -> CString -> Ptr AddrInfo -> Ptr (Ptr AddrInfo)
+                  -> IO CInt
+
+foreign import ccall safe "hsnet_freeaddrinfo"
+    c_freeaddrinfo :: Ptr AddrInfo -> IO ()

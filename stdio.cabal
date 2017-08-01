@@ -36,6 +36,7 @@ library
                             Data.Binary
                             Data.Builder
 
+                            Foreign.PrimVector
                             GHC.Stack.Compat
 
                             System.IO.Exception 
@@ -45,11 +46,12 @@ library
 
                             System.IO.TTY
                             
-                            System.IO.UV.Exception
+                            System.IO.UV.Errno
                             System.IO.UV.FFI
                             System.IO.UV.Manager
                             -- System.IO.TCP
                             -- System.IO.Socket
+                            System.IO.Socket.Errno
                             System.IO.Socket.Types
                             System.IO.Socket.Address
 
@@ -67,6 +69,7 @@ library
 
     include-dirs:       include
     includes:           uv_hs.h
+    install-includes:   uv_hs.h
     c-sources:          cbits/bytes.c
                         cbits/uv_hs.c
 

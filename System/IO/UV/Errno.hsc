@@ -1,4 +1,4 @@
-module System.IO.UV.Exception where
+module System.IO.UV.Errno where
 
 import Foreign.C
 import System.IO.Unsafe (unsafeDupablePerformIO)

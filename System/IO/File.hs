@@ -62,7 +62,7 @@ instance Input File where
             (l, rc) <- asyncRead (fromIntegral fd) 0 (fromIntegral len) buf
             if l == (-1)
             then
-                E.throwOtherErrno cstack path (Errno (fromIntegral rc))
+                E.throwStdErrno cstack path (Errno (fromIntegral rc))
             else return (fromIntegral l)
 #else
         fromIntegral `fmap` E.throwErrnoIfMinus1RetryMayBlock callStack path    -- In theory regular file shouldn't block
