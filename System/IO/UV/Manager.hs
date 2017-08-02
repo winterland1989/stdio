@@ -29,6 +29,7 @@ import Control.Concurrent
 import Control.Monad
 import Data.Primitive.Addr
 import System.IO.Unsafe
+import System.IO.UV.Base
 
 --------------------------------------------------------------------------------
 
@@ -130,11 +131,11 @@ ensureUVMangerRunning uvm = do
             r <- if block
                 then do
                     unless rtsSupportsBoundThreads
-                        (void . E.throwUVErrno callStack "start timer to unblock uv loop for non-threaded RTS" $
+                        (void . E.throwUVErrorIfMinus callStack "start timer to unblock uv loop for non-threaded RTS" $
                             hs_timer_start_stop_loop blockTimer 1)
-                    E.throwUVErrno callStack "blocking uv loop on non-threaded RTS" $
+                    E.throwUVErrorIfMinus callStack "blocking uv loop on non-threaded RTS" $
                         uv_run_safe uvLoop uV_RUN_ONCE
-                else E.throwUVErrno callStack "blocking uv loop on threaded RTS" $
+                else E.throwUVErrorIfMinus callStack "blocking uv loop on threaded RTS" $
                         uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
             (c, q) <- peekEventQueue uvLoopData

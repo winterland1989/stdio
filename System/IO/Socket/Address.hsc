@@ -15,7 +15,9 @@ module System.IO.Socket.Address
   , ScopeID
   -- * address to name
   , AddrInfo(..)
+  , AddrInfoHint(..)
   , AddrInfoFlag
+  , getAddrInfo
   -- * port numbber
   , PortNumber 
   , htons
@@ -24,7 +26,7 @@ module System.IO.Socket.Address
 
 import Foreign
 import Foreign.C
-import qualified System.IO.Exception as E
+import qualified System.IO.Socket.Exception as E
 import GHC.Stack.Compat
 import GHC.ForeignPtr (mallocPlainForeignPtrAlignedBytes)
 import qualified Data.List as List
@@ -34,7 +36,7 @@ import Data.Typeable
 import Data.Ratio
 import System.IO.Unsafe (unsafeDupablePerformIO)
 import qualified Data.Vector as V
-import Foreign.PrimVector
+import Data.CBytes
 import Foreign.Marshal.Utils (copyBytes)
 import Network (withSocketsDo)
 
@@ -362,17 +364,45 @@ data AddrInfoFlag =
     | AI_V4MAPPED
     deriving (Eq, Read, Show, Typeable)
 
+aiFlagMapping :: [(AddrInfoFlag, CInt)]
+aiFlagMapping =
+    [
+#if HAVE_DECL_AI_ADDRCONFIG
+     (AI_ADDRCONFIG, #const AI_ADDRCONFIG),
+#else
+     (AI_ADDRCONFIG, 0),
+#endif
+#if HAVE_DECL_AI_ALL
+     (AI_ALL, #const AI_ALL),
+#else
+     (AI_ALL, 0),
+#endif
+     (AI_CANONNAME, #const AI_CANONNAME),
+     (AI_NUMERICHOST, #const AI_NUMERICHOST),
+#if HAVE_DECL_AI_NUMERICSERV
+     (AI_NUMERICSERV, #const AI_NUMERICSERV),
+#else
+     (AI_NUMERICSERV, 0),
+#endif
+     (AI_PASSIVE, #const AI_PASSIVE),
+#if HAVE_DECL_AI_V4MAPPED
+     (AI_V4MAPPED, #const AI_V4MAPPED)
+#else
+     (AI_V4MAPPED, 0)
+#endif
+    ]
+
 data AddrInfo = AddrInfo 
     { addrFamily :: SocketFamily
     , addrSocketType :: SocketType
     , addrProtocol :: SocketProtocol
     , addrAddressRaw :: RawSockAddr
-    , addrCanonName :: Maybe V.Bytes
+    , addrCanonName :: Maybe CBytes
     } deriving (Eq, Show, Typeable)
 
 data AddrInfoHint = AddrInfoHint 
     { addrHintFlags :: [AddrInfoFlag]
-    , addrHintFamily :: Maybe SocketFamily
+    , addrHintFamily :: SocketFamily
     , addrHintSocketType :: SocketType
     , addrHintProtocol :: SocketProtocol
     } deriving (Show, Eq)
@@ -388,14 +418,11 @@ peekAddrInfo p = do
 
     ai_canonname_ptr <- (#peek struct addrinfo, ai_canonname) p
 
-    ai_canonname <- if ai_canonname_ptr == nullPtr
-                    then return Nothing
-                    else Just `fmap` peekCString ai_canonname_ptr
+    ai_canonname <- fromCString free ai_canonname_ptr
 
-    socktype <- (#peek struct addrinfo, ai_socktype) p 
     return AddrInfo
         { addrFamily = ai_family
-        , addrSocketType = socktype
+        , addrSocketType = ai_socktype
         , addrProtocol = ai_protocol
         , addrAddressRaw = ai_addr
         , addrCanonName = ai_canonname
@@ -404,19 +431,18 @@ peekAddrInfo p = do
     -- | Copy a 'SockAddr' from the given memory location.
     copySockAddr :: CInt -> Ptr SockAddr -> IO RawSockAddr
     copySockAddr len p = do
-        fp <- mallocPlainForeignPtrAlignedBytes len (#alignment struct sockaddr_storage)
+        fp <- mallocPlainForeignPtrAlignedBytes 
+                (fromIntegral len) (#alignment struct sockaddr_storage)
         withForeignPtr fp $ \ p' ->
-            copyBytes p' p len
+            copyBytes p' p (fromIntegral len)
         return (RawSockAddr fp)
-        
 
 pokeAddrInfoHint :: Ptr AddrInfo -> AddrInfoHint -> IO ()
 pokeAddrInfoHint p (AddrInfoHint flags family socketType protocol) = do
-        c_stype <- packSocketTypeOrThrow "AddrInfo.poke" socketType
 
         (#poke struct addrinfo, ai_flags) p (packBits aiFlagMapping flags)
-        (#poke struct addrinfo, ai_family) p (packFamily family)
-        (#poke struct addrinfo, ai_socktype) p c_stype
+        (#poke struct addrinfo, ai_family) p family
+        (#poke struct addrinfo, ai_socktype) p socketType
         (#poke struct addrinfo, ai_protocol) p protocol
 
         -- stuff below is probably not needed, but let's zero it for safety
@@ -425,6 +451,32 @@ pokeAddrInfoHint p (AddrInfoHint flags family socketType protocol) = do
         (#poke struct addrinfo, ai_addr) p nullPtr
         (#poke struct addrinfo, ai_canonname) p nullPtr
         (#poke struct addrinfo, ai_next) p nullPtr
+
+withAddrInfoHint :: AddrInfoHint -> (Ptr AddrInfo -> IO a) -> IO a
+withAddrInfoHint hint = 
+    allocaBytesAligned (#size struct addrinfo) (#alignment struct addrinfo)
+
+-- | Pack a list of values into a bitmask.  The possible mappings from
+-- value to bit-to-set are given as the first argument.  We assume
+-- that each value can cause exactly one bit to be set; unpackBits will
+-- break if this property is not true.
+
+packBits :: (Eq a, Num b, Bits b) => [(a, b)] -> [a] -> b
+packBits mapping xs = List.foldl' pack 0 mapping
+    where pack acc (k, v) | k `elem` xs = acc .|. v
+                          | otherwise   = acc
+
+-- | Unpack a bitmask into a list of values.
+
+unpackBits :: (Num b, Bits b) => [(a, b)] -> b -> [a]
+
+-- Be permissive and ignore unknown bit values. At least on OS X,
+-- getaddrinfo returns an ai_flags field with bits set that have no
+-- entry in <netdb.h>.
+unpackBits [] _    = []
+unpackBits ((k,v):xs) r
+    | r .&. v /= 0 = k : unpackBits xs (r .&. complement v)
+    | otherwise    = unpackBits xs r
 
     
 -- | Resolve a host or service name to one or more addresses.
@@ -467,20 +519,25 @@ pokeAddrInfoHint p (AddrInfoHint flags family socketType protocol) = do
 -- >>> addrAddress addr
 -- 127.0.0.1:80
 
-getAddrInfo :: Maybe AddrInfoHint -- ^ preferred socket type or protocol
-            -> Maybe V.Bytes        -- ^ host name to look up
-            -> Maybe V.Bytes        -- ^ service name to look up
+getAddrInfo :: HasCallStack
+            => Maybe AddrInfoHint -- ^ preferred socket type or protocol
+            -> Maybe CBytes       -- ^ host name to look up
+            -> Maybe CBytes       -- ^ service name to look up
             -> IO [AddrInfo]      -- ^ resolved addresses, with "best" first
 
 getAddrInfo hints node service = withSocketsDo $
-    maybeWith withPrimVector node $ \ c_node ->
-    maybeWith withPrimVector service $ \c_service ->
-    maybeWith with filteredHints $ \c_hints ->
+    maybeWith withCBytes node $ \ c_node ->
+    maybeWith withCBytes service $ \ c_service ->
+    maybeWith withAddrInfoHint hints $ \ c_hints ->
         alloca $ \ ptr_ptr_addrs -> do
-          ret <- throwAddrErrorIfNonZero (c_getaddrinfo c_node c_service c_hints ptr_ptr_addrs)
+          ret <- E.throwAddrErrorIfNonZero callStack
+                    ("hint:" ++ show hints ++
+                    ",host:" ++ show node ++ 
+                    ",service:" ++ show service)
+                    (c_getaddrinfo c_node c_service c_hints ptr_ptr_addrs)
           ptr_addrs <- peek ptr_ptr_addrs
           ais <- followAddrInfo ptr_addrs
-          c_freeaddrinfo ptr_addrs
+          c_freeaddrinfo ptr_addrs          -- don't forget free them
           return ais
     -- Leaving out the service and using AI_NUMERICSERV causes a
     -- segfault on OS X 10.8.2. This code removes AI_NUMERICSERV
@@ -488,23 +545,20 @@ getAddrInfo hints node service = withSocketsDo $
   where
 #if defined(darwin_HOST_OS)
     filteredHints = case service of
-        Nothing -> fmap (\ h -> h { addrFlags = delete AI_NUMERICSERV (addrFlags h) }) hints
+        Nothing -> fmap (\ h -> h { addrHintFlags = delete AI_NUMERICSERV (addrHintFlags h) }) hints
         _       -> hints
 #else
     filteredHints = hints
 #endif
-
-
-followAddrInfo :: Ptr AddrInfo -> IO [AddrInfo]
-
-followAddrInfo ptr_ai | ptr_ai == nullPtr = return []
-                      | otherwise = do
-    a <- peek ptr_ai
-    as <- (#peek struct addrinfo, ai_next) ptr_ai >>= followAddrInfo
-    return (a:as)
+    followAddrInfo :: Ptr AddrInfo -> IO [AddrInfo]
+    followAddrInfo ptr_ai | ptr_ai == nullPtr = return []
+                          | otherwise = do
+        a <- peekAddrInfo ptr_ai
+        as <- (#peek struct addrinfo, ai_next) ptr_ai >>= followAddrInfo
+        return (a:as)
 
 foreign import ccall safe "hsnet_getaddrinfo"
-    c_getaddrinfo :: Ptr Word8 -> Ptr Word8 -> Ptr AddrInfo -> Ptr (Ptr AddrInfo) -> IO CInt
+    c_getaddrinfo :: CString -> CString -> Ptr AddrInfo -> Ptr (Ptr AddrInfo) -> IO CInt
 
 foreign import ccall safe "hsnet_freeaddrinfo"
     c_freeaddrinfo :: Ptr AddrInfo -> IO ()
@@ -819,4 +873,3 @@ protocol_TCP = SocketProtocol (#const IPPROTO_TCP)
 
 protocol_UDP :: SocketProtocol
 protocol_UDP = SocketProtocol (#const IPPROTO_UDP)
-

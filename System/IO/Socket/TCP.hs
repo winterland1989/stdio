@@ -1,6 +1,6 @@
 module System.IO.TCP where
 
-import System.IO.UV.FFI
+import System.IO.UV.Base
 import System.IO.UV.Manager
 import qualified System.IO.UV.Exception as E
 import qualified System.IO.Exception as E

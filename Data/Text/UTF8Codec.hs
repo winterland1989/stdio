@@ -6,6 +6,7 @@ module Data.Text.UTF8Codec where
 import Data.Primitive.ByteArray
 import Data.Primitive.PrimArray
 import GHC.Prim
+import Control.Monad.Primitive
 import GHC.Types
 import GHC.ST
 import GHC.Word
@@ -75,6 +76,40 @@ encodeChar# mba# i# c# = case (int2Word# (ord# c#)) of
                 s2# = writeWord8Array# mba# (i# +# 1#) 0xBF## s1#
                 s3# = writeWord8Array# mba# (i# +# 2#) 0xBD## s2#
             in (# s3#, i# +# 3# #)
+
+
+-- | Encode a 'Char' into bytes with non-standard UTF-8 encoding(Used in "Data.CBytes").
+--
+-- '\NUL' is encoded as two bytes @C0 80@ , '\xD800' ~ '\xDFFF' is encoded as a three bytes normal utf-8 codepoint.
+-- This function assumed there're enough space for encoded bytes, and return the advanced index.
+--
+encodeCBytesChar :: MutablePrimArray RealWorld Word8 -> Int -> Char -> IO Int
+{-# INLINE encodeCBytesChar #-}
+encodeCBytesChar (MutablePrimArray (MutableByteArray mba#)) (I# i#) (C# c#) = primitive (\ s# ->
+    let (# s1#, j# #) = encodeCBytesChar# mba# i# c# s# in (# s1#, (I# j#) #))
+
+encodeCBytesChar# :: MutableByteArray# s -> Int# -> Char# -> State# s -> (# State# s, Int# #)
+{-# NOINLINE encodeCBytesChar# #-} -- codesize vs speed choice here
+encodeCBytesChar# mba# i# c# = case (int2Word# (ord# c#)) of
+    n#
+        | isTrue# (n# `leWord#` 0x0000007F##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# n# s#
+            in (# s1#, i# +# 1# #)
+        | isTrue# (n# `leWord#` 0x000007FF##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (0xC0## `or#` (n# `uncheckedShiftRL#` 6#)) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (0x80## `or#` (n# `and#` 0x3F##)) s1#
+            in (# s2#, i# +# 2# #)
+        | isTrue# (n# `leWord#` 0x0000FFFF##) -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (0xE0## `or#` (n# `uncheckedShiftRL#` 12#)) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (0x80## `or#` ((n# `uncheckedShiftRL#` 6#) `and#` 0x3F##)) s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) (0x80## `or#` (n# `and#` 0x3F##)) s2#
+            in (# s3#, i# +# 3# #)
+        | otherwise -> \ s# ->
+            let s1# = writeWord8Array# mba# i# (0xF0## `or#` (n# `uncheckedShiftRL#` 18#)) s#
+                s2# = writeWord8Array# mba# (i# +# 1#) (0x80## `or#` ((n# `uncheckedShiftRL#` 12#) `and#` 0x3F##)) s1#
+                s3# = writeWord8Array# mba# (i# +# 2#) (0x80## `or#` ((n# `uncheckedShiftRL#` 6#) `and#` 0x3F##)) s2#
+                s4# = writeWord8Array# mba# (i# +# 3#) (0x80## `or#` (n# `and#` 0x3F##)) s3#
+            in (# s4#, i# +# 4# #)
 
 -- | Decode a 'Char' from bytes
 --

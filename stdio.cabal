@@ -29,6 +29,7 @@ library
                             Data.Vector
                             Data.Array
                             Data.Array.Checked
+                            Data.CBytes
                             Data.Parser
                             Data.Text
                             Data.Text.UTF8Codec
@@ -36,7 +37,6 @@ library
                             Data.Binary
                             Data.Builder
 
-                            Foreign.PrimVector
                             GHC.Stack.Compat
 
                             System.IO.Exception 
@@ -46,8 +46,8 @@ library
 
                             System.IO.TTY
                             
+                            System.IO.UV.Base
                             System.IO.UV.Exception
-                            System.IO.UV.FFI
                             System.IO.UV.Manager
                             -- System.IO.TCP
                             -- System.IO.Socket

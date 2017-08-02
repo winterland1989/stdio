@@ -1,7 +1,7 @@
 module System.IO.TTY where
 
 import System.IO.Handle
-import System.IO.UV.FFI
+import System.IO.UV.Base
 import System.IO.UV.Manager
 import Foreign
 import Foreign.C

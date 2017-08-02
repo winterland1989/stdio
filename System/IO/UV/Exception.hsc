@@ -1,10 +1,10 @@
-module System.IO.UV.Exception (throwUVIfMinus) where
+module System.IO.UV.Exception (throwUVErrorIfMinus) where
 
 import Foreign.C
 import System.IO.Unsafe (unsafeDupablePerformIO)
 import GHC.Stack.Compat
 import System.IO.Exception
-import System.IO.UV.FFI
+import System.IO.UV.Base
 
 #include "uv.h"
 
@@ -171,14 +171,14 @@ instance IOErrno UVErrno where
 
 -- | Wrapper libuv functions and throw appropriate exceptions.
 -- 
--- Foreign functions from libuv which return `CInt` can indicate an error, 'throwUVIfMinus' wrapper such 
+-- Foreign functions from libuv which return `CInt` can indicate an error, 'throwUVErrorIfMinus' wrapper such 
 -- functions and turn errnos into appropriate exceptions.
 --
 -- One exception is that we ignore EOF errors and return as it is, since generally EOF detection 
 -- should be done in a different way.
 --
-throwUVIfMinus :: CallStack -> String -> IO CInt -> IO CInt
-throwUVIfMinus cstack dev f = do
+throwUVErrorIfMinus :: CallStack -> String -> IO CInt -> IO CInt
+throwUVErrorIfMinus cstack dev f = do
     errno <- f
     if errno >= 0
     then return errno

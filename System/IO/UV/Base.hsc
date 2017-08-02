@@ -1,4 +1,4 @@
-module System.IO.UV.FFI where
+module System.IO.UV.Base where
 
 import Foreign
 import Foreign.C
