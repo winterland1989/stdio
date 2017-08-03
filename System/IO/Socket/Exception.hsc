@@ -1,9 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module System.IO.Socket.Exception 
-  ( throwAddrErrorIfNonZero
-  , throwSocketErrorIfMinus1Retry
-  ) where
+module System.IO.Socket.Exception where
 
 import System.IO.Exception
 import Foreign.C.Types
@@ -22,6 +19,10 @@ import Control.Monad
 #else
 # error Unknown mingw32 arch
 #endif
+
+throwSocketErrorIfMinus1Retry_ :: CallStack -> String -> IO CInt -> IO ()
+throwSocketErrorIfMinus1Retry_ cstack dev f = do
+    throwSocketErrorIfMinus1Retry cstack dev f >> return ()
 
 throwSocketErrorIfMinus1Retry :: CallStack -> String -> IO CInt -> IO CInt
 throwSocketErrorIfMinus1Retry cstack dev f = do

@@ -5,6 +5,7 @@ module System.IO.Socket.Address
     SocketAddress(..)
   , SockAddr
   , RawSockAddr 
+  , newEmptyRawSockAddr
    -- * IP Address
   , SockAddrInet(..)
    -- ** IPv4 address
@@ -33,6 +34,7 @@ module System.IO.Socket.Address
   , getAddrInfo
   -- * port numbber
   , PortNumber 
+  , aNY_PORT
   , htons
   , ntohs
   -- * family, type, protocol
@@ -67,6 +69,7 @@ import Data.CBytes
 import Foreign.Marshal.Utils (copyBytes)
 import Network (withSocketsDo)
 import Data.Primitive.PrimArray
+import Control.Monad.Primitive
 
 #include "HsNet.h" 
 
@@ -104,7 +107,16 @@ data SockAddr
 -- | A ghc heap copy of OS @sockaddr@ struct, you can use it directly without parsing
 -- if you don't care about or don't know the structure of @sockaddr@.
 --
-newtype RawSockAddr = RawSockAddr (PrimArray Word8) deriving (Eq) -- TODO: better instance
+newtype RawSockAddr = RawSockAddr (MutablePrimArray RealWorld Word8) -- TODO: better instance
+
+newEmptyRawSockAddr :: IO RawSockAddr
+newEmptyRawSockAddr = do
+    mpa <- newAlignedPinnedPrimArray
+        (#size struct sockaddr_storage)
+        (#alignment struct sockaddr_storage)
+
+    setPrimArray mpa 0 (#size struct sockaddr_storage) 0
+    return (RawSockAddr mpa)
 
 instance Show RawSockAddr where
     show _ = "RawSockAddr"
@@ -112,13 +124,13 @@ instance Show RawSockAddr where
 instance SocketAddress RawSockAddr where
     fromRawSockAddr = Just . id
     withSockAddr = withRawSockAddr
-    sockAddrSize (RawSockAddr pa) = sizeofPrimArray pa
+    sockAddrSize (RawSockAddr pa) = unsafeDupablePerformIO $ sizeofMutablePrimArray pa
     sockAddrFamily raw = unsafeDupablePerformIO . withSockAddr raw $ \ p -> do
         family <- (#peek struct sockaddr, sa_family) p :: IO CSaFamily
         return (SocketFamily $ fromIntegral family)
 
 withRawSockAddr :: RawSockAddr -> (Ptr SockAddr -> IO a) -> IO a
-withRawSockAddr (RawSockAddr pa) f =  withPrimArrayContents pa $ \ ptr -> f (castPtr ptr)
+withRawSockAddr (RawSockAddr pa) f =  withMutablePrimArrayContents pa $ \ ptr -> f (castPtr ptr)
 
         -- | Use `RawSockAddr` as a pointer.
 --
@@ -340,10 +352,8 @@ poke32 p i0 a = do
 
 -- Port Numbers
 
--- | Use the @Num@ instance (i.e. use a literal) to create a
--- @PortNumber@ value with the correct network-byte-ordering. You
--- should not use the PortNum constructor. It will be removed in the
--- next release.
+-- | Use the @Num@ instance (i.e. use a literal or 'fromIntegral') to create a
+-- @PortNumber@ value with the correct network-byte-ordering.
 --
 -- >>> 1 :: PortNumber
 -- 1
@@ -353,6 +363,9 @@ newtype PortNumber = PortNum Word16 deriving (Eq, Ord, Typeable)
 -- newtyped to prevent accidental use of sane-looking
 -- port numbers that haven't actually been converted to
 -- network-byte-order first.
+
+aNY_PORT :: PortNumber
+aNY_PORT = 0
 
 instance Show PortNumber where
   showsPrec p pn = showsPrec p (portNumberToInt pn)
@@ -470,7 +483,7 @@ data AddrInfo = AddrInfo
     , addrProtocol :: SocketProtocol
     , addrAddressRaw :: RawSockAddr
     , addrCanonName :: Maybe CBytes
-    } deriving (Eq, Show, Typeable)
+    } deriving (Show, Typeable)
 
 data AddrInfoHint = AddrInfoHint 
     { addrHintFlags :: [AddrInfoFlag]
@@ -506,8 +519,7 @@ peekAddrInfo p = do
         mpa <- newAlignedPinnedPrimArray
                 (fromIntegral len) (#alignment struct sockaddr_storage)
         copyMutablePrimArrayFromPtr mpa 0 (castPtr p) (fromIntegral len)
-        pa <- unsafeFreezePrimArray mpa 
-        return (RawSockAddr pa)
+        return (RawSockAddr mpa)
 
 pokeAddrInfoHint :: Ptr AddrInfo -> AddrInfoHint -> IO ()
 pokeAddrInfoHint p (AddrInfoHint flags family socketType protocol) = do

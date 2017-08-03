@@ -120,7 +120,8 @@ ensureUVMangerRunning uvm = do
     loop block step = do
         yield
         (more, c) <- step block
-        when more $ loop (c == 0) step
+        if more then loop (c == 0) step
+                else writeIORef (uvmRunning uvm) False
 
     step :: UVManager -> Bool -> IO (Bool, CSize)
     step (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning _ blockTimer) block = do
@@ -128,6 +129,7 @@ ensureUVMangerRunning uvm = do
             blockTable <- readIORef iBlockTableRef
             let siz = sizeofArr blockTable
             clearUVLoopuEventCounter uvLoopData
+            (c, q) <- peekEventQueue uvLoopData
             r <- if block
                 then do
                     unless rtsSupportsBoundThreads
@@ -139,6 +141,7 @@ ensureUVMangerRunning uvm = do
                         uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
             (c, q) <- peekEventQueue uvLoopData
+            print c
             forM_ [0..(fromIntegral c-1)] $ \ i -> do      -- convert CSize to int first, otherwise (c-1) may overflow
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)

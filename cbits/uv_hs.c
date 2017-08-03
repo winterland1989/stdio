@@ -160,6 +160,36 @@ int hs_tcp_open_win32(uv_tcp_t* handle, uv_os_sock_t sock) {
 }
 #endif
 
+void hs_connection_cb(uv_stream_t* server, int status){
+    if (status == 0){
+        size_t slot = (size_t)server->data;
+        hs_loop_data* loop_data = server->loop->data;
+        loop_data->result_table[slot] = status;                  // TODO get the errno and pass to ghc
+        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+        loop_data->event_counter += 1;
+    }
+}
+
+int hs_listen(uv_stream_t* stream, int backlog){
+    uv_listen(stream, backlog, hs_connection_cb);
+}
+
+/********************************************************************************/
+
+void hs_poll_cb(uv_poll_t* handle, int status, int events){
+    if (status == 0){
+        size_t slot = (size_t)handle->data;
+        hs_loop_data* loop_data = handle->loop->data;
+        loop_data->result_table[slot] = events;                  // TODO get the errno and pass to ghc
+        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+        loop_data->event_counter += 1;
+    }
+}
+
+int hs_poll_start(uv_poll_t* handle, int events){
+    uv_poll_start(handle, events, hs_poll_cb);
+}
+
 /********************************************************************************/
 
 void uv_timer_cb_stop_loop(uv_timer_t* handle){

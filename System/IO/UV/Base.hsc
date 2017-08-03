@@ -126,6 +126,7 @@ foreign import ccall unsafe uv_signal_init :: Ptr UVLoop -> Ptr UVHandle -> IO (
 
 foreign import ccall unsafe uv_stream_set_blocking :: Ptr UVHandle -> CInt -> IO CInt
 foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
+foreign import ccall unsafe hs_listen :: Ptr UVHandle -> CInt -> IO CInt
 
 
 --------------------------------------------------------------------------------
@@ -140,6 +141,20 @@ foreign import ccall unsafe "hs_tcp_open_win32" uv_tcp_open :: Ptr UVHandle -> C
 #else
 foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
 #endif
+
+foreign import ccall unsafe uv_tcp_simultaneous_accepts :: Ptr UVHandle -> CInt -> IO CInt
+
+--------------------------------------------------------------------------------
+-- uv_poll_t
+
+newtype UVPollEvent = UVPollEvent { getUVPollEvent :: CInt } deriving (Show, Eq, Ord)
+
+#{enum UVPollEvent, UVPollEvent,
+   uV_READABLE    = UV_READABLE,
+   uV_WRITABLE    = UV_WRITABLE}
+
+foreign import ccall unsafe uv_poll_init_socket :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe hs_poll_start :: Ptr UVHandle -> CInt -> IO CInt
 
 --------------------------------------------------------------------------------
 
