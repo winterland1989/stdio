@@ -51,8 +51,9 @@ library
                             System.IO.UV.Manager
                             -- System.IO.TCP
                             -- System.IO.Socket
-                            System.IO.Socket.Exception
                             System.IO.Socket.Address
+                            System.IO.Socket.Base
+                            System.IO.Socket.Exception
 
 
     -- other-modules:          System.IO.UV

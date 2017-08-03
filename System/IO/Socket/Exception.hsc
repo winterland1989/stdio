@@ -1,9 +1,13 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module System.IO.Socket.Exception (throwAddrErrorIfNonZero) where
+module System.IO.Socket.Exception 
+  ( throwAddrErrorIfNonZero
+  , throwSocketErrorIfMinus1Retry
+  ) where
 
 import System.IO.Exception
-import Foreign.C
+import Foreign.C.Types
+import Foreign.C.String
 import Data.Typeable
 import GHC.Stack.Compat
 import Control.Monad
@@ -19,6 +23,28 @@ import Control.Monad
 # error Unknown mingw32 arch
 #endif
 
+throwSocketErrorIfMinus1Retry :: CallStack -> String -> IO CInt -> IO CInt
+throwSocketErrorIfMinus1Retry cstack dev f = do
+#if defined(WITH_WINSOCK)
+    r <- f
+    if (r == -1)
+    then do
+        rc <- wsa_getLastError
+        case rc of
+            #{const WSANOTINITIALISED} -> do
+                withSocketsDo (return ())
+                r <- act
+                if (r == -1)
+                then do
+                    rc <- wsa_getLastError
+                    throwWinSocketError (WSAErrno rc) cstack dev
+                else return r
+            _ -> throwWinSocketError (WSAErrno rc) cstack dev
+    else return r
+#else
+    throwErrnoIfMinus1Retry cstack dev f
+#endif
+    
 
 #if defined(WITH_WINSOCK)
 -- | The standard errno handling already take care of socket error on unix systems, but on windows
@@ -31,8 +57,64 @@ instance IOErrno WSAErrno
     fromErrnoValue v = WSAErrno v
     toErrnoValue (WSAErrno v) = v
 
-foreign import #{WINDOWS_CCONV} unsafe "WSAGetLastError" c_getLastError :: IO CInt
+foreign import #{WINDOWS_CCONV} unsafe "WSAGetLastError" wsa_getLastError :: IO CInt
 foreign import ccall unsafe "getWSErrorDescr" c_getWSError :: CInt -> IO (Ptr CChar)
+
+throwWinSocketError :: WSAErrno -> CallStack -> String -> IO ()
+throwWinSocketError errno@(WSAErrno e) cstack dev = do
+    desc <- c_getWSError e >>= peekCString
+    let info IOEInfo = IOEInfo errno desc dev cstack
+    case () of
+        _                                                                              
+            | errno == wSAEINTR           -> throwIO (Interrupted             info) -- TODO :: rework the mapping
+            | errno == wSAEBADF           -> throwIO (InvalidArgument         info)
+            | errno == wSAEACCES          -> throwIO (PermissionDenied        info)
+            | errno == wSAEFAULT          -> throwIO (UnsupportedOperation    info)
+            | errno == wSAEINVAL          -> throwIO (UnsupportedOperation    info)
+            | errno == wSAEMFILE          -> throwIO (ResourceExhausted       info)
+            | errno == wSAEWOULDBLOCK     -> throwIO (UnsupportedOperation    info)
+            | errno == wSAEINPROGRESS     -> throwIO (ResourceExhausted       info)
+            | errno == wSAEALREADY        -> throwIO (UnsupportedOperation    info)
+            | errno == wSAENOTSOCK        -> throwIO (UnsupportedOperation    info)
+            | errno == wSAEDESTADDRREQ    -> throwIO (ResourceVanished        info)
+            | errno == wSAEMSGSIZE        -> throwIO (OtherError              info)
+            | errno == wSAEPROTOTYPE      -> throwIO (UnsupportedOperation    info)
+            | errno == wSAENOPROTOOPT     -> throwIO (ResourceExhausted       info)
+            | errno == wSAEPROTONOSUPPORT -> throwIO (NoSuchThing             info)
+            | errno == wSAESOCKTNOSUPPORT -> throwIO (NoSuchThing             info)
+            | errno == wSAEOPNOTSUPP      -> throwIO (InvalidArgument         info)
+            | errno == wSAEPFNOSUPPORT    -> throwIO (ProtocolError           info)
+            | errno == wSAEAFNOSUPPORT    -> throwIO (UnsupportedOperation    info)
+            | errno == wSAEADDRINUSE      -> throwIO (UnsupportedOperation    info)
+            | errno == wSAEADDRNOTAVAIL   -> throwIO (AlreadyExists           info)
+            | errno == wSAENETDOWN        -> throwIO (InvalidArgument         info)
+            | errno == wSAENETUNREACH     -> throwIO (ResourceBusy            info)
+            | errno == wSAENETRESET       -> throwIO (ResourceVanished        info)
+            | errno == wSAECONNABORTED    -> throwIO (OtherError              info)
+            | errno == wSAECONNRESET      -> throwIO (ResourceVanished        info)
+            | errno == wSAENOBUFS         -> throwIO (NoSuchThing             info)
+            | errno == wSAEISCONN         -> throwIO (ResourceVanished        info)
+            | errno == wSAENOTCONN        -> throwIO (InvalidArgument         info)
+            | errno == wSAESHUTDOWN       -> throwIO (AlreadyExists           info)
+            | errno == wSAETOOMANYREFS    -> throwIO (OtherError              info)
+            | errno == wSAETIMEDOUT       -> throwIO (PermissionDenied        info)
+            | errno == wSAECONNREFUSED    -> throwIO (NoSuchThing             info)
+            | errno == wSAELOOP           -> throwIO (Interrupted             info)
+            | errno == wSAENAMETOOLONG    -> throwIO (InvalidArgument         info)
+            | errno == wSAEHOSTDOWN       -> throwIO (HardwareFault           info)
+            | errno == wSAEHOSTUNREACH    -> throwIO (AlreadyExists           info)
+            | errno == wSAENOTEMPTY       -> throwIO (NoSuchThing             info)
+            | errno == wSAEPROCLIM        -> throwIO (ResourceVanished        info)
+            | errno == wSAEUSERS          -> throwIO (InvalidArgument         info)
+            | errno == wSAEDQUOT          -> throwIO (AlreadyExists           info)
+            | errno == wSAESTALE          -> throwIO (OtherError              info)
+            | errno == wSAEREMOTE         -> throwIO (PermissionDenied        info)
+            | errno == wSAEDISCON         -> throwIO (NoSuchThing             info)
+            | errno == wSASYSNOTREADY     -> throwIO (Interrupted             info)
+            | errno == wSAVERNOTSUPPORTED -> throwIO (InvalidArgument         info)
+            | errno == wSANOTINITIALISED  -> throwIO (HardwareFault           info)
+
+
 
 --------------------------------------------------------------------------------
 
@@ -114,7 +196,7 @@ throwAddrErrorIfNonZero cstack dev f = do
                 | errno == eAI_NONAME       -> throwIO (NoSuchThing info)
                 | errno == eAI_SERVICE      -> throwIO (UnsupportedOperation info)
                 | errno == eAI_SOCKTYPE     -> throwIO (UnsupportedOperation info)
-                | errno == eAI_STSTEM       -> throwIO (OtherError info)
+                | errno == eAI_STSTEM       -> throwIO (SystemError info)
 
 showAddrIntoErrno :: AddrInfoErrno -> String
 showAddrIntoErrno errno

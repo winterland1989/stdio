@@ -30,15 +30,14 @@ import qualified System.IO.Exception as E
 -- interface.
 --
 -- We neither store length info, nor support O(1) slice for 'CBytes': This will defeat the
--- purpose of null-terminated string which is saving memory, but in practice this is not an
--- issue: most 'CBytes' are very small, e.g. filepath, hostname, etc. And 'strlen' runs
+-- purpose of null-terminated string which is to save memory, in practice this is not an
+-- issue: most 'CBytes's are very small, e.g. filepath, hostname, etc. And 'strlen' runs
 -- very fast.
 --
--- It can be used with @OverloadedString@, the literal encoding is UTF-8 with some modifications:
--- @\NUL@ char is encoded to 'C0 80'(which will cause overlong in UTF-8 validation), and
--- '\xD800' ~ '\xDFFF' is encoded as a three bytes normal utf-8 codepoint. This is also
--- how ghc compile string literal into binaries, thus we can use rewrite-rules to construct
--- 'CBytes' value in O(1) without wasting runtime heap.
+-- It can be used with @OverloadedString@, literal encoding is UTF-8 with some modifications:
+-- @\NUL@ char is encoded to 'C0 80', and '\xD800' ~ '\xDFFF' is encoded as a three bytes
+-- normal utf-8 codepoint. This is also how ghc compile string literal into binaries,
+-- thus we can use rewrite-rules to construct 'CBytes' value in O(1) without wasting runtime heap.
 --
 -- Note most of the unix API is not unicode awared though, you may find a `scandir` call
 -- return a filename which is not proper encoded in any unicode encoding at all.
@@ -49,18 +48,6 @@ data CBytes
     = CBytesOnHeap  {-# UNPACK #-} !(MutablePrimArray RealWorld Word8)   -- ^ On heap pinned 'MutablePrimArray'
     | CBytesPtr     {-# UNPACK #-} !CString  {-# UNPACK #-} !(IORef ())  -- ^ C pointers with finalizer
     | CBytesLiteral {-# UNPACK #-} !CString                              -- ^ String literals with static address
-
-instance IsString CBytes where
-    fromString = packCBytes
-
-{-# RULES
-    "CBytes packCBytes/unpackCString#" forall addr# .
-        packCBytes (unpackCString# addr#) = CBytesLiteral (Ptr addr#)
- #-}
-{-# RULES
-    "CBytes packCBytes/unpackCStringUtf8#" forall addr# .
-        packCBytes (unpackCStringUtf8# addr#) = CBytesLiteral (Ptr addr#)
- #-}
 
 instance Show CBytes where
     show = unpackCBytes
@@ -87,6 +74,19 @@ instance Ord CBytes where
             else do
                 r <- c_strcmp pA pB
                 return (r `compare` 0)
+
+instance IsString CBytes where
+    {-# INLINE fromString #-}
+    fromString = packCBytes
+
+{-# RULES
+    "CBytes packCBytes/unpackCString#" forall addr# .
+        packCBytes (unpackCString# addr#) = CBytesLiteral (Ptr addr#)
+ #-}
+{-# RULES
+    "CBytes packCBytes/unpackCStringUtf8#" forall addr# .
+        packCBytes (unpackCStringUtf8# addr#) = CBytesLiteral (Ptr addr#)
+ #-}
 
 -- | Pack a 'String' into null-terminated 'CByte'.
 --
@@ -141,9 +141,9 @@ fromCString free cstring = do
         _ <- mkWeakIORef ref (free cstring)
         return (Just $ CBytesPtr cstring ref)
 
--- | Same with 'fromCString', but throw 'E.InvalidArgument' when meet null pointer.
+-- | Same with 'fromCString', but throw 'E.InvalidArgument' when meet a null pointer.
 --
--- The first argument is a free function to free the 'CString' pointers, e.g. memory allocated
+-- The first argument is a function to free the 'CString' pointers, e.g. memory allocated
 -- by @malloc@ can be automatically freed by 'free'
 --
 fromCStringThrow :: HasCallStack
@@ -160,7 +160,8 @@ fromCStringThrow free cstring = do
         _ <- mkWeakIORef ref (free cstring)
         return (CBytesPtr cstring ref)
 
-
+-- | Pass 'CBytes' to foreign function as a @char*@.
+--
 withCBytes :: CBytes -> (CString -> IO a) -> IO a
 {-# INLINABLE withCBytes #-}
 withCBytes (CBytesOnHeap mba) f = withMutablePrimArrayContents mba (f . castPtr)
