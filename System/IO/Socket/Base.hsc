@@ -30,11 +30,13 @@ data TCP = TCP
     , tcpManager :: UVManager
     }
 
+instance Show TCP where
+    show tcp = "tcp" -- TODO: make it detailed
+
 closeTCP :: TCP -> IO ()
 closeTCP = undefined
 
 instance Input TCP where
-    inputInfo tcp = "tcp" -- TODO: make it detailed
     readInput tcp@(TCP uvhandle slot uvm) buf bufSiz = do
         ensureUVMangerRunning uvm
         (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
@@ -44,16 +46,28 @@ instance Input TCP where
             pokeElemOff bufTable slot buf
             pokeElemOff bufSizTable slot (fromIntegral bufSiz)
             pokeElemOff resultTable slot 0
-            E.throwUVErrorIfMinus callStack  (inputInfo tcp) $ hs_read_start uvhandle
-        btable <- readIORef $ uvmBlockTable uvm
+            E.throwUVErrorIfMinus callStack  (show tcp) $ hs_read_start uvhandle
+        btable <- readIORef $ uvmBlockTableR uvm
         takeMVar (indexArr btable slot)
         fromIntegral `fmap` peekElemOff resultTable slot
+
+instance Output TCP where
+    writeOutput tcp@(TCP uvhandle slot uvm) buf bufSiz = do
+        ensureUVMangerRunning uvm
+        (bufTable, bufSizTable) <- peekWriteBuffer (uvmLoopData uvm)
+        withMVar (uvmFreeSlotList uvm) $ \ _ -> do
+            pokeElemOff bufTable slot buf
+            pokeElemOff bufSizTable slot (fromIntegral bufSiz)
+            E.throwUVErrorIfMinus callStack  (show tcp) $ hs_read_start uvhandle
+        btable <- readIORef $ uvmBlockTableW uvm
+        takeMVar (indexArr btable slot)
+        return ()
 
 --------------------------------------------------------------------------------
 
 newtype SocketFd = SocketFd CInt deriving (Show, Eq, Ord)
-newtype BoundSocket = BoundSocket CInt deriving (Show, Eq, Ord)
-data TCPListener = TCPListener CInt (IO ())
+data BoundSocket addr = BoundSocket CInt addr deriving Show
+data TCPListener addr = TCPListener CInt addr (IO ())
 
 socket :: HasCallStack
        => SocketFamily      -- Family Name (usually AF_INET)
@@ -67,7 +81,24 @@ socket sfamily@(SocketFamily family) stype@(SocketType typ) sproto@(SocketProtoc
   where
     dev = show sfamily ++ ", " ++ show stype ++ ", " ++ show sproto
 
-    -- Binding a socket
+
+newTCP :: SocketFd -> IO TCP
+newTCP (SocketFd fd) = do
+    uvm <- getUVManager
+    slot <- allocSlot uvm
+    let loop = (uvmLoop uvm)
+        dev = "tcp FD:" ++ show fd
+    p <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_TCP
+
+    withMVar (uvmFreeSlotList uvm) $ \ _ -> do
+        E.throwUVErrorIfMinus callStack dev $ uv_tcp_init loop p
+
+    E.throwUVErrorIfMinus callStack dev $ uv_tcp_open p fd
+
+    poke_uv_handle_data p (fromIntegral slot)
+    return (TCP p slot uvm)
+
+-- Binding a socket
 
 -- | Bind the socket to an address. The socket must not already be
 -- bound.  The 'Family' passed to @bind@ must be the
@@ -78,23 +109,23 @@ socket sfamily@(SocketFamily family) stype@(SocketType typ) sproto@(SocketProtoc
 bind :: (HasCallStack, SocketAddress addr)
      => SocketFd  -- Unconnected Socket
      -> addr      -- Address to Bind to
-     -> IO BoundSocket
+     -> IO (BoundSocket addr)
 bind s@(SocketFd sock) addr = do
     let siz = sockAddrSize addr
     withSockAddr addr $ \ p -> do
         E.throwSocketErrorIfMinus1Retry_ callStack (show s ++ ", " ++ show addr) $
             c_bind sock p (fromIntegral siz)
-    return (BoundSocket sock)
+    return (BoundSocket sock addr)
 
 
 -- | Listen for connections made to the socket.  The second argument
 -- specifies the maximum number of queued connections and should be at
 -- least 1; the maximum value is system-dependent (usually 5).
-listen :: HasCallStack
-       => BoundSocket   -- Connected & Bound Socket
-       -> Int           -- Queue Length
-       -> IO TCPListener
-listen s@(BoundSocket sock) backlog = do
+listen :: (HasCallStack, SocketAddress addr)
+       => BoundSocket addr  -- Connected & Bound Socket
+       -> Int               -- Queue Length
+       -> IO (TCPListener addr)
+listen s@(BoundSocket sock addr) backlog = do
     uvm <- getUVManager
     ensureUVMangerRunning uvm
     slot <- allocSlot uvm
@@ -111,9 +142,9 @@ listen s@(BoundSocket sock) backlog = do
 
     E.throwUVErrorIfMinus callStack dev $ hs_poll_start handle (getUVPollEvent uV_READABLE)
 
-    btable <- readIORef $ uvmBlockTable uvm
+    btable <- readIORef $ uvmBlockTableR uvm
 
-    return (TCPListener sock (takeMVar $ indexArr btable slot))
+    return (TCPListener sock addr (takeMVar $ indexArr btable slot))
 
 
 -- | Accept a connection with 'TCPListener'.
@@ -129,18 +160,17 @@ listen s@(BoundSocket sock) backlog = do
 #endif
 --
 accept :: HasCallStack
-       => TCPListener               -- queue socket
-       -> IO CInt
-accept s@(TCPListener sock wait) = do
+       => TCPListener addr           -- queue socket
+       -> IO SocketFd
+accept s@(TCPListener sock addr wait) = do
     addr <- newEmptyRawSockAddr
     withSockAddr addr $ \ addrPtr ->
         with (fromIntegral $ sockAddrSize addr) $ \ lenPtr -> do
-            E.throwErrnoIfMinus1RetryMayBlock callStack "test" 
+            SocketFd `fmap` E.throwErrnoIfMinus1RetryMayBlock callStack (show addr)
                 (c_accept sock addrPtr lenPtr) wait
-    
 
 #if defined(SO_REUSEPORT) && defined(linux_HOST_OS)
-multiAccept :: [TCPListener]
+multiAccept :: [TCPListener addr]
 multiAccept = undefined
 #endif
 

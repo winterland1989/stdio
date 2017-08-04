@@ -36,6 +36,11 @@ peekReadBuffer p = (,)
     <$> (#{peek hs_loop_data, read_buffer_table          } p)
     <*> (#{peek hs_loop_data, read_buffer_size_table     } p)
 
+peekWriteBuffer :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
+peekWriteBuffer p = (,)
+    <$> (#{peek hs_loop_data, write_buffer_table          } p)
+    <*> (#{peek hs_loop_data, write_buffer_size_table     } p)
+
 clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
 clearUVLoopuEventCounter p = do
     #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)

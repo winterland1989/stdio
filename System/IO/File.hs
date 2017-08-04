@@ -48,9 +48,10 @@ data File = File
     { fileFd :: {-# UNPACK #-} !CInt  -- ^ the file descriptor
     , filePath :: FilePath
     }
+instance Show File where
+    show (File _ path) = path
 
 instance Input File where
-    inputInfo (File _ path) = path
     readInput (File fd path) buf len = do
 #ifdef mingw32_HOST_OS
         if rtsSupportsBoundThreads

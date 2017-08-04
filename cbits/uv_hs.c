@@ -123,6 +123,28 @@ int hs_read_start(uv_stream_t* stream){
     return uv_read_start(stream, hs_alloc_cb ,hs_read_cb);
 }
 
+void hs_write_cb(uv_write_t* req, int status){
+    size_t slot = (size_t)req->data;
+    hs_loop_data* loop_data = req->handle->loop->data;
+    loop_data->event_queue[loop_data->event_counter] = -slot;   // push the slot to event queue, negative is write
+    loop_data->event_counter += 1;
+    free(req);
+}
+
+int hs_write(uv_stream_t* handle){
+    uv_write_t* req = malloc(sizeof(uv_write_t));
+    uv_buf_t* buf = malloc(sizeof(uv_buf_t));
+    hs_loop_data* loop_data = handle->loop->data;
+    size_t slot = (size_t)handle->data;
+
+    req->data = handle->data;
+    buf->base = loop_data->write_buffer_table[slot];
+    buf->len = loop_data->write_buffer_size_table[slot];
+
+    uv_write(req, handle, buf, 1, hs_write_cb);
+}
+
+
 /* on windows uv_tcp_open doesn't work propery for sockets that are not
  * connected or accepted by libuv because the lack of some state initialization,
  * so we do it by manually set those flags

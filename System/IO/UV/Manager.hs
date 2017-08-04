@@ -34,7 +34,8 @@ import System.IO.UV.Base
 --------------------------------------------------------------------------------
 
 data UVManager = UVManager
-    { uvmBlockTable  :: IORef (Array (MVar ()))     -- a list to store blocked thread
+    { uvmBlockTableR  :: IORef (Array (MVar ()))     -- a list to store blocked thread
+    , uvmBlockTableW  :: IORef (Array (MVar ()))     -- a list to store blocked thread
 
     , uvmFreeSlotList :: MVar [Int]                 -- we generate an unique range limited 'Int' /slot/
                                                     -- for each uv_handle_t and uv_req_t
@@ -85,13 +86,19 @@ getUVManager = do
 newUVManager :: HasCallStack => Int -> Int -> IO UVManager
 newUVManager siz cap = do
 
-    blockTable <- newArr siz
+    blockTableR <- newArr siz
     forM_ [0..siz-1] $ \ i ->
-        writeArr blockTable i =<< newEmptyMVar
-    iBlockTable <- unsafeFreezeArr blockTable
-    iBlockTableRef <- newIORef iBlockTable
+        writeArr blockTableR i =<< newEmptyMVar
+    iBlockTableR <- unsafeFreezeArr blockTableR
+    iBlockTableRRef <- newIORef iBlockTableR
 
-    freeSlotList <- newMVar [0..siz-1]
+    blockTableW <- newArr siz
+    forM_ [0..siz-1] $ \ i ->
+        writeArr blockTableW i =<< newEmptyMVar
+    iBlockTableW <- unsafeFreezeArr blockTableW
+    iBlockTableWRef <- newIORef iBlockTableW
+
+    freeSlotList <- newMVar [1..siz]
 
     uvLoop <- E.throwOOMIfNull callStack "malloc loop and data for uv manager" $ hs_loop_init (fromIntegral siz)
 
@@ -106,7 +113,7 @@ newUVManager siz cap = do
         hs_handle_close blockTimer
         hs_loop_close uvLoop
 
-    return (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning cap blockTimer)
+    return (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmRunning cap blockTimer)
 
 ensureUVMangerRunning :: HasCallStack => UVManager -> IO ()
 ensureUVMangerRunning uvm = do
@@ -124,10 +131,11 @@ ensureUVMangerRunning uvm = do
                 else writeIORef (uvmRunning uvm) False
 
     step :: UVManager -> Bool -> IO (Bool, CSize)
-    step (UVManager iBlockTableRef freeSlotList uvLoopData uvLoop uvmRunning _ blockTimer) block = do
+    step (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmRunning _ blockTimer) block = do
         withMVar freeSlotList $ \ _ -> do             -- now let's begin
-            blockTable <- readIORef iBlockTableRef
-            let siz = sizeofArr blockTable
+            blockTableR <- readIORef iBlockTableRRef
+            blockTableW <- readIORef iBlockTableWRef
+            let siz = sizeofArr blockTableR
             clearUVLoopuEventCounter uvLoopData
             (c, q) <- peekEventQueue uvLoopData
             r <- if block
@@ -144,32 +152,42 @@ ensureUVMangerRunning uvm = do
             print c
             forM_ [0..(fromIntegral c-1)] $ \ i -> do      -- convert CSize to int first, otherwise (c-1) may overflow
                 slot <- peekElemOff q i
-                lock <- indexArrM blockTable (fromIntegral slot)
+                lock <-
+                    if slot >= 0
+                    then indexArrM blockTableR (fromIntegral slot)
+                    else indexArrM blockTableW (fromIntegral slot)
                 tryPutMVar lock ()
                 return ()
             when (r == 0) (atomicWriteIORef uvmRunning False) -- not sure if we really need atomic since we're holding a lock
             return (r /= 0, c)
 
 allocSlot :: UVManager -> IO Int
-allocSlot (UVManager blockTableRef freeSlotList uvLoopData uvLoop _ _ _) = do
+allocSlot (UVManager blockTableRRef blockTableWRef freeSlotList uvLoopData uvLoop _ _ _) = do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do        -- free list is empty, we double it
 
-            blockTable <- readIORef blockTableRef
-            let oldSiz = sizeofArr blockTable
+            blockTableR <- readIORef blockTableRRef
+            blockTableW <- readIORef blockTableWRef
+            let oldSiz = sizeofArr blockTableR
                 newSiz = oldSiz * 2
-            blockTable' <- newArr newSiz
-            copyArr blockTable' 0 blockTable 0 oldSiz
+            blockTableR' <- newArr newSiz
+            copyArr blockTableR' 0 blockTableR 0 oldSiz
             forM_ [oldSiz..newSiz-1] $ \ i ->
-                writeArr blockTable' i =<< newEmptyMVar
-            !iBlockTable' <- unsafeFreezeArr blockTable'
-            writeIORef blockTableRef iBlockTable'
+                writeArr blockTableR' i =<< newEmptyMVar
+            !iBlockTableR' <- unsafeFreezeArr blockTableR'
+            writeIORef blockTableRRef iBlockTableR'
 
+            blockTableW' <- newArr newSiz
+            copyArr blockTableW' 0 blockTableW 0 oldSiz
+            forM_ [oldSiz..newSiz-1] $ \ i ->
+                writeArr blockTableW' i =<< newEmptyMVar
+            !iBlockTableW' <- unsafeFreezeArr blockTableW'
+            writeIORef blockTableWRef iBlockTableW'
             hs_loop_resize uvLoop (fromIntegral newSiz)
 
-            return ([oldSiz+1..newSiz-1], oldSiz)    -- fill the free slot list
+            return ([oldSiz+2..newSiz], oldSiz+1)    -- fill the free slot list
 
 freeSlot :: Int -> UVManager -> IO ()
-freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _) =
+freeSlot slot  (UVManager _ _ freeSlotList _ _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)

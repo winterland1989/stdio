@@ -27,8 +27,10 @@ newTTY fd readable = do
     poke_uv_handle_data tty (fromIntegral slot)
     return (TTY tty loop slot uvm)
 
+instance Show TTY where
+    show _ = "tty"
+
 instance Input TTY where
-    inputInfo _ = "tty"
     readInput (TTY tty loop slot uvm) buf bufSiz = do
         ensureUVMangerRunning uvm
         withMVar (uvmFreeSlotList uvm) $ \ _ -> do
@@ -36,7 +38,7 @@ instance Input TTY where
             pokeElemOff bufTable slot buf
             pokeElemOff bufSizTable slot (fromIntegral bufSiz)
             hs_read_start tty
-        btable <- readIORef $ uvmBlockTable uvm
+        btable <- readIORef $ uvmBlockTableR uvm
         takeMVar (indexArr btable slot)
         rTable <- peekResultTable (uvmLoopData uvm)
         fromIntegral `fmap` peekElemOff rTable slot
