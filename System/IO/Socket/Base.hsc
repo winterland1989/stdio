@@ -140,11 +140,14 @@ listen s@(BoundSocket sock addr) backlog = do
 
     c_listen sock (fromIntegral backlog)
 
-    E.throwUVErrorIfMinus callStack dev $ hs_poll_start handle (getUVPollEvent uV_READABLE)
-
     btable <- readIORef $ uvmBlockTableR uvm
 
-    return (TCPListener sock addr (takeMVar $ indexArr btable slot))
+    let wait = do
+        E.throwUVErrorIfMinus callStack dev $ hs_poll_start handle (getUVPollEvent uV_READABLE)
+        takeMVar $ indexArr btable slot
+
+
+    return (TCPListener sock addr wait)
 
 
 -- | Accept a connection with 'TCPListener'.

@@ -118,7 +118,7 @@ foreign import ccall unsafe hs_timer_start_stop_loop :: Ptr UVHandle -> CULong -
 --------------------------------------------------------------------------------
 -- uv_async_t
 
-foreign import ccall unsafe hs_async_init_no_callback :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
+foreign import ccall unsafe hs_async_init_stop_loop :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
 foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO CInt
 
 --------------------------------------------------------------------------------

@@ -205,6 +205,7 @@ void hs_poll_cb(uv_poll_t* handle, int status, int events){
         loop_data->result_table[slot] = events;                  // TODO get the errno and pass to ghc
         loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
         loop_data->event_counter += 1;
+        uv_poll_stop(handle);
     }
 }
 
@@ -224,10 +225,15 @@ int hs_timer_start_stop_loop(uv_timer_t* handle, uint64_t timeout){
 
 /********************************************************************************/
 
-int hs_async_init_no_callback(uv_loop_t* loop, uv_async_t* async){
-    return uv_async_init(loop, async, NULL);
+void hs_async_cb(uv_async_t* handle){
+    uv_stop(handle->loop);
 }
 
+int hs_async_init_stop_loop(uv_loop_t* loop, uv_async_t* async){
+    return uv_async_init(loop, async, hs_async_cb);
+}
+
+/********************************************************************************/
 
 void hs_fs_cb(uv_fs_t* req){
     hs_loop_data* d = req->loop->data;

@@ -22,6 +22,7 @@ import Data.Array
 import Data.Primitive.PrimArray
 import Data.Word
 import Data.IORef
+import Data.IORef.Unboxed
 import Foreign hiding (void)
 import Foreign.C
 import Control.Concurrent.MVar
@@ -37,7 +38,7 @@ data UVManager = UVManager
     { uvmBlockTableR  :: IORef (Array (MVar ()))     -- a list to store blocked thread
     , uvmBlockTableW  :: IORef (Array (MVar ()))     -- a list to store blocked thread
 
-    , uvmFreeSlotList :: MVar [Int]                 -- we generate an unique range limited 'Int' /slot/
+    , uvmFreeSlotList :: MVar [Int]                -- we generate an unique range limited 'Int' /slot/
                                                     -- for each uv_handle_t and uv_req_t
 
                                                     -- the slot is attached as the data field of
@@ -60,9 +61,10 @@ data UVManager = UVManager
                                                     --
     , uvmLoop        :: Ptr UVLoop                  -- the uv loop refrerence
 
-    , uvmRunning     :: IORef Bool                  -- is uv manager running?
+    , uvmState       :: Counter                     -- 0: stopped, 1: running, -1: blocking
     , uvmCap         :: Int                         -- the capability uv manager is runnig on
     , uvmBlockTimer  :: Ptr UVHandle
+    , uvmBlockAsync  :: Ptr UVHandle
     }
 
 initTableSize :: Int
@@ -104,16 +106,24 @@ newUVManager siz cap = do
 
     uvLoopData <- peek_uv_loop_data uvLoop
 
-    uvmRunning <- newIORef False
+    uvmState <- newCounter 0
 
     blockTimer <- E.throwOOMIfNull callStack "malloc block timer for uv manager" $ hs_handle_init uV_TIMER
     uv_timer_init uvLoop blockTimer
 
+    blockAsync <- E.throwOOMIfNull callStack "malloc block async handler for uv manager" $ hs_handle_init uV_ASYNC
+    hs_async_init_stop_loop uvLoop blockAsync
+
     _ <- mkWeakMVar freeSlotList $ do
+        hs_handle_close blockTimer
         hs_handle_close blockTimer
         hs_loop_close uvLoop
 
-    return (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmRunning cap blockTimer)
+    return (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmState cap blockTimer blockAsync)
+
+wakeUpBlockingUVManager :: UVManager -> IO ()
+wakeUpBlockingUVManager uvm = do
+    E.throwUVErrorIfMinus $ uv_async_send (uvmBlockAsync uvm)
 
 ensureUVMangerRunning :: HasCallStack => UVManager -> IO ()
 ensureUVMangerRunning uvm = do
@@ -131,8 +141,8 @@ ensureUVMangerRunning uvm = do
                 else writeIORef (uvmRunning uvm) False
 
     step :: UVManager -> Bool -> IO (Bool, CSize)
-    step (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmRunning _ blockTimer) block = do
-        withMVar freeSlotList $ \ _ -> do             -- now let's begin
+    step (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmRunning uvmBlocking _ blockTimer _) block = do
+        withMVar uvmRunning $ \ _ -> do             -- now let's begin
             blockTableR <- readIORef iBlockTableRRef
             blockTableW <- readIORef iBlockTableWRef
             let siz = sizeofArr blockTableR
@@ -143,13 +153,12 @@ ensureUVMangerRunning uvm = do
                     unless rtsSupportsBoundThreads
                         (void . E.throwUVErrorIfMinus callStack "start timer to unblock uv loop for non-threaded RTS" $
                             hs_timer_start_stop_loop blockTimer 1)
-                    E.throwUVErrorIfMinus callStack "blocking uv loop on non-threaded RTS" $
-                        uv_run_safe uvLoop uV_RUN_ONCE
-                else E.throwUVErrorIfMinus callStack "blocking uv loop on threaded RTS" $
+                    E.throwUVErrorIfMinus callStack "blocking uv loop on threaded RTS" $ do
+                            uv_run_safe uvLoop uV_RUN_ONCE
+                else E.throwUVErrorIfMinus callStack "non-blocking uv loop on threaded RTS" $
                         uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception
             (c, q) <- peekEventQueue uvLoopData
-            print c
             forM_ [0..(fromIntegral c-1)] $ \ i -> do      -- convert CSize to int first, otherwise (c-1) may overflow
                 slot <- peekElemOff q i
                 lock <-
@@ -158,11 +167,10 @@ ensureUVMangerRunning uvm = do
                     else indexArrM blockTableW (fromIntegral slot)
                 tryPutMVar lock ()
                 return ()
-            when (r == 0) (atomicWriteIORef uvmRunning False) -- not sure if we really need atomic since we're holding a lock
             return (r /= 0, c)
 
 allocSlot :: UVManager -> IO Int
-allocSlot (UVManager blockTableRRef blockTableWRef freeSlotList uvLoopData uvLoop _ _ _) = do
+allocSlot (UVManager blockTableRRef blockTableWRef freeSlotList uvLoopData uvLoop _ _ _ _) = do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do        -- free list is empty, we double it
@@ -189,5 +197,5 @@ allocSlot (UVManager blockTableRRef blockTableWRef freeSlotList uvLoopData uvLoo
             return ([oldSiz+2..newSiz], oldSiz+1)    -- fill the free slot list
 
 freeSlot :: Int -> UVManager -> IO ()
-freeSlot slot  (UVManager _ _ freeSlotList _ _ _ _ _) =
+freeSlot slot  (UVManager _ _ freeSlotList _ _ _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)
