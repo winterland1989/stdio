@@ -70,6 +70,8 @@ void hs_loop_close(uv_loop_t* loop){
     free(loop_data->result_table);
 }
 
+/********************************************************************************/
+
 // Initialize a uv_handle_t with give type, return NULL on fail.
 uv_handle_t* hs_handle_init(uv_handle_type typ){
     return malloc(uv_handle_size(typ));
@@ -84,6 +86,15 @@ void hs_handle_close(uv_handle_t* handle){
     uv_close(handle, hs_free_handle_callback);
 }
 
+// Initialize a uv_req_t with give type, return NULL on fail.
+uv_handle_t* hs_req_init(uv_req_type typ){
+    return malloc(uv_req_size(typ));
+}
+
+// free uv_req_t's memory.
+void hs_req_free(uv_req_t* req){
+    free(req);
+}
 
 /********************************************************************************/
 
@@ -97,9 +108,13 @@ void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
 void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
     size_t slot = (size_t)stream->data;
     hs_loop_data* loop_data = stream->loop->data;
-    loop_data->result_table[slot] += nread;                        // save the read result
+
+    loop_data->result_table[slot] = nread;                   // save the read result,
+                                                             // > 0 in case of success, < 0 otherwise.
+
     loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
     loop_data->event_counter += 1;
+
     uv_read_stop(stream);
 }
 
@@ -110,22 +125,28 @@ int hs_read_start(uv_stream_t* stream){
 void hs_write_cb(uv_write_t* req, int status){
     size_t slot = (size_t)req->data;
     hs_loop_data* loop_data = req->handle->loop->data;
-    loop_data->event_queue[loop_data->event_counter] = -slot;   // push the slot to event queue, negative is write
+
+    loop_data->result_table[slot] = status;                   // 0 in case of success, < 0 otherwise.
+
+    loop_data->event_queue[loop_data->event_counter] = slot;   // push the slot to event queue
     loop_data->event_counter += 1;
-    free(req);
 }
 
-int hs_write(uv_stream_t* handle){
-    uv_write_t* req = malloc(sizeof(uv_write_t));
-    uv_buf_t* buf = malloc(sizeof(uv_buf_t));
+int hs_write(uv_write_t* req, uv_stream_t* handle){
+
     hs_loop_data* loop_data = handle->loop->data;
-    size_t slot = (size_t)handle->data;
+    size_t slot = (size_t)req->data;            // fetch the request slot
 
-    req->data = handle->data;
-    buf->base = loop_data->buffer_table[slot];
-    buf->len = loop_data->buffer_size_table[slot];
-
-    uv_write(req, handle, buf, 1, hs_write_cb);
+    // on windows this struct is captured by WSASend
+    // on unix this struct is copied by libuv's uv_write
+    // so it's safe to allocate it on stack
+    uv_buf_t buf = { 
+        .base = loop_data->buffer_table[slot],
+        .len = loop_data->buffer_size_table[slot]
+    };
+    
+    uv_write(req, handle, &buf, 1, hs_write_cb);    // we never use writev: we do our own
+                                                    // user-space buffering in haskell.
 }
 
 
@@ -155,25 +176,22 @@ void uv_connection_init(uv_stream_t* handle){
   handle->stream.conn.shutdown_req = NULL;
 }
 
-int hs_tcp_open_win32(uv_tcp_t* handle, uv_os_sock_t sock) {
+int uv_tcp_open_win32(uv_tcp_t* handle, uv_os_sock_t sock) {
   int r = uv_tcp_open(handle, sock);
   if (r == 0) {
     uv_connection_init((uv_stream_t*)handle);
     handle->flags |= UV_HANDLE_BOUND | UV_HANDLE_READABLE | UV_HANDLE_WRITABLE;
   }
-
   return r;
 }
 #endif
 
 void hs_connection_cb(uv_stream_t* server, int status){
-    if (status == 0){
-        size_t slot = (size_t)server->data;
-        hs_loop_data* loop_data = server->loop->data;
-        loop_data->result_table[slot] = status;                  // TODO get the errno and pass to ghc
-        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
-        loop_data->event_counter += 1;
-    }
+    size_t slot = (size_t)server->data;
+    hs_loop_data* loop_data = server->loop->data;
+    loop_data->result_table[slot] = status;                  // 0 in case of success, < 0 otherwise.
+    loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+    loop_data->event_counter += 1;
 }
 
 int hs_listen(uv_stream_t* stream, int backlog){
@@ -182,15 +200,16 @@ int hs_listen(uv_stream_t* stream, int backlog){
 
 /********************************************************************************/
 
+// we ignore events number: we loop until EAGAIN/EWOULDBLOCK, then we wait again.
 void hs_poll_cb(uv_poll_t* handle, int status, int events){
-    if (status == 0){
-        size_t slot = (size_t)handle->data;
-        hs_loop_data* loop_data = handle->loop->data;
-        loop_data->result_table[slot] = events;                  // TODO get the errno and pass to ghc
-        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
-        loop_data->event_counter += 1;
-        uv_poll_stop(handle);
-    }
+    size_t slot = (size_t)handle->data;
+    hs_loop_data* loop_data = handle->loop->data;
+
+    loop_data->result_table[slot] = status;                  // 0 in case of success, < 0 otherwise.
+    loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+    loop_data->event_counter += 1;
+
+    uv_poll_stop(handle);
 }
 
 int hs_poll_start(uv_poll_t* handle, int events){

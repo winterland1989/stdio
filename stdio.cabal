@@ -44,7 +44,7 @@ library
                             System.IO.Handle
                             System.LowResTimer
 
-                            System.IO.TTY
+                            -- System.IO.TTY
                             
                             System.IO.UV.Base
                             System.IO.UV.Exception

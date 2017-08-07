@@ -25,9 +25,12 @@ import Data.Array
 
 
 data TCP = TCP
-    { tcpHandle :: Ptr UVHandle
-    , tcpSlot   :: Int
-    , tcpManager :: UVManager
+    { tcpUVHandle     :: Ptr UVHandle
+    , tcpUVHandleSlot :: Int
+    , tcpUVReadLock   :: MVar ()
+    , tcpUVReqLock    :: MVar (Ptr UVReq) -- the write request and write lock
+    , tcpUVReqSlot    :: Int
+    , tcpUVManager    :: UVManager
     }
 
 instance Show TCP where
@@ -37,30 +40,43 @@ closeTCP :: TCP -> IO ()
 closeTCP = undefined
 
 instance Input TCP where
-    readInput tcp@(TCP uvhandle slot uvm) buf bufSiz = do
-        ensureUVMangerRunning uvm
-        (bufTable, bufSizTable) <- peekReadBuffer (uvmLoopData uvm)
-        resultTable <- peekResultTable (uvmLoopData uvm)
-        withMVar (uvmFreeSlotList uvm) $ \ _ -> do
+    readInput tcp@(TCP handle slot readLock _ _ uvm) buf bufSiz = withMVar readLock $ \ _ -> do
+        let dev = show tcp
 
-            pokeElemOff bufTable slot buf
-            pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-            pokeElemOff resultTable slot 0
-            E.throwUVErrorIfMinus callStack  (show tcp) $ hs_read_start uvhandle
-        btable <- readIORef $ uvmBlockTableR uvm
+        (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
+        resultTable <- peekUVResultTable (uvmLoopData uvm)
+        pokeElemOff bufTable slot buf
+        pokeElemOff bufSizTable slot (fromIntegral bufSiz)
+        pokeElemOff resultTable slot 0
+
+        E.throwUVErrorIfMinus callStack dev $
+            withUVManagerEnsureRunning uvm (hs_read_start handle)
+
+        btable <- readIORef $ uvmBlockTable uvm
         takeMVar (indexArr btable slot)
-        fromIntegral `fmap` peekElemOff resultTable slot
+        r <- E.throwUVErrorIfMinus callStack dev $ 
+            fromIntegral `fmap` peekElemOff resultTable slot
+
+        return (fromIntegral r)
 
 instance Output TCP where
-    writeOutput tcp@(TCP uvhandle slot uvm) buf bufSiz = do
-        ensureUVMangerRunning uvm
-        (bufTable, bufSizTable) <- peekWriteBuffer (uvmLoopData uvm)
-        withMVar (uvmFreeSlotList uvm) $ \ _ -> do
-            pokeElemOff bufTable slot buf
-            pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-            E.throwUVErrorIfMinus callStack  (show tcp) $ hs_read_start uvhandle
-        btable <- readIORef $ uvmBlockTableW uvm
+    writeOutput tcp@(TCP handle _ _ reqLock slot uvm) buf bufSiz = withMVar reqLock $ \ req -> do
+        let dev = show tcp
+
+        (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
+        resultTable <- peekUVResultTable (uvmLoopData uvm)
+        pokeElemOff bufTable slot buf
+        pokeElemOff bufSizTable slot (fromIntegral bufSiz)
+        pokeElemOff resultTable slot 0
+        
+        E.throwUVErrorIfMinus callStack  (show tcp) $ 
+            withUVManagerEnsureRunning uvm (hs_write req handle)
+
+        btable <- readIORef $ uvmBlockTable uvm
         takeMVar (indexArr btable slot)
+
+        _ <- E.throwUVErrorIfMinus callStack dev $ 
+            fromIntegral `fmap` peekElemOff resultTable slot
         return ()
 
 --------------------------------------------------------------------------------
@@ -85,18 +101,28 @@ socket sfamily@(SocketFamily family) stype@(SocketType typ) sproto@(SocketProtoc
 newTCP :: SocketFd -> IO TCP
 newTCP (SocketFd fd) = do
     uvm <- getUVManager
-    slot <- allocSlot uvm
-    let loop = (uvmLoop uvm)
-        dev = "tcp FD:" ++ show fd
-    p <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_TCP
+    slotR <- allocSlot uvm
+    slotW <- allocSlot uvm
 
-    withMVar (uvmFreeSlotList uvm) $ \ _ -> do
-        E.throwUVErrorIfMinus callStack dev $ uv_tcp_init loop p
+    let dev = "tcp FD:" ++ show fd
 
-    E.throwUVErrorIfMinus callStack dev $ uv_tcp_open p fd
+    (handle, req) <- withUVManager uvm $ \ loop -> do
+        handle <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_TCP
+        req <- E.throwOOMIfNull callStack dev $ hs_req_init uV_WRITE
+        E.throwUVErrorIfMinus callStack dev $ uv_tcp_init loop handle
+        return (handle, req)
 
-    poke_uv_handle_data p (fromIntegral slot)
-    return (TCP p slot uvm)
+    E.throwUVErrorIfMinus callStack dev $ uv_tcp_open handle fd     -- It's OK to call this outside of uv lock
+    poke_uv_handle_data handle (fromIntegral slotR)
+    poke_uv_req_data req (fromIntegral slotW)
+
+    readLock <- newMVar ()
+    reqLock <- newMVar req
+
+    _ <- mkWeakMVar readLock (hs_handle_close handle)
+    _ <- mkWeakMVar reqLock (hs_req_free req)
+
+    return (TCP handle slotR readLock reqLock slotW uvm)
 
 -- Binding a socket
 
@@ -126,26 +152,26 @@ listen :: (HasCallStack, SocketAddress addr)
        -> Int               -- Queue Length
        -> IO (TCPListener addr)
 listen s@(BoundSocket sock addr) backlog = do
+    let dev = show s
+
     uvm <- getUVManager
-    ensureUVMangerRunning uvm
     slot <- allocSlot uvm
-    let loop = (uvmLoop uvm)
-        dev = show s
+
     handle <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_POLL
 
-    withMVar (uvmFreeSlotList uvm) $ \ _ -> do
-        E.throwUVErrorIfMinus callStack dev $ uv_poll_init_socket loop handle sock
+    E.throwUVErrorIfMinus callStack dev $
+        withUVManager uvm $ \ loop -> uv_poll_init_socket loop handle sock
 
     poke_uv_handle_data handle (fromIntegral slot)
 
     c_listen sock (fromIntegral backlog)
 
-    btable <- readIORef $ uvmBlockTableR uvm
+    btable <- readIORef $ uvmBlockTable uvm
 
     let wait = do
-        E.throwUVErrorIfMinus callStack dev $ hs_poll_start handle (getUVPollEvent uV_READABLE)
-        takeMVar $ indexArr btable slot
-
+            E.throwUVErrorIfMinus callStack dev $ 
+                withUVManagerEnsureRunning uvm (hs_poll_start handle uV_READABLE)
+            takeMVar $ indexArr btable slot
 
     return (TCPListener sock addr wait)
 

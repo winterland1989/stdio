@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module System.IO.UV.Base where
 
 import Foreign
@@ -9,7 +10,10 @@ import Foreign.C
 #endif
 
 #include <uv.h>
-#include <uv_hs.h>
+#include <hs_uv.h>
+
+newtype UVSlot = UVSlot CSize 
+    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
 --------------------------------------------------------------------------------
 -- uv errno
@@ -21,48 +25,46 @@ foreign import ccall unsafe uv_err_name :: CInt -> IO CString
 
 data UVLoopData
 
-peekEventQueue :: Ptr UVLoopData -> IO (CSize, Ptr CSize)
-peekEventQueue p = (,)
+peekUVEventQueue :: Ptr UVLoopData -> IO (CSize, Ptr CSize)
+peekUVEventQueue p = (,)
     <$> (#{peek hs_loop_data, event_counter          } p)
     <*> (#{peek hs_loop_data, event_queue            } p)
 
-peekResultTable :: Ptr UVLoopData -> IO (Ptr CSize)
-peekResultTable p = do
+clearUVEventCounter :: Ptr UVLoopData -> IO ()
+clearUVEventCounter p = do
+    #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
+
+peekUVResultTable :: Ptr UVLoopData -> IO (Ptr CSize)
+peekUVResultTable p = do
     (#{peek hs_loop_data, result_table          } p)
 
-
-peekReadBuffer :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
-peekReadBuffer p = (,)
-    <$> (#{peek hs_loop_data, read_buffer_table          } p)
-    <*> (#{peek hs_loop_data, read_buffer_size_table     } p)
-
-peekWriteBuffer :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
-peekWriteBuffer p = (,)
-    <$> (#{peek hs_loop_data, write_buffer_table          } p)
-    <*> (#{peek hs_loop_data, write_buffer_size_table     } p)
-
-clearUVLoopuEventCounter :: Ptr UVLoopData -> IO ()
-clearUVLoopuEventCounter p = do
-    #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
+peekUVBufferTable :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
+peekUVBufferTable p = (,)
+    <$> (#{peek hs_loop_data, buffer_table          } p)
+    <*> (#{peek hs_loop_data, buffer_size_table     } p)
 
 --------------------------------------------------------------------------------
 
 data UVLoop
 
-#{enum CInt, CInt, 
+newtype UVRunMode = UVRunMode CInt 
+    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
+
+#{enum UVRunMode, UVRunMode, 
   uV_RUN_DEFAULT = UV_RUN_DEFAULT,
   uV_RUN_ONCE    = UV_RUN_ONCE,
   uV_RUN_NOWAIT  = UV_RUN_NOWAIT}
 
-foreign import ccall unsafe hs_loop_init      :: CSize -> IO (Ptr UVLoop)
-foreign import ccall safe hs_loop_close     :: Ptr UVLoop -> IO ()
-foreign import ccall unsafe hs_loop_resize    :: Ptr UVLoop -> CSize -> IO (Ptr UVLoop)
-
 peek_uv_loop_data :: Ptr UVLoop -> IO (Ptr UVLoopData)
 peek_uv_loop_data p = #{peek uv_loop_t, data} p
 
-foreign import ccall unsafe uv_run            :: Ptr UVLoop -> CInt -> IO CInt
-foreign import ccall safe "uv_run" uv_run_safe :: Ptr UVLoop -> CInt -> IO CInt
+foreign import ccall unsafe hs_loop_init      :: CSize -> IO (Ptr UVLoop)
+foreign import ccall safe hs_loop_close       :: Ptr UVLoop -> IO ()
+foreign import ccall unsafe hs_loop_resize    :: Ptr UVLoop -> CSize -> IO (Ptr UVLoop)
+
+foreign import ccall unsafe uv_run            :: Ptr UVLoop -> UVRunMode -> IO CInt
+-- we never use safe blocking wait actually
+foreign import ccall safe "uv_run" uv_run_safe :: Ptr UVLoop -> UVRunMode -> IO CInt
 
 foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO CInt
 foreign import ccall unsafe uv_backend_fd     :: Ptr UVLoop -> IO CInt
@@ -70,43 +72,114 @@ foreign import ccall unsafe uv_now            :: Ptr UVLoop -> IO CULong
 
 --------------------------------------------------------------------------------
 
-data UVHandle = UVHandle
-    { uvHandleData :: Int           -- the slot number
-    , uvHandleType :: CInt
-    , uvHandleLoop :: Ptr UVLoop
-    }
+data UVHandle
 
-poke_uv_handle_data :: Ptr UVHandle -> CSize -> IO ()
+poke_uv_handle_data :: Ptr UVHandle -> UVSlot -> IO ()
 poke_uv_handle_data p slot =  #{poke uv_handle_t, data} p slot 
 
-foreign import ccall unsafe hs_handle_init :: UVHandleType -> IO (Ptr UVHandle)
+foreign import ccall unsafe hs_handle_init  :: UVHandleType -> IO (Ptr UVHandle)
 foreign import ccall unsafe hs_handle_close :: Ptr UVHandle -> IO ()
 
 foreign import ccall unsafe uv_ref :: Ptr UVHandle -> IO ()
 foreign import ccall unsafe uv_unref :: Ptr UVHandle -> IO ()
 
-newtype UVHandleType = UVHandleType { getUVHandleType :: CInt } deriving (Show, Eq, Ord)
+newtype UVHandleType = UVHandleType CInt 
+    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
 #{enum UVHandleType, UVHandleType,
-   uV_UNKNOWN_HANDLE  = UV_UNKNOWN_HANDLE,
-   uV_ASYNC           = UV_ASYNC,
-   uV_CHECK           = UV_CHECK,
-   uV_FS_EVENT        = UV_FS_EVENT,
-   uV_FS_POLL         = UV_FS_POLL,
-   uV_HANDLE          = UV_HANDLE,
-   uV_IDLE            = UV_IDLE,
-   uV_NAMED_PIPE      = UV_NAMED_PIPE,
-   uV_POLL            = UV_POLL,
-   uV_PREPARE         = UV_PREPARE,
-   uV_PROCESS         = UV_PROCESS,
-   uV_STREAM          = UV_STREAM,
-   uV_TCP             = UV_TCP,
-   uV_TIMER           = UV_TIMER,
-   uV_TTY             = UV_TTY,
-   uV_UDP             = UV_UDP,
-   uV_SIGNAL          = UV_SIGNAL,
-   uV_FILE            = UV_FILE,
-   uV_HANDLE_TYPE_MAX = UV_HANDLE_TYPE_MAX }
+    uV_UNKNOWN_HANDLE  = UV_UNKNOWN_HANDLE,
+    uV_ASYNC           = UV_ASYNC,
+    uV_CHECK           = UV_CHECK,
+    uV_FS_EVENT        = UV_FS_EVENT,
+    uV_FS_POLL         = UV_FS_POLL,
+    uV_HANDLE          = UV_HANDLE,
+    uV_IDLE            = UV_IDLE,
+    uV_NAMED_PIPE      = UV_NAMED_PIPE,
+    uV_POLL            = UV_POLL,
+    uV_PREPARE         = UV_PREPARE,
+    uV_PROCESS         = UV_PROCESS,
+    uV_STREAM          = UV_STREAM,
+    uV_TCP             = UV_TCP,
+    uV_TIMER           = UV_TIMER,
+    uV_TTY             = UV_TTY,
+    uV_UDP             = UV_UDP,
+    uV_SIGNAL          = UV_SIGNAL,
+    uV_FILE            = UV_FILE,
+    uV_HANDLE_TYPE_MAX = UV_HANDLE_TYPE_MAX }
+
+--------------------------------------------------------------------------------
+-- uv_req_t
+
+data UVReq
+
+poke_uv_req_data :: Ptr UVReq -> CSize -> IO ()
+poke_uv_req_data p slot =  #{poke uv_req_t, data} p slot 
+
+foreign import ccall unsafe hs_req_init :: UVReqType -> IO (Ptr UVReq)
+foreign import ccall unsafe hs_req_free :: Ptr UVReq -> IO ()
+
+newtype UVReqType = UVReqType CInt
+    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
+
+#{enum UVReqType, UVReqType,
+    uV_UNKNOWN_REQ      = UV_UNKNOWN_REQ,
+    uV_REQ              = UV_REQ,
+    uV_CONNECT          = UV_CONNECT,
+    uV_WRITE            = UV_WRITE,
+    uV_SHUTDOWN         = UV_SHUTDOWN,
+    uV_UDP_SEND         = UV_UDP_SEND,
+    uV_FS               = UV_FS,
+    uV_WORK             = UV_WORK,
+    uV_GETADDRINFO      = UV_GETADDRINFO,
+    uV_GETNAMEINFO      = UV_GETNAMEINFO,
+    uV_REQ_TYPE_MAX     = UV_REQ_TYPE_MAX }
+
+--------------------------------------------------------------------------------
+-- uv_stream_t
+
+foreign import ccall unsafe uv_stream_set_blocking :: Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
+foreign import ccall unsafe hs_listen :: Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe hs_write :: Ptr UVReq -> Ptr UVHandle -> IO CInt
+
+--------------------------------------------------------------------------------
+-- uv_tcp_t
+
+foreign import ccall unsafe uv_tcp_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
+foreign import ccall unsafe uv_tcp_init_ex :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
+
+-- see notes in cbits/hs_uv.c
+#if defined(mingw32_HOST_OS)
+foreign import ccall unsafe "uv_tcp_open_win32" uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
+#else
+foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
+#endif
+
+foreign import ccall unsafe uv_tcp_simultaneous_accepts :: Ptr UVHandle -> CInt -> IO CInt
+
+--------------------------------------------------------------------------------
+-- uv_poll_t
+
+newtype UVPollEvent = UVPollEvent CInt
+    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
+
+#{enum UVPollEvent, UVPollEvent,
+   uV_READABLE    = UV_READABLE,
+   uV_WRITABLE    = UV_WRITABLE}
+
+foreign import ccall unsafe uv_poll_init_socket :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe hs_poll_start :: Ptr UVHandle -> UVPollEvent -> IO CInt
+
+--------------------------------------------------------------------------------
+-- uv_pipe_t
+
+foreign import ccall unsafe uv_pipe_init  :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO ()
+foreign import ccall unsafe uv_pipe_open  :: Ptr UVHandle -> UVFile -> IO ()
+    
+--------------------------------------------------------------------------------
+-- uv_tty_t
+
+foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> UVFile -> CInt -> IO CInt
 
 --------------------------------------------------------------------------------
 -- uv_timer_t
@@ -125,41 +198,6 @@ foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO CInt
 -- uv_signal_t
 
 foreign import ccall unsafe uv_signal_init :: Ptr UVLoop -> Ptr UVHandle -> IO ()
-
---------------------------------------------------------------------------------
--- uv_stream_t
-
-foreign import ccall unsafe uv_stream_set_blocking :: Ptr UVHandle -> CInt -> IO CInt
-foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
-foreign import ccall unsafe hs_listen :: Ptr UVHandle -> CInt -> IO CInt
-
-
---------------------------------------------------------------------------------
--- uv_tcp_t
-
-foreign import ccall unsafe uv_tcp_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
-foreign import ccall unsafe uv_tcp_init_ex :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
-
--- see notes in cbits/uv_hs.c
-#if defined(mingw32_HOST_OS)
-foreign import ccall unsafe "hs_tcp_open_win32" uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
-#else
-foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
-#endif
-
-foreign import ccall unsafe uv_tcp_simultaneous_accepts :: Ptr UVHandle -> CInt -> IO CInt
-
---------------------------------------------------------------------------------
--- uv_poll_t
-
-newtype UVPollEvent = UVPollEvent { getUVPollEvent :: CInt } deriving (Show, Eq, Ord)
-
-#{enum UVPollEvent, UVPollEvent,
-   uV_READABLE    = UV_READABLE,
-   uV_WRITABLE    = UV_WRITABLE}
-
-foreign import ccall unsafe uv_poll_init_socket :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
-foreign import ccall unsafe hs_poll_start :: Ptr UVHandle -> CInt -> IO CInt
 
 --------------------------------------------------------------------------------
 
@@ -313,36 +351,6 @@ foreign import ccall unsafe uv_fs_close       :: Ptr UVLoop -> Ptr UVFs -> UVFil
 foreign import ccall unsafe uv_fs_open_hs     :: Ptr UVLoop -> Ptr UVFs -> CString -> CInt -> CInt -> IO ()
 
 
---------------------------------------------------------------------------------
--- uv_pipe_t
-
-data UVPipe = UVPipe
-    { uvPipeData :: CInt
-    , uvPipeLoop :: Ptr UVLoop
-    , uvPipeWriteQueueSize :: CSize
-    }
-
-instance Storable UVPipe where
-    sizeOf _ = #size uv_pipe_t
-    alignment _ = #alignment uv_pipe_t
-    poke p uvpipe = do
-        #{poke uv_pipe_t, data               } p $ uvPipeData uvpipe
-        #{poke uv_pipe_t, loop               } p $ uvPipeLoop uvpipe
-        #{poke uv_pipe_t, write_queue_size   } p $ uvPipeWriteQueueSize uvpipe
-    peek p = UVPipe 
-        <$> (#{peek uv_pipe_t, data               } p)
-        <*> (#{peek uv_pipe_t, loop               } p)
-        <*> (#{peek uv_pipe_t, write_queue_size   } p)
-
-foreign import ccall unsafe uv_pipe_init  :: Ptr UVLoop -> Ptr UVPipe -> CInt -> IO ()
-foreign import ccall unsafe uv_pipe_open  :: Ptr UVPipe -> UVFile -> IO ()
-    
---------------------------------------------------------------------------------
--- uv_tty_t
-
-foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> UVFile -> CInt -> IO CInt
-
---------------------------------------------------------------------------------
 
 
 type UVFile = CInt
