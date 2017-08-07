@@ -14,6 +14,7 @@ import Control.Concurrent
 import System.IO.Handle
 import Data.IORef
 import Data.Array
+import Control.Monad
 
 #include "HsNet.h"
 
@@ -31,6 +32,7 @@ data TCP = TCP
     , tcpUVReqLock    :: MVar (Ptr UVReq) -- the write request and write lock
     , tcpUVReqSlot    :: Int
     , tcpUVManager    :: UVManager
+    , tcpFd           :: CInt
     }
 
 instance Show TCP where
@@ -40,44 +42,67 @@ closeTCP :: TCP -> IO ()
 closeTCP = undefined
 
 instance Input TCP where
-    readInput tcp@(TCP handle slot readLock _ _ uvm) buf bufSiz = withMVar readLock $ \ _ -> do
-        let dev = show tcp
+    readInput tcp@(TCP handle slot readLock _ _ uvm fd) buf bufSiz = withMVar readLock $ \ _ -> do
 
-        (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
-        resultTable <- peekUVResultTable (uvmLoopData uvm)
-        pokeElemOff bufTable slot buf
-        pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-        pokeElemOff resultTable slot 0
+        r <- c_recv fd buf (fromIntegral bufSiz) 0
 
-        E.throwUVErrorIfMinus callStack dev $
-            withUVManagerEnsureRunning uvm (hs_read_start handle)
+        if E.Errno r == E.eAGAIN || E.Errno r == E.eWOULDBLOCK      -- TODO, make cross-platform retry
 
-        btable <- readIORef $ uvmBlockTable uvm
-        takeMVar (indexArr btable slot)
-        r <- E.throwUVErrorIfMinus callStack dev $ 
-            fromIntegral `fmap` peekElemOff resultTable slot
+        then do
 
-        return (fromIntegral r)
+            let dev = show tcp
+
+            (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
+            resultTable <- peekUVResultTable (uvmLoopData uvm)
+            pokeElemOff bufTable slot buf
+            pokeElemOff bufSizTable slot (fromIntegral bufSiz)
+            pokeElemOff resultTable slot 0
+
+            E.throwUVErrorIfMinus callStack dev $
+                withUVManagerEnsureRunning uvm (hs_read_start handle)
+
+            btable <- readIORef $ uvmBlockTable uvm
+            takeMVar (indexArr btable slot)
+            r <- E.throwUVErrorIfMinus callStack dev $ 
+                fromIntegral `fmap` peekElemOff resultTable slot
+
+            return (fromIntegral r)
+        else return (fromIntegral r)
 
 instance Output TCP where
-    writeOutput tcp@(TCP handle _ _ reqLock slot uvm) buf bufSiz = withMVar reqLock $ \ req -> do
-        let dev = show tcp
+    writeOutput tcp@(TCP handle _ _ reqLock slot uvm fd) buf bufSiz = withMVar reqLock $ \ req -> 
+        loop req buf bufSiz
+      where
+        loop req buf bufSiz = do 
+            r <- c_send fd buf (fromIntegral bufSiz) 0
 
-        (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
-        resultTable <- peekUVResultTable (uvmLoopData uvm)
-        pokeElemOff bufTable slot buf
-        pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-        pokeElemOff resultTable slot 0
+            if E.Errno r == E.eAGAIN || E.Errno r == E.eWOULDBLOCK      -- TODO, make cross-platform retry
+            then do
         
-        E.throwUVErrorIfMinus callStack  (show tcp) $ 
-            withUVManagerEnsureRunning uvm (hs_write req handle)
+                let dev = show tcp
 
-        btable <- readIORef $ uvmBlockTable uvm
-        takeMVar (indexArr btable slot)
+                (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
+                resultTable <- peekUVResultTable (uvmLoopData uvm)
+                pokeElemOff bufTable slot buf
+                pokeElemOff bufSizTable slot (fromIntegral bufSiz)
+                pokeElemOff resultTable slot 0
+                
+                E.throwUVErrorIfMinus callStack  (show tcp) $ 
+                    withUVManagerEnsureRunning uvm (hs_write req handle)
 
-        _ <- E.throwUVErrorIfMinus callStack dev $ 
-            fromIntegral `fmap` peekElemOff resultTable slot
-        return ()
+                btable <- readIORef $ uvmBlockTable uvm
+                takeMVar (indexArr btable slot)
+
+                _ <- E.throwUVErrorIfMinus callStack dev $ 
+                    fromIntegral `fmap` peekElemOff resultTable slot
+                return ()
+
+            else do
+
+                let r' = fromIntegral r
+                when (r' < bufSiz && r' /= -1)  $
+                    loop req (buf `plusPtr` r') (bufSiz - r')
+
 
 --------------------------------------------------------------------------------
 
@@ -119,7 +144,7 @@ newTCP (SocketFd fd) = do
     readLock <- newMVar ()
     reqLock <- newMVar req
 
-    return (TCP handle slotR readLock reqLock slotW uvm)
+    return (TCP handle slotR readLock reqLock slotW uvm fd)
 
 -- Binding a socket
 
@@ -214,3 +239,9 @@ foreign import #{CALLCONV} unsafe "listen"
 
 foreign import #{CALLCONV} unsafe "accept"
     c_accept :: CInt -> Ptr SockAddr -> Ptr CInt{-CSockLen???-} -> IO CInt
+
+foreign import #{CALLCONV} unsafe "recv"
+    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO CInt
+
+foreign import #{CALLCONV} unsafe "send"
+    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO CInt
