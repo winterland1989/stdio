@@ -41,6 +41,8 @@ module System.IO.Exception
   , ioExceptionFromException
     -- * Builtin io exception types
   , IOEInfo(..)
+  , IOErrno(..)
+  , NoErrno(..)
   , AlreadyExists(..)
   , NoSuchThing(..)
   , ResourceBusy(..)
@@ -60,7 +62,9 @@ module System.IO.Exception
   , ResourceVanished(..)
   , Interrupted(..)
     -- * Throw io exceptions
-  , throwOtherErrno
+  , throwIO
+  , throwStdErrno
+  , throwOOMIfNull
   , throwErrno
   , throwErrorIf
   , throwErrnoIfMinus1
@@ -78,12 +82,26 @@ module System.IO.Exception
   , throwErrnoIfMinus1Retry_
   , throwErrnoIfRetryMayBlock_
   , throwErrnoIfMinus1RetryMayBlock_
-    -- * Errno type
+    -- * Default errno type
   , Errno(..)
   , isValidErrno
   , getErrno
   , resetErrno
-  , showErrno
+   -- * standard errno
+  , eOK, e2BIG, eACCES, eADDRINUSE, eADDRNOTAVAIL, eADV, eAFNOSUPPORT, eAGAIN,
+  eALREADY, eBADF, eBADMSG, eBADRPC, eBUSY, eCHILD, eCOMM, eCONNABORTED,
+  eCONNREFUSED, eCONNRESET, eDEADLK, eDESTADDRREQ, eDIRTY, eDOM, eDQUOT,
+  eEXIST, eFAULT, eFBIG, eFTYPE, eHOSTDOWN, eHOSTUNREACH, eIDRM, eILSEQ,
+  eINPROGRESS, eINTR, eINVAL, eIO, eISCONN, eISDIR, eLOOP, eMFILE, eMLINK,
+  eMSGSIZE, eMULTIHOP, eNAMETOOLONG, eNETDOWN, eNETRESET, eNETUNREACH,
+  eNFILE, eNOBUFS, eNODATA, eNODEV, eNOENT, eNOEXEC, eNOLCK, eNOLINK,
+  eNOMEM, eNOMSG, eNONET, eNOPROTOOPT, eNOSPC, eNOSR, eNOSTR, eNOSYS,
+  eNOTBLK, eNOTCONN, eNOTDIR, eNOTEMPTY, eNOTSOCK, eNOTSUP, eNOTTY, eNXIO,
+  eOPNOTSUPP, ePERM, ePFNOSUPPORT, ePIPE, ePROCLIM, ePROCUNAVAIL,
+  ePROGMISMATCH, ePROGUNAVAIL, ePROTO, ePROTONOSUPPORT, ePROTOTYPE,
+  eRANGE, eREMCHG, eREMOTE, eROFS, eRPCMISMATCH, eRREMOTE, eSHUTDOWN,
+  eSOCKTNOSUPPORT, eSPIPE, eSRCH, eSRMNT, eSTALE, eTIME, eTIMEDOUT,
+  eTOOMANYREFS, eTXTBSY, eUSERS, eWOULDBLOCK, eXDEV,
   ) where
 
 import Control.Exception
@@ -163,17 +181,17 @@ IOE(Interrupted)
 throwErrno :: CallStack -- callstack
            -> String    -- device info, such as filename, socket address, etc
            -> IO a
-throwErrno cstack dev = getErrno >>= throwOtherErrno cstack dev
+throwErrno cstack dev = getErrno >>= throwStdErrno cstack dev
 
--- | Throw io exception corresponding to the given errno.
+-- | Throw io exception corresponding to a standard unix errno.
 --
-throwOtherErrno :: CallStack -- callstack
-                -> String    -- device info, such as filename, socket address, etc
-                -> Errno     -- custom errno
-                -> IO a
-throwOtherErrno cstack dev errno = do
+throwStdErrno :: CallStack -- callstack
+              -> String    -- device info, such as filename, socket address, etc
+              -> Errno     -- custom errno
+              -> IO a
+throwStdErrno cstack dev errno = do
     desc <- (strerror errno >>= peekCString)
-    let info = IOEInfo (Just errno) desc dev cstack
+    let info = IOEInfo errno desc dev cstack
     case () of
         _
 
@@ -278,6 +296,19 @@ throwOtherErrno cstack dev errno = do
             | errno == eXDEV           -> throwIO (UnsupportedOperation    info)
             | otherwise                -> throwIO (OtherError              info)
 
+--------------------------------------------------------------------------------
+
+-- | Throw 'ResourceExhausted' if action return a 'nullPtr'.
+--
+throwOOMIfNull :: CallStack     -- ^ callstack
+               -> String        -- ^ a descrition of what you are doing
+               -> IO (Ptr a)    -- ^ the action
+               -> IO (Ptr a)
+throwOOMIfNull cstack info f = do
+   addr <- f
+   if addr == nullPtr
+      then throwIO (ResourceExhausted (IOEInfo NoErrno "out of memory" info cstack))
+      else return addr
 
 --------------------------------------------------------------------------------
 
@@ -389,123 +420,139 @@ throwErrnoIfMinus1RetryMayBlock_ cstack dev f onblock = void (throwErrnoIfMinus1
 
 --------------------------------------------------------------------------------
 
+class (Eq errno) => IOErrno errno where
+    showErrno :: errno -> String
+    fromErrnoValue :: CInt -> errno
+    toErrnoValue :: errno -> CInt
+
+-- | An empty errno for situation where we don't have one, convert to zero when use 'fromErrnoValue'.
+--
+data NoErrno = NoErrno deriving Eq
+
+instance IOErrno NoErrno where
+    showErrno _ = "no errno available"
+    fromErrnoValue _ = NoErrno
+    toErrnoValue _ = 0
+
 -- | IO exceptions informations.
 --
-data IOEInfo = IOEInfo
-    { ioeErrno :: Maybe Errno     -- ^ the errno
+data IOEInfo = forall errno. IOErrno errno => IOEInfo
+    { ioeErrno :: errno           -- ^ the errno
     , ioeDescription :: String    -- ^ description from strerror
     , ioeDevice :: String         -- ^ device info, such as filename, socket address, etc
     , ioeCallStack :: CallStack   -- ^ lightweight partial call-stack
     }
 
 instance Show IOEInfo where
-    show (IOEInfo merrno desc dev cstack) =
-         (maybe "" (\errno -> "{errno:" ++ (showErrno errno) ++ ", ") merrno) ++
-         "description:" ++ desc ++ ", " ++
-         "device:" ++ dev ++ ", " ++
-         "callstack:" ++ prettyCallStack cstack ++ "}"
+    show (IOEInfo errno desc dev cstack) =
+         "{errno:" ++ (showErrno errno) ++
+         ", description:" ++ desc ++
+         ", device:" ++ dev ++
+         ", callstack:" ++ prettyCallStack cstack ++ "}"
 
-showErrno :: Errno -> String
-showErrno e
-    | e == eOK             = "EOK"
-    | e == e2BIG           = "E2BIG"
-    | e == eACCES          = "EACCES"
-    | e == eADDRINUSE      = "EADDRINUSE"
-    | e == eADDRNOTAVAIL   = "EADDRNOTAVAIL"
-    | e == eADV            = "EADV"
-    | e == eAFNOSUPPORT    = "EAFNOSUPPORT"
-    | e == eAGAIN          = "EAGAIN"
-    | e == eALREADY        = "EALREADY"
-    | e == eBADF           = "EBADF"
-    | e == eBADMSG         = "EBADMSG"
-    | e == eBADRPC         = "EBADRPC"
-    | e == eBUSY           = "EBUSY"
-    | e == eCHILD          = "ECHILD"
-    | e == eCOMM           = "ECOMM"
-    | e == eCONNABORTED    = "ECONNABORTED"
-    | e == eCONNREFUSED    = "ECONNREFUSED"
-    | e == eCONNRESET      = "ECONNRESET"
-    | e == eDEADLK         = "EDEADLK"
-    | e == eDESTADDRREQ    = "EDESTADDRREQ"
-    | e == eDIRTY          = "EDIRTY"
-    | e == eDOM            = "EDOM"
-    | e == eDQUOT          = "EDQUOT"
-    | e == eEXIST          = "EEXIST"
-    | e == eFAULT          = "EFAULT"
-    | e == eFBIG           = "EFBIG"
-    | e == eFTYPE          = "EFTYPE"
-    | e == eHOSTDOWN       = "EHOSTDOWN"
-    | e == eHOSTUNREACH    = "EHOSTUNREACH"
-    | e == eIDRM           = "EIDRM"
-    | e == eILSEQ          = "EILSEQ"
-    | e == eINPROGRESS     = "EINPROGRESS"
-    | e == eINTR           = "EINTR"
-    | e == eINVAL          = "EINVAL"
-    | e == eIO             = "EIO"
-    | e == eISCONN         = "EISCONN"
-    | e == eISDIR          = "EISDIR"
-    | e == eLOOP           = "ELOOP"
-    | e == eMFILE          = "EMFILE"
-    | e == eMLINK          = "EMLINK"
-    | e == eMSGSIZE        = "EMSGSIZE"
-    | e == eMULTIHOP       = "EMULTIHOP"
-    | e == eNAMETOOLONG    = "ENAMETOOLONG"
-    | e == eNETDOWN        = "ENETDOWN"
-    | e == eNETRESET       = "ENETRESET"
-    | e == eNETUNREACH     = "ENETUNREACH"
-    | e == eNFILE          = "ENFILE"
-    | e == eNOBUFS         = "ENOBUFS"
-    | e == eNODATA         = "ENODATA"
-    | e == eNODEV          = "ENODEV"
-    | e == eNOENT          = "ENOENT"
-    | e == eNOEXEC         = "ENOEXEC"
-    | e == eNOLCK          = "ENOLCK"
-    | e == eNOLINK         = "ENOLINK"
-    | e == eNOMEM          = "ENOMEM"
-    | e == eNOMSG          = "ENOMSG"
-    | e == eNONET          = "ENONET"
-    | e == eNOPROTOOPT     = "ENOPROTOOPT"
-    | e == eNOSPC          = "ENOSPC"
-    | e == eNOSR           = "ENOSR"
-    | e == eNOSTR          = "ENOSTR"
-    | e == eNOSYS          = "ENOSYS"
-    | e == eNOTBLK         = "ENOTBLK"
-    | e == eNOTCONN        = "ENOTCONN"
-    | e == eNOTDIR         = "ENOTDIR"
-    | e == eNOTEMPTY       = "ENOTEMPTY"
-    | e == eNOTSOCK        = "ENOTSOCK"
-    | e == eNOTSUP         = "ENOTSUP"
-    | e == eNOTTY          = "ENOTTY"
-    | e == eNXIO           = "ENXIO"
-    | e == eOPNOTSUPP      = "EOPNOTSUPP"
-    | e == ePERM           = "EPERM"
-    | e == ePFNOSUPPORT    = "EPFNOSUPPORT"
-    | e == ePIPE           = "EPIPE"
-    | e == ePROCLIM        = "EPROCLIM"
-    | e == ePROCUNAVAIL    = "EPROCUNAVAIL"
-    | e == ePROGMISMATCH   = "EPROGMISMATCH"
-    | e == ePROGUNAVAIL    = "EPROGUNAVAIL"
-    | e == ePROTO          = "EPROTO"
-    | e == ePROTONOSUPPORT = "EPROTONOSUPPORT"
-    | e == ePROTOTYPE      = "EPROTOTYPE"
-    | e == eRANGE          = "ERANGE"
-    | e == eREMCHG         = "EREMCHG"
-    | e == eREMOTE         = "EREMOTE"
-    | e == eROFS           = "EROFS"
-    | e == eRPCMISMATCH    = "ERPCMISMATCH"
-    | e == eRREMOTE        = "ERREMOTE"
-    | e == eSHUTDOWN       = "ESHUTDOWN"
-    | e == eSOCKTNOSUPPORT = "ESOCKTNOSUPPORT"
-    | e == eSPIPE          = "ESPIPE"
-    | e == eSRCH           = "ESRCH"
-    | e == eSRMNT          = "ESRMNT"
-    | e == eSTALE          = "ESTALE"
-    | e == eTIME           = "ETIME"
-    | e == eTIMEDOUT       = "ETIMEDOUT"
-    | e == eTOOMANYREFS    = "ETOOMANYREFS"
-    | e == eTXTBSY         = "ETXTBSY"
-    | e == eUSERS          = "EUSERS"
-    | e == eWOULDBLOCK     = "EWOULDBLOCK"
-    | e == eXDEV           = "EXDEV"
+instance IOErrno Errno where
+    fromErrnoValue v = Errno v
+    toErrnoValue (Errno v) = v
+    showErrno e
+        | e == eOK             = "EOK"
+        | e == e2BIG           = "E2BIG"
+        | e == eACCES          = "EACCES"
+        | e == eADDRINUSE      = "EADDRINUSE"
+        | e == eADDRNOTAVAIL   = "EADDRNOTAVAIL"
+        | e == eADV            = "EADV"
+        | e == eAFNOSUPPORT    = "EAFNOSUPPORT"
+        | e == eAGAIN          = "EAGAIN"
+        | e == eALREADY        = "EADY"
+        | e == eBADF           = "EBADF"
+        | e == eBADMSG         = "EBADMSG"
+        | e == eBADRPC         = "EBADRPC"
+        | e == eBUSY           = "EBUSY"
+        | e == eCHILD          = "ECHILD"
+        | e == eCOMM           = "ECOMM"
+        | e == eCONNABORTED    = "ECONNABORTED"
+        | e == eCONNREFUSED    = "ECONNREFUSED"
+        | e == eCONNRESET      = "ECONNRESET"
+        | e == eDEADLK         = "EDEADLK"
+        | e == eDESTADDRREQ    = "EDESTADDRREQ"
+        | e == eDIRTY          = "EDIRTY"
+        | e == eDOM            = "EDOM"
+        | e == eDQUOT          = "EDQUOT"
+        | e == eEXIST          = "EEXIST"
+        | e == eFAULT          = "EFAULT"
+        | e == eFBIG           = "EFBIG"
+        | e == eFTYPE          = "EFTYPE"
+        | e == eHOSTDOWN       = "EHOSTDOWN"
+        | e == eHOSTUNREACH    = "EHOSTUNREACH"
+        | e == eIDRM           = "EIDRM"
+        | e == eILSEQ          = "EILSEQ"
+        | e == eINPROGRESS     = "EINPROGRESS"
+        | e == eINTR           = "EINTR"
+        | e == eINVAL          = "EINVAL"
+        | e == eIO             = "EIO"
+        | e == eISCONN         = "EISCONN"
+        | e == eISDIR          = "EISDIR"
+        | e == eLOOP           = "ELOOP"
+        | e == eMFILE          = "EMFILE"
+        | e == eMLINK          = "EMLINK"
+        | e == eMSGSIZE        = "EMSGSIZE"
+        | e == eMULTIHOP       = "EMULTIHOP"
+        | e == eNAMETOOLONG    = "ENAMETOOLONG"
+        | e == eNETDOWN        = "ENETDOWN"
+        | e == eNETRESET       = "ENETRESET"
+        | e == eNETUNREACH     = "ENETUNREACH"
+        | e == eNFILE          = "ENFILE"
+        | e == eNOBUFS         = "ENOBUFS"
+        | e == eNODATA         = "ENODATA"
+        | e == eNODEV          = "ENODEV"
+        | e == eNOENT          = "ENOENT"
+        | e == eNOEXEC         = "ENOEXEC"
+        | e == eNOLCK          = "ENOLCK"
+        | e == eNOLINK         = "ENOLINK"
+        | e == eNOMEM          = "ENOMEM"
+        | e == eNOMSG          = "ENOMSG"
+        | e == eNONET          = "ENONET"
+        | e == eNOPROTOOPT     = "ENOPROTOOPT"
+        | e == eNOSPC          = "ENOSPC"
+        | e == eNOSR           = "ENOSR"
+        | e == eNOSTR          = "ENOSTR"
+        | e == eNOSYS          = "ENOSYS"
+        | e == eNOTBLK         = "ENOTBLK"
+        | e == eNOTCONN        = "ENOTCONN"
+        | e == eNOTDIR         = "ENOTDIR"
+        | e == eNOTEMPTY       = "ENOTEMPTY"
+        | e == eNOTSOCK        = "ENOTSOCK"
+        | e == eNOTSUP         = "ENOTSUP"
+        | e == eNOTTY          = "ENOTTY"
+        | e == eNXIO           = "ENXIO"
+        | e == eOPNOTSUPP      = "EOPNOTSUPP"
+        | e == ePERM           = "EPERM"
+        | e == ePFNOSUPPORT    = "EPFNOSUPPORT"
+        | e == ePIPE           = "EPIPE"
+        | e == ePROCLIM        = "EPROCLIM"
+        | e == ePROCUNAVAIL    = "EPROCUNAVAIL"
+        | e == ePROGMISMATCH   = "EPROGMISMATCH"
+        | e == ePROGUNAVAIL    = "EPROGUNAVAIL"
+        | e == ePROTO          = "EPROTO"
+        | e == ePROTONOSUPPORT = "EPROTONOSUPPORT"
+        | e == ePROTOTYPE      = "EPROTOTYPE"
+        | e == eRANGE          = "ERANGE"
+        | e == eREMCHG         = "EREMCHG"
+        | e == eREMOTE         = "EREMOTE"
+        | e == eROFS           = "EROFS"
+        | e == eRPCMISMATCH    = "ERPCMISMATCH"
+        | e == eRREMOTE        = "ERREMOTE"
+        | e == eSHUTDOWN       = "ESHUTDOWN"
+        | e == eSOCKTNOSUPPORT = "ESOCKTNOSUPPORT"
+        | e == eSPIPE          = "ESPIPE"
+        | e == eSRCH           = "ESRCH"
+        | e == eSRMNT          = "ESRMNT"
+        | e == eSTALE          = "ESTALE"
+        | e == eTIME           = "ETIME"
+        | e == eTIMEDOUT       = "ETIMEDOUT"
+        | e == eTOOMANYREFS    = "ETOOMANYREFS"
+        | e == eTXTBSY         = "ETXTBSY"
+        | e == eUSERS          = "EUSERS"
+        | e == eWOULDBLOCK     = "EWOULDBLOCK"
+        | e == eXDEV           = "EXDEV"
 
 foreign import ccall unsafe "string.h" strerror :: Errno -> IO (Ptr CChar)

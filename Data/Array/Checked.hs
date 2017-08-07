@@ -15,6 +15,7 @@ This module provides exactly the same API with "Data.Array", but will throw an '
 module Data.Array.Checked
   ( -- * Arr typeclass re-export
     A.Arr
+  , RealWorld
     -- * Bound checked array operations
   , newArr
   , newArrWith
@@ -32,8 +33,6 @@ module Data.Array.Checked
   , cloneMutableArr
   , resizeMutableArr
   , shrinkMutableArr
-  -- * Bound checked primitive array operations
-  , copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr
   -- * No bound checked operations
   , A.unsafeFreezeArr
   , A.unsafeThawArr
@@ -51,8 +50,12 @@ module Data.Array.Checked
   , A.PrimArray(..)
   , A.MutablePrimArray(..)
   , A.newPinnedPrimArray, A.newAlignedPinnedPrimArray
-  , A.primArrayContents, A.mutablePrimArrayContents
-  , A.isPrimArrayPinned, A.isMutablePrimArrayPinned
+  -- * Bound checked primitive array operations
+  , copyPrimArrayToPtr, copyMutablePrimArrayToPtr, copyMutablePrimArrayFromPtr
+  -- * Unlifted array type
+  , A.UnliftedArray(..)
+  , A.MutableUnliftedArray(..)
+  , A.PrimUnlifted(..)
   -- * The 'ArrayException' type
   , ArrayException(..)
   ) where

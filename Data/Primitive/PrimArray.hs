@@ -59,7 +59,7 @@ module Data.Primitive.PrimArray (
 
   -- * Information
   sizeofPrimArray, sizeofMutablePrimArray, sameMutablePrimArray,
-  primArrayContents, mutablePrimArrayContents,
+  primArrayContents, mutablePrimArrayContents, withPrimArrayContents, withMutablePrimArrayContents,
   isPrimArrayPinned, isMutablePrimArrayPinned,
   samePrimArray,
 
@@ -88,6 +88,15 @@ import GHC.ST
 newtype PrimArray a = PrimArray ByteArray
     deriving (Typeable, Data)
 
+instance (Prim a, Eq a) => Eq (PrimArray a) where
+    paA@(PrimArray (ByteArray baA#)) == paB@(PrimArray (ByteArray baB#)) =
+        samePrimArray paA paB || (
+            let sizA = sizeofPrimArray paA
+                sizB = sizeofPrimArray paB
+            in sizA == sizB && c_memcmp baA# baB# (fromIntegral sizA) == 0)
+
+foreign import ccall unsafe "cstring.h memcmp" c_memcmp :: ByteArray# -> ByteArray# -> CInt -> CInt
+
 -- | Mutable primitive array tagged with element type @a@.
 --
 newtype MutablePrimArray s a = MutablePrimArray (MutableByteArray s)
@@ -115,20 +124,52 @@ newAlignedPinnedPrimArray
 newAlignedPinnedPrimArray n align = MutablePrimArray `fmap` newAlignedPinnedByteArray (n*siz) align
   where siz = sizeOf (undefined :: a)
 
--- | Yield a pointer to the array's data. This operation is only safe on
--- /pinned/ primitive arrays allocated by 'newAlignedPinnedPrimArray'.
+-- | Yield a pointer to the array's data.
+-- This operation is only safe on /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or
+-- 'newAlignedPinnedPrimArray', and you have to make sure the 'PrimArray' can outlive the 'Ptr'.
+--
 primArrayContents :: PrimArray a -> Ptr a
 {-# INLINE primArrayContents #-}
 primArrayContents (PrimArray ba) =
     let !(Addr addr#) = byteArrayContents ba in Ptr addr#
 
--- | Yield a pointer to the array's data. This operation is only safe on
--- /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or
--- 'newAlignedPinnedPrimArray'.
+-- | Yield a pointer to the array's data.
+--
+-- This operation is only safe on /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or
+-- 'newAlignedPinnedPrimArray'. and you have to make sure the 'PrimArray' can outlive the 'Ptr'.
+--
 mutablePrimArrayContents :: MutablePrimArray s a -> Ptr a
 {-# INLINE mutablePrimArrayContents #-}
 mutablePrimArrayContents (MutablePrimArray mba) =
     let !(Addr addr#) = mutableByteArrayContents mba in Ptr addr#
+
+-- | Yield a pointer to the array's data and do computation with it.
+--
+-- This operation is only safe on /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or
+-- 'newAlignedPinnedPrimArray'.
+--
+withPrimArrayContents :: PrimArray a -> (Ptr a -> IO b) -> IO b
+{-# INLINE withPrimArrayContents #-}
+withPrimArrayContents (PrimArray ba) f = do
+    let !(Addr addr#) = byteArrayContents ba
+        ptr = Ptr addr#
+    b <- f ptr
+    touch ba
+    return b
+
+-- | Yield a pointer to the array's data and do computation with it.
+--
+-- This operation is only safe on /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or
+-- 'newAlignedPinnedPrimArray'.
+--
+withMutablePrimArrayContents :: MutablePrimArray RealWorld a -> (Ptr a -> IO b) -> IO b
+{-# INLINE withMutablePrimArrayContents #-}
+withMutablePrimArrayContents (MutablePrimArray mba) f = do
+    let !(Addr addr#) = mutableByteArrayContents mba
+        ptr = Ptr addr#
+    b <- f ptr
+    touch mba
+    return b
 
 -- | Check if the two arrays refer to the same memory block.
 sameMutablePrimArray :: MutablePrimArray s a -> MutablePrimArray s a -> Bool

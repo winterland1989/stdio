@@ -29,6 +29,7 @@ library
                             Data.Vector
                             Data.Array
                             Data.Array.Checked
+                            Data.CBytes
                             Data.Parser
                             Data.Text
                             Data.Text.UTF8Codec
@@ -43,21 +44,39 @@ library
                             System.IO.Handle
                             System.LowResTimer
 
-    -- other-modules:       
+                            -- System.IO.TTY
+                            
+                            System.IO.UV.Base
+                            System.IO.UV.Exception
+                            System.IO.UV.Manager
+                            -- System.IO.TCP
+                            -- System.IO.Socket
+                            System.IO.Socket.Address
+                            System.IO.Socket.Base
+                            System.IO.Socket.Exception
+
+
+    -- other-modules:          System.IO.UV
     -- other-extensions:    
+    extra-libraries:         uv
     build-depends:          base >=4.7 && <5.0
                         ,   ghc-prim  >= 0.4
                         ,   primitive >= 0.6.2
+                        ,   network
                         ,   deepseq
                         ,   template-haskell 
                         ,   unboxed-ref >= 0.4
 
+    include-dirs:       include
+    includes:           hs_uv.h
+    install-includes:   hs_uv.h
     c-sources:          cbits/bytes.c
-                        cbits/win32.c
+                        cbits/hs_uv.c
 
 
     -- hs-source-dirs:      
     default-language:    Haskell2010
+    build-tools:         hsc2hs
     -- ghc-options:        -Wall
 
 benchmark bench

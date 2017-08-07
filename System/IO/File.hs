@@ -48,9 +48,10 @@ data File = File
     { fileFd :: {-# UNPACK #-} !CInt  -- ^ the file descriptor
     , filePath :: FilePath
     }
+instance Show File where
+    show (File _ path) = path
 
 instance Input File where
-    inputInfo (File _ path) = path
     readInput (File fd path) buf len = do
 #ifdef mingw32_HOST_OS
         if rtsSupportsBoundThreads
@@ -62,7 +63,7 @@ instance Input File where
             (l, rc) <- asyncRead (fromIntegral fd) 0 (fromIntegral len) buf
             if l == (-1)
             then
-                E.throwOtherErrno cstack path (Errno (fromIntegral rc))
+                E.throwStdErrno cstack path (Errno (fromIntegral rc))
             else return (fromIntegral l)
 #else
         fromIntegral `fmap` E.throwErrnoIfMinus1RetryMayBlock callStack path    -- In theory regular file shouldn't block
@@ -121,11 +122,11 @@ openFile path mode =
             if (r == -1)
             then do
                 c_close fd
-                E.throwIO $ E.ResourceBusy (E.IOEInfo Nothing "file is locked" path callStack)
+                E.throwIO $ E.ResourceBusy (E.IOEInfo E.NoErrno "file is locked" path callStack)
             else return (File fd path)
         else do
             c_close fd
-            E.throwIO $ E.InappropriateType (E.IOEInfo Nothing "not a regular file" path callStack)
+            E.throwIO $ E.InappropriateType (E.IOEInfo E.NoErrno "not a regular file" path callStack)
   where
 #ifdef mingw32_HOST_OS
     commonFLAG = o_BINARY .|. o_NONBLOCK .|. o_NOCTTY
@@ -194,6 +195,6 @@ getUniqueFileInfo _ dev ino = return (fromIntegral dev, fromIntegral ino)
 #endif
 
 #ifdef mingw32_HOST_OS
-foreign import ccall unsafe "get_unique_file_info"
+foreign import ccall unsafe "HsBase.h get_unique_file_info"
     c_getUniqueFileInfo :: CInt -> Ptr Word64 -> Ptr Word64 -> IO ()
 #endif

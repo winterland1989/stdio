@@ -12,10 +12,18 @@ install:
   - 7z x -bd cabal.zip
   - cabal --version
   - cabal update
+  # install libuv for mingw.
+  - curl -o libuv.tar.xz --insecure --progress-bar https://mirrors.tuna.tsinghua.edu.cn/msys2/mingw/x86_64/mingw-w64-x86_64-libuv-1.10.0-1-any.pkg.tar.xz
+  - 7z x -bd libuv.tar.xz
+  - 7z x -bd libuv.tar
+  - set EXTRA_DIR=%cd%
+  - set PATH=%cd%\mingw64\bin;%PATH%
+  - refreshenv
 
 build_script:
   - cabal install Cabal
   - cabal install --only-dependencies --enable-tests --enable-benchmarks
+  - cabal configure --enable-tests --enable-benchmarks --extra-lib-dirs=%EXTRA_DIR%\mingw64\lib --extra-include-dirs=%EXTRA_DIR%\mingw64\include
   - cabal build   # this builds all libraries and executables (including tests/benchmarks)
   - cabal test
   - cabal check
