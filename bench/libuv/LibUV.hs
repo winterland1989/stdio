@@ -17,9 +17,12 @@ main = do
     sock <- socket aF_INET sOCK_STREAM iPPROTO_TCP
     b <- bind sock $ SockAddrInet (fromIntegral 8888) inetAny
     l <- listen b 32768
+    cap <- getNumCapabilities
+    capCounter <- newCounter 0
     forever $ do
         sock' <- accept l
-        forkIO $ do
+        c <- atomicAddCounter_ capCounter 1
+        forkOn c $ do
             tcp <- newTCP sock'
             forever $ do
                 recvbuf <- mallocPlainForeignPtrBytes 2048

@@ -90,7 +90,7 @@ instance Output TCP where
                         fromIntegral `fmap` peekElemOff resultTable slot
                     return bufSiz
 
-            when (r < bufSiz && r /= -1)  $
+            when (r < bufSiz)  $
                 loop req (buf `plusPtr` r) (bufSiz - r)
 
 
@@ -214,7 +214,6 @@ accept s@(TCPListener sock addr wait) = do
 multiAccept :: [TCPListener addr]
 multiAccept = undefined
 #endif
-
 
 --------------------------------------------------------------------------------
 
