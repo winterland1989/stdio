@@ -4,12 +4,15 @@ stdio: standard input and output
 [![Linux Build Status](https://img.shields.io/travis/winterland1989/stdio/master.svg?label=Linux%20build)](https://travis-ci.org/winterland1989/stdio)
 [![Windows Build Status](https://img.shields.io/appveyor/ci/winterland1989/stdio/master.svg?label=Windows%20build)](https://ci.appveyor.com/project/winterland1989/stdio/branch/master)
 
+![stdio banner](./img/banner.png)
+
 This library is an effort trying to improve and standardize Haskell's IO interface with pack data types.
 
 + A faster/simpler vector type, which packed bytes type built on.
 + Binary and textual `Parser` and `Builder` for compact bytes.
 + A UTF-8 based text type for text process.
-+ A simpler `Handler` for IO, include file and network module.
++ ~~A simpler `Handler` for IO, include file and network module.~~
++ A new I/O system based on libuv.
 + A high performance approximated timer based on timing wheel.
 
 This package is designed from ground, with two goals: simplicity and performance, join in!
