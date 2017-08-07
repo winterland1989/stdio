@@ -46,6 +46,37 @@ throwSocketErrorIfMinus1Retry cstack dev f = do
     throwErrnoIfMinus1Retry cstack dev f
 #endif
     
+throwSocketErrorIfMinus1RetryMayBlock :: (Eq a, Num a) => CallStack -> String -> IO a -> IO a -> IO a
+throwSocketErrorIfMinus1RetryMayBlock cstack dev f fwait = do
+#if defined(WITH_WINSOCK)
+    r <- f
+    if (r == -1)
+    then do
+        rc <- wsa_getLastError
+        case rc of
+            #{const WSANOTINITIALISED} -> do
+                withSocketsDo (return ())
+                r <- act
+                if (r == -1)
+                then do
+                    rc <- wsa_getLastError
+                    throwWinSocketError (WSAErrno rc) cstack dev
+                else return r
+            #{const WSAEWOULDBLOCK} -> fwait
+            _ -> throwWinSocketError (WSAErrno rc) cstack dev
+    else return r
+#else
+    r <- f
+    if (r == -1)
+    then do
+        err <- getErrno
+        if err == eINTR 
+        then throwSocketErrorIfMinus1RetryMayBlock cstack dev f fwait
+        else if err == eWOULDBLOCK || err == eAGAIN
+            then fwait
+            else throwErrno cstack dev
+    else return r
+#endif
 
 #if defined(WITH_WINSOCK)
 -- | The standard errno handling already take care of socket error on unix systems, but on windows

@@ -44,64 +44,54 @@ closeTCP = undefined
 instance Input TCP where
     readInput tcp@(TCP handle slot readLock _ _ uvm fd) buf bufSiz = withMVar readLock $ \ _ -> do
 
-        r <- c_recv fd buf (fromIntegral bufSiz) 0
+        let dev = show tcp
 
-        if E.Errno r == E.eAGAIN || E.Errno r == E.eWOULDBLOCK      -- TODO, make cross-platform retry
-
-        then do
-
-            let dev = show tcp
-
-            (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
-            resultTable <- peekUVResultTable (uvmLoopData uvm)
-            pokeElemOff bufTable slot buf
-            pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-            pokeElemOff resultTable slot 0
-
-            E.throwUVErrorIfMinus callStack dev $
-                withUVManagerEnsureRunning uvm (hs_read_start handle)
-
-            btable <- readIORef $ uvmBlockTable uvm
-            takeMVar (indexArr btable slot)
-            r <- E.throwUVErrorIfMinus callStack dev $ 
-                fromIntegral `fmap` peekElemOff resultTable slot
-
-            return (fromIntegral r)
-        else return (fromIntegral r)
-
-instance Output TCP where
-    writeOutput tcp@(TCP handle _ _ reqLock slot uvm fd) buf bufSiz = withMVar reqLock $ \ req -> 
-        loop req buf bufSiz
-      where
-        loop req buf bufSiz = do 
-            r <- c_send fd buf (fromIntegral bufSiz) 0
-
-            if E.Errno r == E.eAGAIN || E.Errno r == E.eWOULDBLOCK      -- TODO, make cross-platform retry
-            then do
-        
-                let dev = show tcp
+        E.throwSocketErrorIfMinus1RetryMayBlock callStack dev
+            (fromIntegral `fmap` c_recv fd buf (fromIntegral bufSiz) 0) $ do
 
                 (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
                 resultTable <- peekUVResultTable (uvmLoopData uvm)
                 pokeElemOff bufTable slot buf
                 pokeElemOff bufSizTable slot (fromIntegral bufSiz)
                 pokeElemOff resultTable slot 0
-                
-                E.throwUVErrorIfMinus callStack  (show tcp) $ 
-                    withUVManagerEnsureRunning uvm (hs_write req handle)
+
+                E.throwUVErrorIfMinus callStack dev $
+                    withUVManagerEnsureRunning uvm (hs_read_start handle)
 
                 btable <- readIORef $ uvmBlockTable uvm
                 takeMVar (indexArr btable slot)
-
-                _ <- E.throwUVErrorIfMinus callStack dev $ 
+                r <- E.throwUVErrorIfMinus callStack dev $ 
                     fromIntegral `fmap` peekElemOff resultTable slot
-                return ()
 
-            else do
+                return (fromIntegral r)
 
-                let r' = fromIntegral r
-                when (r' < bufSiz && r' /= -1)  $
-                    loop req (buf `plusPtr` r') (bufSiz - r')
+instance Output TCP where
+    writeOutput tcp@(TCP handle _ _ reqLock slot uvm fd) buf bufSiz = withMVar reqLock $ \ req -> 
+        loop req buf bufSiz
+      where
+        loop req buf bufSiz = do 
+            let dev = show tcp
+            r <- E.throwSocketErrorIfMinus1RetryMayBlock callStack dev
+                (fromIntegral `fmap` c_send fd buf (fromIntegral bufSiz) 0) $ do
+
+                    (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
+                    resultTable <- peekUVResultTable (uvmLoopData uvm)
+                    pokeElemOff bufTable slot buf
+                    pokeElemOff bufSizTable slot (fromIntegral bufSiz)
+                    pokeElemOff resultTable slot 0
+                    
+                    E.throwUVErrorIfMinus callStack  (show tcp) $ 
+                        withUVManagerEnsureRunning uvm (hs_write req handle)
+
+                    btable <- readIORef $ uvmBlockTable uvm
+                    takeMVar (indexArr btable slot)
+
+                    _ <- E.throwUVErrorIfMinus callStack dev $ 
+                        fromIntegral `fmap` peekElemOff resultTable slot
+                    return bufSiz
+
+            when (r < bufSiz && r /= -1)  $
+                loop req (buf `plusPtr` r) (bufSiz - r)
 
 
 --------------------------------------------------------------------------------
