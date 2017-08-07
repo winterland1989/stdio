@@ -1,6 +1,6 @@
 #include <uv.h>
 #include <stdio.h>
-#include "uv_hs.h"
+#include "hs_uv.h"
 #include <assert.h>
 #include <stdlib.h>
 
@@ -19,26 +19,18 @@ uv_loop_t* hs_loop_init(size_t siz){
     size_t* event_queue = malloc(siz*sizeof(size_t));
     if (event_queue == NULL) return NULL;
 
-    char** read_buffer_table = malloc(siz*sizeof(char*));
-    if (read_buffer_table == NULL) return NULL;
+    char** buffer_table = malloc(siz*sizeof(char*));
+    if (buffer_table == NULL) return NULL;
 
-    size_t* read_buffer_size_table = malloc(siz*sizeof(size_t));
-    if (read_buffer_size_table == NULL) return NULL;
-
-    char** write_buffer_table = malloc(siz*sizeof(char*));
-    if (write_buffer_table == NULL) return NULL; 
-
-    size_t* write_buffer_size_table = malloc(siz*sizeof(size_t));
-    if (write_buffer_size_table == NULL) return NULL;
+    size_t* buffer_size_table = malloc(siz*sizeof(size_t));
+    if (buffer_size_table == NULL) return NULL;
 
     size_t* result_table = malloc(siz*sizeof(size_t));
     if (result_table == NULL) return NULL;
 
     loop_data->event_queue             = event_queue;
-    loop_data->read_buffer_table       = read_buffer_table;
-    loop_data->read_buffer_size_table  = read_buffer_size_table;
-    loop_data->write_buffer_table      = write_buffer_table;
-    loop_data->write_buffer_size_table = write_buffer_size_table;
+    loop_data->buffer_table            = buffer_table;
+    loop_data->buffer_size_table       = buffer_size_table;
     loop_data->result_table            = result_table;
 
     loop->data = loop_data;
@@ -51,22 +43,16 @@ uv_loop_t* hs_loop_resize(uv_loop_t* loop, size_t siz){
     hs_loop_data* loop_data = loop->data;
     size_t* event_queue_new             = realloc(loop_data->event_queue, (siz*sizeof(size_t)));
     if (event_queue_new == NULL) return NULL; 
-    char** read_buffer_table_new        = realloc(loop_data->read_buffer_table, (siz*sizeof(char*)));
-    if (read_buffer_table_new == NULL) return NULL; 
-    size_t* read_buffer_size_table_new  = realloc(loop_data->read_buffer_size_table, (siz*sizeof(size_t)));
-    if (read_buffer_size_table_new == NULL) return NULL; 
-    char** write_buffer_table_new       = realloc(loop_data->write_buffer_table, (siz*sizeof(char*)));
-    if (write_buffer_table_new == NULL) return NULL; 
-    size_t* write_buffer_size_table_new = realloc(loop_data->write_buffer_size_table, (siz*sizeof(size_t)));
-    if (write_buffer_size_table_new == NULL) return NULL; 
+    char** buffer_table_new       = realloc(loop_data->buffer_table, (siz*sizeof(char*)));
+    if (buffer_table_new == NULL) return NULL; 
+    size_t* buffer_size_new = realloc(loop_data->buffer_size_table, (siz*sizeof(size_t)));
+    if (buffer_size_new == NULL) return NULL; 
     size_t* result_table_new            = realloc(loop_data->result_table, (siz*sizeof(size_t)));
     if (result_table_new == NULL) return NULL; 
 
     loop_data->event_queue             = event_queue_new;
-    loop_data->read_buffer_table       = read_buffer_table_new;
-    loop_data->read_buffer_size_table  = read_buffer_size_table_new;
-    loop_data->write_buffer_table      = write_buffer_table_new;
-    loop_data->write_buffer_size_table = write_buffer_size_table_new;
+    loop_data->buffer_table            = buffer_table_new;
+    loop_data->buffer_size_table       = buffer_size_new;
     loop_data->result_table            = result_table_new;
 
     return loop;
@@ -79,10 +65,8 @@ void hs_loop_close(uv_loop_t* loop){
     hs_loop_data* loop_data = loop->data;
     free(loop);
     free(loop_data->event_queue);
-    free(loop_data->read_buffer_table);
-    free(loop_data->read_buffer_size_table);
-    free(loop_data->write_buffer_table);
-    free(loop_data->write_buffer_size_table);
+    free(loop_data->buffer_table);
+    free(loop_data->buffer_size_table);
     free(loop_data->result_table);
 }
 
@@ -106,8 +90,8 @@ void hs_handle_close(uv_handle_t* handle){
 void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
     size_t slot = (size_t)handle->data;
     hs_loop_data* loop_data = handle->loop->data;
-    buf->base = loop_data->read_buffer_table[slot];      // fetch buffer from buffer table
-    buf->len = loop_data->read_buffer_size_table[slot];  // we ignore suggested_size completely
+    buf->base = loop_data->buffer_table[slot];      // fetch buffer from buffer table
+    buf->len = loop_data->buffer_size_table[slot];  // we ignore suggested_size completely
 }
 
 void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
@@ -138,8 +122,8 @@ int hs_write(uv_stream_t* handle){
     size_t slot = (size_t)handle->data;
 
     req->data = handle->data;
-    buf->base = loop_data->write_buffer_table[slot];
-    buf->len = loop_data->write_buffer_size_table[slot];
+    buf->base = loop_data->buffer_table[slot];
+    buf->len = loop_data->buffer_size_table[slot];
 
     uv_write(req, handle, buf, 1, hs_write_cb);
 }

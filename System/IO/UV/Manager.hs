@@ -35,15 +35,15 @@ import System.IO.UV.Base
 --------------------------------------------------------------------------------
 
 data UVManager = UVManager
-    { uvmBlockTableR  :: IORef (Array (MVar ()))     -- a list to store blocked thread
-    , uvmBlockTableW  :: IORef (Array (MVar ()))     -- a list to store blocked thread
+    { uvmBlockTable  :: IORef (Array (MVar ()))     -- a array to store thread blocked on read or write
 
-    , uvmFreeSlotList :: MVar [Int]                -- we generate an unique range limited 'Int' /slot/
-                                                    -- for each uv_handle_t and uv_req_t
-
+    , uvmFreeSlotList :: MVar [Int]                 -- we generate two unique range limited 'Int' /slot/
+                                                    -- for each uv_handle_t(one for read and another for
+                                                    -- write).
+                                                    --
                                                     -- the slot is attached as the data field of
-                                                    -- c struct such as handle and request,
-                                                    -- thus it will be available to c callback
+                                                    -- c struct uv_handle_t, thus will be available
+                                                    -- to c callbacks, which are static functions:
                                                     -- inside callback we increase event counter and
                                                     -- push slot into event queue
                                                     --
@@ -51,20 +51,26 @@ data UVManager = UVManager
                                                     -- and the queue back, use the slots in the queue
                                                     -- as index to unblock thread in block queue
                                                     --
-                                                    -- during uv_run this lock shall be held!
-                                                    --
                                                     -- We also use this 'MVar' to do finalization of
                                                     -- I/O manager by attaching finalizers to it with 'mkWeakMVar'
 
-
-    , uvmLoopData    :: Ptr UVLoopData              -- This is the pointer to uv_loop_t's data field
-                                                    --
     , uvmLoop        :: Ptr UVLoop                  -- the uv loop refrerence
+    , uvmLoopData    :: Ptr UVLoopData              -- This is the pointer to uv_loop_t's data field
 
-    , uvmState       :: Counter                     -- 0: stopped, 1: running, -1: blocking
-    , uvmCap         :: Int                         -- the capability uv manager is runnig on
-    , uvmBlockTimer  :: Ptr UVHandle
-    , uvmBlockAsync  :: Ptr UVHandle
+    , uvmLoopLock    :: MVar ()                     -- during uv_run this lock shall be held!
+                                                    -- unlike epoll/ONESHOT, uv loop are NOT thread safe,
+                                                    -- thus we can only add new event when uv_run is not
+                                                    -- running, usually this is not a problem because
+                                                    -- unsafe FFI can't run concurrently on one
+                                                    -- capability, but with work stealing we'd better
+                                                    -- ask for this lock before calling any uv APIs.
+
+    , uvmIdleCounter :: Counter                     -- Counter for idle(no event) uv_runs, when counter
+                                                    -- reaches 10, we start to increase waiting between
+                                                    -- uv_run, until delay reach 8 milliseconds
+
+    , uvmRunningLock :: MVar ()                     -- when manager is not running, it would be blocked
+                                                    -- by this lock, use 'tryPutMVar' to wake up manager
     }
 
 initTableSize :: Int
@@ -121,9 +127,24 @@ newUVManager siz cap = do
 
     return (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmState cap blockTimer blockAsync)
 
-wakeUpBlockingUVManager :: UVManager -> IO ()
-wakeUpBlockingUVManager uvm = do
-    E.throwUVErrorIfMinus $ uv_async_send (uvmBlockAsync uvm)
+-- | Start the uv loop on given capability
+--
+-- The thread will never block unlike the io manager in Mio, we take the golang poller's approach:
+-- simply run non-block poll with a bound increasing delay, the reason is two-fold:
+--
+-- * libuv's APIs is generally not thread safe: you shouldn't add or remove events during uv_run.
+-- Which makes safe blocking poll inconvenient, because doing that will requrie we have some thread
+-- safe notification, and it's too complex.
+--
+-- * GHC thread is scheduled in magnitude of milliseconds, so the latency of polling, doing safe FFI
+-- will save CPU when load is not very high, e.g. constantly
+--
+startUVManager :: UVManager -> Int -> IO ()
+startUVManager uvm cap = do
+  where
+    loop block step = do
+        (more, c) <- step block
+
 
 ensureUVMangerRunning :: HasCallStack => UVManager -> IO ()
 ensureUVMangerRunning uvm = do
@@ -135,10 +156,8 @@ ensureUVMangerRunning uvm = do
         return ()
   where
     loop block step = do
-        yield
         (more, c) <- step block
-        if more then loop (c == 0) step
-                else writeIORef (uvmRunning uvm) False
+
 
     step :: UVManager -> Bool -> IO (Bool, CSize)
     step (UVManager iBlockTableRRef iBlockTableWRef freeSlotList uvLoopData uvLoop uvmRunning uvmBlocking _ blockTimer _) block = do
@@ -150,11 +169,6 @@ ensureUVMangerRunning uvm = do
             (c, q) <- peekEventQueue uvLoopData
             r <- if block
                 then do
-                    unless rtsSupportsBoundThreads
-                        (void . E.throwUVErrorIfMinus callStack "start timer to unblock uv loop for non-threaded RTS" $
-                            hs_timer_start_stop_loop blockTimer 1)
-                    E.throwUVErrorIfMinus callStack "blocking uv loop on threaded RTS" $ do
-                            uv_run_safe uvLoop uV_RUN_ONCE
                 else E.throwUVErrorIfMinus callStack "non-blocking uv loop on threaded RTS" $
                         uv_run uvLoop uV_RUN_NOWAIT
             -- TODO, handle exception

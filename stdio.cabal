@@ -68,10 +68,10 @@ library
                         ,   unboxed-ref >= 0.4
 
     include-dirs:       include
-    includes:           uv_hs.h
-    install-includes:   uv_hs.h
+    includes:           hs_uv.h
+    install-includes:   hs_uv.h
     c-sources:          cbits/bytes.c
-                        cbits/uv_hs.c
+                        cbits/hs_uv.c
 
 
     -- hs-source-dirs:      
