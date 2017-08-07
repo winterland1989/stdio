@@ -8,16 +8,14 @@ import Foreign.C.String
 import Data.Typeable
 import GHC.Stack.Compat
 import Control.Monad
+import Network (withSocketsDo)
 
 #include "HsNet.h"
 
-
-#if defined(i386_HOST_ARCH)
-# define WINDOWS_CCONV stdcall
-#elif defined(x86_64_HOST_ARCH)
-# define WINDOWS_CCONV ccall
+#if defined(i386_HOST_ARCH) && defined(mingw32_HOST_OS)
+#let CALLCONV = "stdcall"
 #else
-# error Unknown mingw32 arch
+#let CALLCONV = "ccall"
 #endif
 
 throwSocketErrorIfMinus1Retry_ :: CallStack -> String -> IO CInt -> IO ()
@@ -84,18 +82,18 @@ throwSocketErrorIfMinus1RetryMayBlock cstack dev f fwait = do
 --
 newtype WSAErrno = WSAErrno CInt deriving (Typeable, Eq, Ord)
 
-instance IOErrno WSAErrno
+instance IOErrno WSAErrno where
     showErrno = showWSAErrno
     fromErrnoValue v = WSAErrno v
     toErrnoValue (WSAErrno v) = v
 
-foreign import #{WINDOWS_CCONV} unsafe "WSAGetLastError" wsa_getLastError :: IO CInt
-foreign import ccall unsafe "getWSErrorDescr" c_getWSError :: CInt -> IO (Ptr CChar)
+foreign import #{CALLCONV} unsafe "WSAGetLastError" wsa_getLastError :: IO CInt
+foreign import ccall unsafe "getWSErrorDescr" c_getWSError :: WSAErrno -> IO CString
 
 throwWinSocketError :: WSAErrno -> CallStack -> String -> IO ()
 throwWinSocketError errno@(WSAErrno e) cstack dev = do
     desc <- c_getWSError e >>= peekCString
-    let info IOEInfo = IOEInfo errno desc dev cstack
+    let info = IOEInfo errno desc dev cstack
     case () of
         _                                                                              
             | errno == wSAEINTR           -> throwIO (Interrupted             info) -- TODO :: rework the mapping
@@ -228,7 +226,6 @@ throwAddrErrorIfNonZero cstack dev f = do
                 | errno == eAI_NONAME       -> throwIO (NoSuchThing info)
                 | errno == eAI_SERVICE      -> throwIO (UnsupportedOperation info)
                 | errno == eAI_SOCKTYPE     -> throwIO (UnsupportedOperation info)
-                | errno == eAI_STSTEM       -> throwIO (SystemError info)
 
 showAddrIntoErrno :: AddrInfoErrno -> String
 showAddrIntoErrno errno
@@ -240,7 +237,6 @@ showAddrIntoErrno errno
     | errno == eAI_NONAME       = "EAI_NONAME"
     | errno == eAI_SERVICE      = "EAI_SERVICE"
     | errno == eAI_SOCKTYPE     = "EAI_SOCKTYPE"
-    | errno == eAI_STSTEM       = "EAI_SYSTEM"
 
 -- | > AddrInfoErrno "Temporary failure in name resolution"
 eAI_AGAIN    :: AddrInfoErrno
@@ -273,10 +269,6 @@ eAI_SERVICE   = AddrInfoErrno (#const EAI_SERVICE)
 -- | > AddrInfoErrno "ai_socktype not supported"
 eAI_SOCKTYPE :: AddrInfoErrno
 eAI_SOCKTYPE  = AddrInfoErrno (#const EAI_SOCKTYPE)
-
--- | > AddrInfoErrno "System error"
-eAI_STSTEM   :: AddrInfoErrno
-eAI_STSTEM    = AddrInfoErrno (#const EAI_SYSTEM)
 
 gai_strerror :: CInt -> IO String
 #ifdef HAVE_GAI_STRERROR
