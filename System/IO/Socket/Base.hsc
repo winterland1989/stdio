@@ -119,9 +119,6 @@ newTCP (SocketFd fd) = do
     readLock <- newMVar ()
     reqLock <- newMVar req
 
-    _ <- mkWeakMVar readLock (hs_handle_close handle)
-    _ <- mkWeakMVar reqLock (hs_req_free req)
-
     return (TCP handle slotR readLock reqLock slotW uvm)
 
 -- Binding a socket

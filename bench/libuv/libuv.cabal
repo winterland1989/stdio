@@ -17,11 +17,14 @@ cabal-version:       >=1.10
 
 executable libuv
   main-is:             LibUV.hs
-  other-modules:        System.IO.UV.FFI
+  other-modules:        System.IO.UV.Base
                         System.IO.UV.Exception
+                        System.IO.Socket.Base
+                        System.IO.Socket.Exception
+                        System.IO.Socket.Address
   -- other-extensions:    
   c-sources:          ../../cbits/bytes.c
-                      ../../cbits/uv_hs.c
+                      ../../cbits/hs_uv.c
   extra-libraries:         uv
   build-depends:       base >=4.9 && <5.0
                     ,   stm
@@ -32,9 +35,10 @@ executable libuv
                     ,   template-haskell
                     ,   deepseq
                     ,   async
+                    ,   bytestring
 
   include-dirs:       ../../include
-  includes:           uv_hs.h
+  includes:           hs_uv.h
   hs-source-dirs:       ./
                         ../../
   ghc-options:         -O2 -threaded -eventlog -with-rtsopts=-N4

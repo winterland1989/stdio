@@ -4,16 +4,33 @@ module Main where
 
 import Network.Socket hiding (send, recv)
 import Network.Socket.ByteString
-import Control.Concurrent.Async
+import Control.Concurrent
+import Control.Monad
 import qualified Data.ByteString as B
 
 main :: IO ()
 main = do
-    replicateConcurrently_ 200 $ do
-        sock <- socket AF_INET Stream defaultProtocol
-        connect sock $ SockAddrInet 80 (tupleToHostAddress (220,181,112,244))
-        send sock "GET / HTTP/1.1\r\n"
-        send sock "Host: www.baidu.com\r\n"
-        send sock "\r\n"
-        recv sock 4096
+    sock <- socket AF_INET Stream defaultProtocol
+    bind sock $ SockAddrInet 8888 iNADDR_ANY
+    listen sock 32768
+    forever $ do
+        (sock' , addr) <- accept sock
+        forkIO $ do
+            _ <- recv sock' 2048
+            sendAll sock'
+                "HTTP/1.1 200 OK\r\n\
+                \Content-Type: text/html; charset=UTF-8\r\n\
+                \Content-Length: 130\r\n\
+                \Connection: close\r\n\
+                \\r\n\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!\
+                \hello, world!"
 
