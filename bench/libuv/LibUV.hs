@@ -33,21 +33,9 @@ main = do
     sendbuf =
         "HTTP/1.1 200 OK\r\n\
         \Content-Type: text/html; charset=UTF-8\r\n\
-        \Content-Length: 130\r\n\
+        \Content-Length: 10000\r\n\
         \Connection: close\r\n\
-        \\r\n\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!\
-        \hello, world!"
-
-
+        \\r\n" `B.append` (B.replicate 10000 48)
 
 
 

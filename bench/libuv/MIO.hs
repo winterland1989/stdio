@@ -17,20 +17,12 @@ main = do
         (sock' , addr) <- accept sock
         forkIO $ do
             _ <- recv sock' 2048
-            sendAll sock'
-                "HTTP/1.1 200 OK\r\n\
-                \Content-Type: text/html; charset=UTF-8\r\n\
-                \Content-Length: 130\r\n\
-                \Connection: close\r\n\
-                \\r\n\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!\
-                \hello, world!"
+            sendAll sock' sendbuf
+  where
+    sendbuf =
+        "HTTP/1.1 200 OK\r\n\
+        \Content-Type: text/html; charset=UTF-8\r\n\
+        \Content-Length: 10000\r\n\
+        \Connection: close\r\n\
+        \\r\n" `B.append` (B.replicate 10000 48)
 
