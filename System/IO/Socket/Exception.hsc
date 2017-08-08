@@ -238,6 +238,14 @@ showAddrIntoErrno errno
     | errno == eAI_SERVICE      = "EAI_SERVICE"
     | errno == eAI_SOCKTYPE     = "EAI_SOCKTYPE"
 
+
+eAI_ADDRFAMILY :: AddrInfoErrno
+#if defined(eAI_ADDRFAMILY)
+eAI_ADDRFAMILY = AddrInfoErrno (#const EAI_ADDRFAMILY)
+#else
+eAI_ADDRFAMILY = AddrInfoErrno 0    -- windows doesn't have this
+#endif
+
 -- | > AddrInfoErrno "Temporary failure in name resolution"
 eAI_AGAIN    :: AddrInfoErrno
 eAI_AGAIN     = AddrInfoErrno (#const EAI_AGAIN)
@@ -269,6 +277,14 @@ eAI_SERVICE   = AddrInfoErrno (#const EAI_SERVICE)
 -- | > AddrInfoErrno "ai_socktype not supported"
 eAI_SOCKTYPE :: AddrInfoErrno
 eAI_SOCKTYPE  = AddrInfoErrno (#const EAI_SOCKTYPE)
+
+-- | > AddrInfoErrno "System error"
+eAI_STSTEM   :: AddrInfoErrno
+#if defined(EAI_SYSTEM) 
+eAI_STSTEM    = AddrInfoErrno (#const EAI_SYSTEM)
+#else
+eAI_STSTEM    = AddrInfoErrno 0     -- windows doesn't have this
+#endif
 
 gai_strerror :: CInt -> IO String
 #ifdef HAVE_GAI_STRERROR
