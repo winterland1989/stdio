@@ -157,7 +157,7 @@ int hs_write(uv_write_t* req, uv_stream_t* handle){
  * referenes:   https://github.com/libuv/libuv/issues/397
  *              https://github.com/libuv/libuv/pull/1150
  */
-#if defined(mingw32_HOST_OS)
+#if defined(_WIN32)
 #define UV_HANDLE_READING                       0x00000100
 #define UV_HANDLE_BOUND                         0x00000200
 #define UV_HANDLE_LISTENING                     0x00000800

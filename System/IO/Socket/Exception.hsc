@@ -32,7 +32,7 @@ throwSocketErrorIfMinus1Retry cstack dev f = do
         case rc of
             #{const WSANOTINITIALISED} -> do
                 withSocketsDo (return ())
-                r <- act
+                r <- f
                 if (r == -1)
                 then do
                     rc <- wsa_getLastError
@@ -54,7 +54,7 @@ throwSocketErrorIfMinus1RetryMayBlock cstack dev f fwait = do
         case rc of
             #{const WSANOTINITIALISED} -> do
                 withSocketsDo (return ())
-                r <- act
+                r <- f
                 if (r == -1)
                 then do
                     rc <- wsa_getLastError
@@ -80,19 +80,19 @@ throwSocketErrorIfMinus1RetryMayBlock cstack dev f fwait = do
 -- | The standard errno handling already take care of socket error on unix systems, but on windows
 -- The errno is different, so does the errno handling.
 --
-newtype WSAErrno = WSAErrno CInt deriving (Typeable, Eq, Ord)
+newtype WSAErrno = WSAErrno CInt deriving (Show, Typeable, Eq, Ord)
 
 instance IOErrno WSAErrno where
-    showErrno = showWSAErrno
+    showErrno = show
     fromErrnoValue v = WSAErrno v
     toErrnoValue (WSAErrno v) = v
 
 foreign import #{CALLCONV} unsafe "WSAGetLastError" wsa_getLastError :: IO CInt
 foreign import ccall unsafe "getWSErrorDescr" c_getWSError :: WSAErrno -> IO CString
 
-throwWinSocketError :: WSAErrno -> CallStack -> String -> IO ()
-throwWinSocketError errno@(WSAErrno e) cstack dev = do
-    desc <- c_getWSError e >>= peekCString
+throwWinSocketError :: WSAErrno -> CallStack -> String -> IO a
+throwWinSocketError errno cstack dev = do
+    desc <- c_getWSError errno >>= peekCString
     let info = IOEInfo errno desc dev cstack
     case () of
         _                                                                              

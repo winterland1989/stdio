@@ -38,9 +38,9 @@ main = do
     sendbuf =
         "HTTP/1.1 200 OK\r\n\
         \Content-Type: text/html; charset=UTF-8\r\n\
-        \Content-Length: 5000\r\n\
+        \Content-Length: 50000\r\n\
         \Connection: Keep-Alive\r\n\
-        \\r\n" `B.append` (B.replicate 5000 48)
+        \\r\n" `B.append` (B.replicate 50000 48)
 
 
 

@@ -190,15 +190,6 @@ listen s@(BoundSocket sock addr) backlog = do
 
 -- | Accept a connection with 'TCPListener'.
 --
--- This function will start event based accept loop on up to N captibilities, automatically start worker
--- thread using given callback and distrubite them on to all captibilities.
---
--- This function leverage the fact that multiple event loop can improve accepting rate but this will suffer 
--- from multiple wakeups, aka. @thundering herd@ problem. So it's recommand to limit the N parameter.
-#if defined(SO_REUSEPORT) && defined(linux_HOST_OS)
--- On system support @SO_REUSEPORT@ and kernel load balance(e.g. linux > 3.9), please use 'multiAccept' to
--- avoid this problem without losing multithread accept.
-#endif
 --
 accept :: HasCallStack
        => TCPListener addr           -- queue socket
@@ -207,10 +198,22 @@ accept s@(TCPListener sock addr wait) = do
     addr <- newEmptyRawSockAddr
     withSockAddr addr $ \ addrPtr ->
         with (fromIntegral $ sockAddrSize addr) $ \ lenPtr -> do
-            SocketFd `fmap` E.throwErrnoIfMinus1RetryMayBlock callStack (show addr)
-                (c_accept sock addrPtr lenPtr) wait
+            SocketFd `fmap` E.throwSocketErrorIfMinus1RetryMayBlock callStack (show addr)
+                (c_accept sock addrPtr lenPtr) 
+                (wait >> c_accept sock addrPtr lenPtr)
+
 
 #if defined(SO_REUSEPORT) && defined(linux_HOST_OS)
+-- This function will start event based accept loop on up to N captibilities, automatically start worker
+-- thread using given callback and distrubite them on to all captibilities.
+--
+-- This function leverage the fact that multiple event loop can improve accepting rate but this will suffer 
+-- from multiple wakeups, aka. @thundering herd@ problem. So it's recommand to limit the N parameter.
+#if defined(SO_REUSEPORT) && defined(linux_HOST_OS)
+-- On system support @SO_REUSEPORT@ and kernel load balance(e.g. linux > 3.9), please use 'multiAccept' to
+-- avoid this problem without losing multithread accept.
+--
+#endif
 multiAccept :: [TCPListener addr]
 multiAccept = undefined
 #endif
