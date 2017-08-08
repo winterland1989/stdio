@@ -151,7 +151,7 @@ startUVManager uvm = do
             e <- step uvm
             ic <- readIORefU idleCounter
             if (e == 0)                     -- bump the idle counter if no events, there's no need to do atomic-ops
-            then when (ic < 16) $ writeIORefU idleCounter (ic+1)
+            then when (ic < 205) $ writeIORefU idleCounter (ic+1)
             else writeIORefU idleCounter 0
 
             return (True, True)
@@ -163,9 +163,9 @@ startUVManager uvm = do
     when continue $ do
         let idleCounter = uvmIdleCounter uvm
         ic <- readIORefU idleCounter
-        if (ic >= 2)                    -- we yield 2 times, then start to delay 1ms, 2ms ... up to 8 ms.
-        then threadDelay $ (ic `quot` 2) * 1000
-        else yield
+        if (ic > 200)                  -- we yield 200 times, then start to delay 1ms, 2ms ... up to 5 ms.
+        then threadDelay $ (ic - 200) * 1000
+        else yield                     -- it's important that we yeild enough time, CPU vs performance trade off here
         startUVManager uvm
 
   where
@@ -185,7 +185,6 @@ startUVManager uvm = do
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)
                 void $ tryPutMVar lock ()
-
             return c
 
 allocSlot :: UVManager -> IO Int
