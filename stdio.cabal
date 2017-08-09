@@ -40,19 +40,19 @@ library
                             GHC.Stack.Compat
 
                             System.IO.Exception 
-                            System.IO.File
+                            -- System.IO.File
                             System.IO.Handle
                             System.LowResTimer
 
-                            -- System.IO.TTY
+                            System.IO.TTY
                             
                             System.IO.UV.Base
                             System.IO.UV.Exception
                             System.IO.UV.Manager
                             -- System.IO.TCP
                             -- System.IO.Socket
-                            System.IO.Socket.Address
-                            System.IO.Socket.Base
+                             -- System.IO.Socket.Address
+                             -- System.IO.Socket.Base
                             System.IO.Socket.Exception
 
 

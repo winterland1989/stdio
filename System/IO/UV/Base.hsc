@@ -15,11 +15,6 @@ import Foreign.C
 newtype UVSlot = UVSlot CSize 
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
---------------------------------------------------------------------------------
--- uv errno
-
-foreign import ccall unsafe uv_strerror :: CInt -> IO CString
-foreign import ccall unsafe uv_err_name :: CInt -> IO CString
 
 --------------------------------------------------------------------------------
 

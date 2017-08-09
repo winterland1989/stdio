@@ -154,7 +154,7 @@ fromCStringThrow :: HasCallStack
 fromCStringThrow free cstring = do
     if cstring == nullPtr
     then E.throwIO (E.InvalidArgument
-        (E.IOEInfo E.NoErrno "unexpected null pointer" "constructing a CBytes" callStack))
+        (E.IOEInfo "" "unexpected null pointer" "constructing a CBytes" callStack))
     else do
         ref <- newIORef ()
         _ <- mkWeakIORef ref (free cstring)
