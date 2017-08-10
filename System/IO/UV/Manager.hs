@@ -174,12 +174,7 @@ withUVManagerEnsureRunning uvm f = do
 
 -- | Start the uv loop, the loop is stopped when there're not active I/O requests.
 --
--- Inside loop, we never do block waiting like the io manager in Mio does,
--- we take the golang net poller's approach instead:
--- simply run non-block poll with a bound increasing delay, the reason is that libuv's APIs is
--- generally not thread safe: you shouldn't add or remove events during uv_run,
--- which makes safe blocking poll problematic, because doing that will requrie us to do some thread
--- safe notification, and that's too complex.
+-- Inside loop, we do either blocking wait or non-blocking wait depending on idle counter.
 --
 startUVManager :: UVManager -> IO ()
 startUVManager uvm = do
@@ -191,7 +186,7 @@ startUVManager uvm = do
             e <- step uvm False
             ic <- readIORefU idleCounter
             if (e == 0)                     -- bump the idle counter if no events, there's no need to do atomic-ops
-            then when (ic < 25) $ writeIORefU idleCounter (ic+1)
+            then when (ic < 4) $ writeIORefU idleCounter (ic+1)
             else writeIORefU idleCounter 0
 
             return (UVRunning, True)
@@ -203,13 +198,13 @@ startUVManager uvm = do
     when continue $ do
         let idleCounter = uvmIdleCounter uvm
         ic <- readIORefU idleCounter
-        if (ic > 20)                  -- we yield 20 times, then start a blocking uv_run
+        if (ic > 4)                  -- we yield 5 times, then start a blocking wait if still no events coming
         then do
-            _ <- swapMVar (uvmRunningLock uvm) UVBlocking
+            _ <- swapMVar (uvmRunningLock uvm) UVBlocking   -- after changing this, other thread can wake up us
             step uvm True
             _ <- swapMVar (uvmRunningLock uvm) UVRunning
             writeIORefU idleCounter 0
-        else yield                     -- it's important that we yeild enough time, CPU vs performance trade off here
+        else yield
         startUVManager uvm
 
   where
