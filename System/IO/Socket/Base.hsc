@@ -121,13 +121,13 @@ newTCP (SocketFd fd) = do
 
     let dev = "tcp FD:" ++ show fd
 
-    (handle, req) <- withUVManager uvm $ \ loop -> do
-        handle <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_TCP
-        req <- E.throwOOMIfNull callStack dev $ hs_req_init uV_WRITE
-        E.throwUVErrorIfMinus callStack dev $ uv_tcp_init loop handle
-        return (handle, req)
+    handle <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_TCP
+    req <- E.throwOOMIfNull callStack dev $ hs_req_init uV_WRITE
 
-    E.throwUVErrorIfMinus callStack dev $ uv_tcp_open handle fd     -- It's OK to call this outside of uv lock
+    withUVManager uvm $ \ loop -> do
+        E.throwUVErrorIfMinus callStack dev $ uv_tcp_init loop handle
+        E.throwUVErrorIfMinus callStack dev $ uv_tcp_open handle fd
+
     poke_uv_handle_data handle (fromIntegral slotR)
     poke_uv_req_data req (fromIntegral slotW)
 
