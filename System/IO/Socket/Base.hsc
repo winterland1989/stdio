@@ -60,8 +60,7 @@ instance Input TCP where
 
                 btable <- readIORef $ uvmBlockTable uvm
                 takeMVar (indexArr btable slot)
-                r <- E.throwUVErrorIfMinus callStack dev $ 
-                    fromIntegral `fmap` peekElemOff resultTable slot
+                r <- fromIntegral `fmap` peekElemOff resultTable slot -- TODO. handle errno
 
                 return (fromIntegral r)
 
