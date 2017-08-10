@@ -42,7 +42,7 @@ data UVRunningState
   deriving (Show, Eq, Ord)
 
 data UVManager = UVManager
-    { uvmBlockTable  :: IORef (Array (MVar ()))     -- a array to store thread blocked on read or write
+    { uvmBlockTable  :: IORef (UnliftedArray (MVar ()))     -- a array to store thread blocked on read or write
 
     , uvmFreeSlotList :: MVar [Int]                 -- we generate two unique range limited 'Int' /slot/
                                                     -- for each uv_handle_t(one for read and another for
@@ -201,10 +201,11 @@ startUVManager uvm = do
         if (ic >= 50)                   -- we yield 50 times, then start a blocking wait if still no events coming
         then do
             _ <- swapMVar (uvmRunningLock uvm) UVBlocking   -- after changing this, other thread can wake up us
-            step uvm True
-            _ <- swapMVar (uvmRunningLock uvm) UVRunning
-            writeIORefU idleCounter 0
-        else yield                      -- it's important that we yeild enough time, CPU vs performance trade off here
+            step uvm True                                   -- by send async handler, and it's thread safe
+            _ <- swapMVar (uvmRunningLock uvm) UVRunning    -- it's OK to send multiple time, libuv only calls
+            writeIORefU idleCounter 0                       -- async callback once.
+            yield       -- we yield here, to give other thread a chance to register new event
+        else yield      -- it's important that we yeild enough time, CPU vs performance trade off here
         startUVManager uvm
 
   where
