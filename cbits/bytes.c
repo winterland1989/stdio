@@ -1,8 +1,6 @@
-#include <stdio.h>
-#include <string.h>
-#include "Rts.h"
+#include "hs_bytes.h"
 
-int _memcmp(char *a, 
+int hs_memcmp(char *a, 
             size_t aoff,
             char *b, 
             size_t boff,
@@ -12,7 +10,7 @@ int _memcmp(char *a,
     return memcmp(a, b, n);
 }
 
-size_t _memchr(char *a, 
+size_t hs_memchr(char *a, 
             size_t aoff,
             char b, 
             size_t n) {

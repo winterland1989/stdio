@@ -69,7 +69,9 @@ library
 
     include-dirs:       include
     includes:           hs_uv.h
+                        hs_bytes.h
     install-includes:   hs_uv.h
+                        hs_bytes.h
     c-sources:          cbits/bytes.c
                         cbits/hs_uv.c
 

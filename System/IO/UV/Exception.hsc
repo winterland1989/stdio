@@ -29,6 +29,7 @@ instance IOReturn UVReturn where
 
 foreign import ccall unsafe uv_strerror :: IOErrno UVReturn -> IO CString
 foreign import ccall unsafe uv_err_name :: IOErrno UVReturn -> IO CString
+foreign import ccall unsafe uv_translate_sys_error :: CInt -> IO (IOErrno UVReturn)
 
 --------------------------------------------------------------------------------
 
