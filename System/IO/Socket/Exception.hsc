@@ -205,34 +205,37 @@ wSANOTINITIALISED  = WSAErrno (#const WSANOTINITIALISED  )
 
 --------------------------------------------------------------------------------
 
-newtype AddrInfoReturn = AddrInfoReturn CInt 
+newtype AddrInfoReturn a = AddrInfoReturn a
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
 instance IOReturn AddrInfoReturn where
     newtype IOErrno AddrInfoReturn = AddrInfoErrno CInt
         deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
     isError (AddrInfoReturn r) = r /= 0
-    getErrno (AddrInfoReturn r) =  (AddrInfoErrno r)
+    isInterrupt _ = False
+    isBlock _ = False
+    getReturn (AddrInfoReturn r) = r
+    getErrno (AddrInfoReturn r) =  return (AddrInfoErrno (fromIntegral r))
     nameErrno = return . nameAddrInfoErrno
-    descErrno e = gai_strerror
+    descErrno e = gai_strerror e
     throwErrno = throwAddrInfoError
 
-gai_strerror :: CInt -> IO String
+gai_strerror :: IOErrno AddrInfoReturn -> IO String
 #ifdef HAVE_GAI_STRERROR
 gai_strerror n = c_gai_strerror n >>= peekCString
 
-foreign import ccall safe "gai_strerror" c_gai_strerror :: CInt -> IO CString
+foreign import ccall safe "gai_strerror" c_gai_strerror :: IOErrno AddrInfoReturn -> IO CString
 #else
 gai_strerror _ = return "gai_strerror not supported on your platform"
 #endif
 
 -- | Wrapper `getAddrInfo/getNameInfo` functions and throw appropriate exceptions.
 -- 
-throwAddrInfoError :: HasCallStack => IOErrno AddrInfoReturn -> String -> IO ()
+throwAddrInfoError :: HasCallStack => IOErrno AddrInfoReturn -> String -> IO a
 throwAddrInfoError e dev = do
     name <- nameErrno e
     desc <- descErrno e
-    let info = IOEInfo errno desc dev cstack
+    let info = IOEInfo name desc dev callStack
     case () of 
         _
             | e == eAI_ADDRFAMILY   -> throwIO (UnsupportedOperation info)

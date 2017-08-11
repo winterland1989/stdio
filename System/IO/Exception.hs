@@ -67,8 +67,11 @@ module System.IO.Exception
   , throwOOMIfNull
     -- * Default errno type
   , IOReturn(..)
+  , throwAllError
+  , retryInterrupt
+  , retryInterruptWaitBlock
+   -- * unix return and errno
   , UnixReturn(..)
-   -- * standard errno
   , eOK, e2BIG, eACCES, eADDRINUSE, eADDRNOTAVAIL, eADV, eAFNOSUPPORT, eAGAIN,
   eALREADY, eBADF, eBADMSG, eBADRPC, eBUSY, eCHILD, eCOMM, eCONNABORTED,
   eCONNREFUSED, eCONNRESET, eDEADLK, eDESTADDRREQ, eDIRTY, eDOM, eDQUOT,
@@ -161,16 +164,16 @@ throwOOMIfNull info f = do
 
 class IOReturn r where
     data IOErrno r :: *
-    isError   :: r -> Bool
+    isError   :: Integral a => r a -> Bool
     isInterrupt :: IOErrno r -> Bool
     isBlock   :: IOErrno r -> Bool
-    getReturn :: r -> CInt
-    getErrno  :: r -> IO (IOErrno r)
+    getReturn :: Integral a => r a -> a
+    getErrno  :: Integral a => r a -> IO (IOErrno r)
     nameErrno :: IOErrno r -> IO String
     descErrno :: IOErrno r -> IO String
-    throwErrno :: HasCallStack => IOErrno r -> String -> IO a
+    throwErrno :: HasCallStack => IOErrno r -> String -> IO anything
 
-throwAllError :: (HasCallStack, IOReturn r) => String -> IO r -> IO CInt
+throwAllError :: (HasCallStack, IOReturn r, Integral a) => String -> IO (r a) -> IO a
 throwAllError dev f = do
     r <- f
     if (isError r)
@@ -179,7 +182,7 @@ throwAllError dev f = do
         throwErrno e dev
     else return (getReturn r)
 
-retryInterrupt :: (HasCallStack, IOReturn r) => String -> IO r -> IO CInt
+retryInterrupt :: (HasCallStack, IOReturn r, Integral a) => String -> IO (r a) -> IO a
 retryInterrupt dev f = do
     r <- f
     if (isError r)
@@ -190,7 +193,7 @@ retryInterrupt dev f = do
         else throwErrno e dev
     else return (getReturn r)
 
-retryInterruptWaitBlock :: (HasCallStack, IOReturn r) => String -> IO r -> IO r -> IO CInt
+retryInterruptWaitBlock :: (HasCallStack, IOReturn r, Integral a) => String -> IO (r a) -> IO (r a) -> IO a
 retryInterruptWaitBlock dev f wait = do
     f >>= loop
   where
@@ -199,7 +202,7 @@ retryInterruptWaitBlock dev f wait = do
         then do
             e <- getErrno r
             if isInterrupt e
-            then retryInterruptWaitOnBlock dev f wait
+            then retryInterruptWaitBlock dev f wait
             else if isBlock e
                 then wait >>= loop
                 else throwErrno e dev
@@ -225,7 +228,7 @@ instance Show IOEInfo where
          ", device:" ++ dev ++
          ", callstack:" ++ prettyCallStack cstack ++ "}"
 
-newtype UnixReturn = UnixReturn CInt
+newtype UnixReturn a = UnixReturn a
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
 instance IOReturn UnixReturn where

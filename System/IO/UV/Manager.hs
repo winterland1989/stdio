@@ -102,7 +102,7 @@ newUVManager siz cap = do
 
     freeSlotList <- newMVar [0..siz-1]
 
-    loop <- E.throwOOMIfNull callStack "malloc loop and data for uv manager" $
+    loop <- E.throwOOMIfNull "uv manager" $
         hs_loop_init (fromIntegral siz)
 
     loopData <- peek_uv_loop_data loop
@@ -178,7 +178,7 @@ startUVManager uvm = do
             clearUVEventCounter loopData
             (c, q) <- peekUVEventQueue loopData
 
-            E.throwUVErrorIfMinus callStack "uv manager uv_run" $ uv_run loop uV_RUN_NOWAIT
+            E.retryInterrupt "uv manager" $ uv_run loop uV_RUN_NOWAIT
 
             (c, q) <- peekUVEventQueue loopData
             forM_ [0..(fromIntegral c-1)] $ \ i -> do

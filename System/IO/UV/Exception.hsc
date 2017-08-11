@@ -12,14 +12,17 @@ import System.IO.Exception
 import Data.Bits
 import Foreign.Storable
 
-newtype UVReturn = UVReturn CInt
+newtype UVReturn a = UVReturn a
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
 instance IOReturn UVReturn where
     newtype IOErrno UVReturn = UVErrno CInt
         deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
     isError (UVReturn r) = r < 0
-    getErrno (UVReturn r) = return (UVErrno r)
+    isInterrupt e = e == uV_EINTR
+    isBlock e = e == uV_EAGAIN
+    getReturn (UVReturn r) = r
+    getErrno (UVReturn r) = return (UVErrno (fromIntegral r))
     nameErrno e = uv_err_name e >>= peekCString
     descErrno e = uv_strerror e >>= peekCString
     throwErrno = throwUVError

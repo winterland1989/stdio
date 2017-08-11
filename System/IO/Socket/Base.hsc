@@ -46,7 +46,7 @@ instance Input TCP where
 
         let dev = show tcp
 
-        E.throwSocketErrorIfMinus1RetryMayBlock callStack dev
+        E.retryInterruptWaitBlock dev
             (fromIntegral `fmap` c_recv fd buf (fromIntegral bufSiz) 0) $ do
 
                 (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
@@ -55,13 +55,13 @@ instance Input TCP where
                 pokeElemOff bufSizTable slot (fromIntegral bufSiz)
                 pokeElemOff resultTable slot 0
 
-                E.throwUVErrorIfMinus callStack dev $
+                E.retryInterrupt callStack dev $
                     withUVManagerEnsureRunning uvm (hs_read_start handle)
 
                 btable <- readIORef $ uvmBlockTable uvm
                 takeMVar (indexArr btable slot)
-                r <- E.throwUVErrorIfMinus callStack dev $ 
-                    fromIntegral `fmap` peekElemOff resultTable slot
+                r <- E.throwAllError dev $ do
+                    peekElemOff resultTable slot
 
                 return (fromIntegral r)
 

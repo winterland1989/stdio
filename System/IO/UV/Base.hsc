@@ -3,6 +3,7 @@ module System.IO.UV.Base where
 
 import Foreign
 import Foreign.C
+import System.IO.UV.Exception (UVReturn(..))
 
 -- The macro `#alignment` exists since GHC 8.0
 #if __GLASGOW_HASKELL__ < 800
@@ -57,13 +58,13 @@ foreign import ccall unsafe hs_loop_init      :: CSize -> IO (Ptr UVLoop)
 foreign import ccall safe hs_loop_close       :: Ptr UVLoop -> IO ()
 foreign import ccall unsafe hs_loop_resize    :: Ptr UVLoop -> CSize -> IO (Ptr UVLoop)
 
-foreign import ccall unsafe uv_run            :: Ptr UVLoop -> UVRunMode -> IO CInt
+foreign import ccall unsafe uv_run            :: Ptr UVLoop -> UVRunMode -> IO (UVReturn CInt)
 -- we never use safe blocking wait actually
-foreign import ccall safe "uv_run" uv_run_safe :: Ptr UVLoop -> UVRunMode -> IO CInt
+foreign import ccall safe "uv_run" uv_run_safe :: Ptr UVLoop -> UVRunMode -> IO (UVReturn CInt)
 
-foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe uv_backend_fd     :: Ptr UVLoop -> IO CInt
-foreign import ccall unsafe uv_now            :: Ptr UVLoop -> IO CULong
+foreign import ccall unsafe uv_loop_alive     :: Ptr UVLoop -> IO (UVReturn CInt)
+foreign import ccall unsafe uv_backend_fd     :: Ptr UVLoop -> IO (UVReturn CInt)
+foreign import ccall unsafe uv_now            :: Ptr UVLoop -> IO (UVReturn CULong)
 
 --------------------------------------------------------------------------------
 
@@ -132,25 +133,25 @@ newtype UVReqType = UVReqType CInt
 --------------------------------------------------------------------------------
 -- uv_stream_t
 
-foreign import ccall unsafe uv_stream_set_blocking :: Ptr UVHandle -> CInt -> IO CInt
-foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO CInt
-foreign import ccall unsafe hs_listen :: Ptr UVHandle -> CInt -> IO CInt
-foreign import ccall unsafe hs_write :: Ptr UVReq -> Ptr UVHandle -> IO CInt
+foreign import ccall unsafe uv_stream_set_blocking :: Ptr UVHandle -> CInt -> IO (UVReturn CInt)
+foreign import ccall unsafe hs_read_start :: Ptr UVHandle -> IO (UVReturn CInt)
+foreign import ccall unsafe hs_listen :: Ptr UVHandle -> CInt -> IO (UVReturn CInt)
+foreign import ccall unsafe hs_write :: Ptr UVReq -> Ptr UVHandle -> IO (UVReturn CInt)
 
 --------------------------------------------------------------------------------
 -- uv_tcp_t
 
-foreign import ccall unsafe uv_tcp_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
-foreign import ccall unsafe uv_tcp_init_ex :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe uv_tcp_init :: Ptr UVLoop -> Ptr UVHandle -> IO (UVReturn CInt)
+foreign import ccall unsafe uv_tcp_init_ex :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO (UVReturn CInt)
 
 -- see notes in cbits/hs_uv.c
 #if defined(mingw32_HOST_OS)
-foreign import ccall unsafe "uv_tcp_open_win32" uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe "uv_tcp_open_win32" uv_tcp_open :: Ptr UVHandle -> CInt -> IO (UVReturn CInt)
 #else
-foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO (UVReturn CInt)
 #endif
 
-foreign import ccall unsafe uv_tcp_simultaneous_accepts :: Ptr UVHandle -> CInt -> IO CInt
+foreign import ccall unsafe uv_tcp_simultaneous_accepts :: Ptr UVHandle -> CInt -> IO (UVReturn CInt)
 
 --------------------------------------------------------------------------------
 -- uv_poll_t
@@ -162,8 +163,8 @@ newtype UVPollEvent = UVPollEvent CInt
    uV_READABLE    = UV_READABLE,
    uV_WRITABLE    = UV_WRITABLE}
 
-foreign import ccall unsafe uv_poll_init_socket :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
-foreign import ccall unsafe hs_poll_start :: Ptr UVHandle -> UVPollEvent -> IO CInt
+foreign import ccall unsafe uv_poll_init_socket :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO (UVReturn CInt)
+foreign import ccall unsafe hs_poll_start :: Ptr UVHandle -> UVPollEvent -> IO (UVReturn CInt)
 
 --------------------------------------------------------------------------------
 -- uv_pipe_t
@@ -174,20 +175,20 @@ foreign import ccall unsafe uv_pipe_open  :: Ptr UVHandle -> UVFile -> IO ()
 --------------------------------------------------------------------------------
 -- uv_tty_t
 
-foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> UVFile -> CInt -> IO CInt
+foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> UVFile -> CInt -> IO (UVReturn CInt)
 
 --------------------------------------------------------------------------------
 -- uv_timer_t
 
-foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
-foreign import ccall unsafe uv_timer_stop :: Ptr UVHandle -> IO CInt
-foreign import ccall unsafe hs_timer_start_stop_loop :: Ptr UVHandle -> CULong -> IO CInt
+foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO (UVReturn CInt)
+foreign import ccall unsafe uv_timer_stop :: Ptr UVHandle -> IO (UVReturn CInt)
+foreign import ccall unsafe hs_timer_start_stop_loop :: Ptr UVHandle -> CULong -> IO (UVReturn CInt)
 
 --------------------------------------------------------------------------------
 -- uv_async_t
 
-foreign import ccall unsafe hs_async_init_stop_loop :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
-foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO CInt
+foreign import ccall unsafe hs_async_init_stop_loop :: Ptr UVLoop -> Ptr UVHandle -> IO (UVReturn CInt)
+foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO (UVReturn CInt)
 
 --------------------------------------------------------------------------------
 -- uv_signal_t
@@ -349,7 +350,6 @@ foreign import ccall unsafe uv_fs_open_hs     :: Ptr UVLoop -> Ptr UVFs -> CStri
 
 
 type UVFile = CInt
-
 
 
 

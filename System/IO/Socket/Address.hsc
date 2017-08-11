@@ -56,6 +56,7 @@ module System.IO.Socket.Address
 import Foreign
 import Foreign.C
 import qualified System.IO.Socket.Exception as E
+import qualified System.IO.Exception as E
 import GHC.Stack.Compat
 import GHC.ForeignPtr (mallocPlainForeignPtrAlignedBytes)
 import qualified Data.List as List
@@ -614,7 +615,7 @@ getAddrInfo hints node service = withSocketsDo $
     maybeWith withCBytes service $ \ c_service ->
     maybeWith withAddrInfoHint hints $ \ c_hints ->
         alloca $ \ ptr_ptr_addrs -> do
-          ret <- E.throwAddrErrorIfNonZero callStack
+          ret <- E.throwAllError
                     ("hint:" ++ show hints ++
                     ",host:" ++ show node ++ 
                     ",service:" ++ show service)
@@ -642,7 +643,7 @@ getAddrInfo hints node service = withSocketsDo $
         return (a:as)
 
 foreign import ccall safe "hsnet_getaddrinfo"
-    c_getaddrinfo :: CString -> CString -> Ptr AddrInfo -> Ptr (Ptr AddrInfo) -> IO CInt
+    c_getaddrinfo :: CString -> CString -> Ptr AddrInfo -> Ptr (Ptr AddrInfo) -> IO (E.AddrInfoReturn CInt)
 
 foreign import ccall safe "hsnet_freeaddrinfo"
     c_freeaddrinfo :: Ptr AddrInfo -> IO ()
