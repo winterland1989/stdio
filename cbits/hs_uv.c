@@ -106,16 +106,18 @@ void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
 }
 
 void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
-    size_t slot = (size_t)stream->data;
-    hs_loop_data* loop_data = stream->loop->data;
+    if (nread !=0){
+        size_t slot = (size_t)stream->data;
+        hs_loop_data* loop_data = stream->loop->data;
 
-    loop_data->result_table[slot] = nread;                   // save the read result,
-                                                             // > 0 in case of success, < 0 otherwise.
+        loop_data->result_table[slot] = nread;                   // save the read result,
+                                                                 // > 0 in case of success, < 0 otherwise.
 
-    loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
-    loop_data->event_counter += 1;
+        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+        loop_data->event_counter += 1;
 
-    uv_read_stop(stream);
+        uv_read_stop(stream);
+    }
 }
 
 int hs_read_start(uv_stream_t* stream){

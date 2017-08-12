@@ -231,24 +231,19 @@ gai_strerror _ = return "gai_strerror not supported on your platform"
 
 -- | Wrapper `getAddrInfo/getNameInfo` functions and throw appropriate exceptions.
 -- 
-throwAddrInfoError :: HasCallStack => IOErrno AddrInfoReturn -> String -> IO a
-throwAddrInfoError e dev = do
-    name <- nameErrno e
-    desc <- descErrno e
-    let info = IOEInfo name desc dev callStack
-    case () of 
-        _
-            | e == eAI_ADDRFAMILY   -> throwIO (UnsupportedOperation info)
-            | e == eAI_AGAIN        -> throwIO (ResourceExhausted info)
-            | e == eAI_BADFLAGS     -> throwIO (UnsupportedOperation info)
-            | e == eAI_FAIL         -> throwIO (OtherError info)
-            | e == eAI_FAMILY       -> throwIO (UnsupportedOperation info)
-            | e == eAI_MEMORY       -> throwIO (ResourceExhausted info)
-            | e == eAI_NONAME       -> throwIO (NoSuchThing info)
-            | e == eAI_SERVICE      -> throwIO (UnsupportedOperation info)
-            | e == eAI_SOCKTYPE     -> throwIO (UnsupportedOperation info)
-            | e == eAI_STSTEM       -> throwIO (SystemError info)
-            | otherwise             -> throwIO (OtherError info)
+throwAddrInfoError :: HasCallStack => IOErrno AddrInfoReturn -> IOEInfo -> IO a
+throwAddrInfoError e info
+    | e == eAI_ADDRFAMILY   = throwIO (UnsupportedOperation info)
+    | e == eAI_AGAIN        = throwIO (ResourceExhausted info)
+    | e == eAI_BADFLAGS     = throwIO (UnsupportedOperation info)
+    | e == eAI_FAIL         = throwIO (OtherError info)
+    | e == eAI_FAMILY       = throwIO (UnsupportedOperation info)
+    | e == eAI_MEMORY       = throwIO (ResourceExhausted info)
+    | e == eAI_NONAME       = throwIO (NoSuchThing info)
+    | e == eAI_SERVICE      = throwIO (UnsupportedOperation info)
+    | e == eAI_SOCKTYPE     = throwIO (UnsupportedOperation info)
+    | e == eAI_STSTEM       = throwIO (SystemError info)
+    | otherwise             = throwIO (OtherError info)
 
 nameAddrInfoErrno :: IOErrno AddrInfoReturn -> String
 nameAddrInfoErrno e

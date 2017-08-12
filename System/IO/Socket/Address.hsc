@@ -615,7 +615,7 @@ getAddrInfo hints node service = withSocketsDo $
     maybeWith withCBytes service $ \ c_service ->
     maybeWith withAddrInfoHint hints $ \ c_hints ->
         alloca $ \ ptr_ptr_addrs -> do
-          ret <- E.throwAllError
+          ret <- E.throwIfError
                     ("hint:" ++ show hints ++
                     ",host:" ++ show node ++ 
                     ",service:" ++ show service)

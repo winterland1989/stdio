@@ -60,7 +60,7 @@ instance Input TCP where
 
                 btable <- readIORef $ uvmBlockTable uvm
                 takeMVar (indexArr btable slot)
-                r <- E.throwAllError dev $ do
+                r <- E.throwIfError dev $ do
                     peekElemOff resultTable slot
 
                 return (fromIntegral r)
@@ -71,7 +71,7 @@ instance Output TCP where
       where
         loop req buf bufSiz = do 
             let dev = show tcp
-            r <- E.throwSocketErrorIfMinus1RetryMayBlock callStack dev
+            r <- E.retryInterruptWaitBlock dev
                 (fromIntegral `fmap` c_send fd buf (fromIntegral bufSiz) 0) $ do
 
                     (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
@@ -80,13 +80,13 @@ instance Output TCP where
                     pokeElemOff bufSizTable slot (fromIntegral bufSiz)
                     pokeElemOff resultTable slot 0
                     
-                    E.throwUVErrorIfMinus callStack  (show tcp) $ 
+                    E.throwIfError dev $ 
                         withUVManagerEnsureRunning uvm (hs_write req handle)
 
                     btable <- readIORef $ uvmBlockTable uvm
                     takeMVar (indexArr btable slot)
 
-                    _ <- E.throwUVErrorIfMinus callStack dev $ 
+                    _ <- E.throwIfError callStack dev $ 
                         fromIntegral `fmap` peekElemOff resultTable slot
                     return bufSiz
 
@@ -106,7 +106,7 @@ socket :: HasCallStack
        -> SocketProtocol    -- Protocol Number (getProtocolByName to find value)
        -> IO SocketFd       -- Unconnected Socket
 socket sfamily@(SocketFamily family) stype@(SocketType typ) sproto@(SocketProtocol proto) = do
-    fd <- E.throwSocketErrorIfMinus1Retry callStack dev $
+    fd <- E.retryInterruptWaitBlock dev $
                 c_socket family typ proto
     withSocketsDo $ return (SocketFd fd)   -- TODO: set non blocking here
   where
@@ -124,10 +124,10 @@ newTCP (SocketFd fd) = do
     (handle, req) <- withUVManager uvm $ \ loop -> do
         handle <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_TCP
         req <- E.throwOOMIfNull callStack dev $ hs_req_init uV_WRITE
-        E.throwUVErrorIfMinus callStack dev $ uv_tcp_init loop handle
+        E.throwIfError callStack dev $ uv_tcp_init loop handle
         return (handle, req)
 
-    E.throwUVErrorIfMinus callStack dev $ uv_tcp_open handle fd     -- It's OK to call this outside of uv lock
+    E.throwIfError callStack dev $ uv_tcp_open handle fd     -- It's OK to call this outside of uv lock
     poke_uv_handle_data handle (fromIntegral slotR)
     poke_uv_req_data req (fromIntegral slotW)
 
@@ -151,7 +151,7 @@ bind :: (HasCallStack, SocketAddress addr)
 bind s@(SocketFd sock) addr = do
     let siz = sockAddrSize addr
     withSockAddr addr $ \ p -> do
-        E.throwSocketErrorIfMinus1Retry_ callStack (show s ++ ", " ++ show addr) $
+        E.retryInterrupt (show s ++ ", " ++ show addr) $
             c_bind sock p (fromIntegral siz)
     return (BoundSocket sock addr)
 
@@ -171,7 +171,7 @@ listen s@(BoundSocket sock addr) backlog = do
 
     handle <- E.throwOOMIfNull callStack dev $ hs_handle_init uV_POLL
 
-    E.throwUVErrorIfMinus callStack dev $
+    E.throwIfError callStack dev $
         withUVManager uvm $ \ loop -> uv_poll_init_socket loop handle sock
 
     poke_uv_handle_data handle (fromIntegral slot)
@@ -181,7 +181,7 @@ listen s@(BoundSocket sock addr) backlog = do
     btable <- readIORef $ uvmBlockTable uvm
 
     let wait = do
-            E.throwUVErrorIfMinus callStack dev $ 
+            E.throwIfError callStack dev $ 
                 withUVManagerEnsureRunning uvm (hs_poll_start handle uV_READABLE)
             takeMVar $ indexArr btable slot
 
@@ -198,7 +198,7 @@ accept s@(TCPListener sock addr wait) = do
     addr <- newEmptyRawSockAddr
     withSockAddr addr $ \ addrPtr ->
         with (fromIntegral $ sockAddrSize addr) $ \ lenPtr -> do
-            SocketFd `fmap` E.throwSocketErrorIfMinus1RetryMayBlock callStack (show addr)
+            SocketFd `fmap` E.retryInterruptWaitBlock callStack (show addr)
                 (c_accept sock addrPtr lenPtr) 
                 (wait >> c_accept sock addrPtr lenPtr)
 

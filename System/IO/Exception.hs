@@ -4,6 +4,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {-|
 Module      : System.IO.Exception
@@ -67,7 +68,7 @@ module System.IO.Exception
   , throwOOMIfNull
     -- * Default errno type
   , IOReturn(..)
-  , throwAllError
+  , throwIfError
   , retryInterrupt
   , retryInterruptWaitBlock
    -- * unix return and errno
@@ -162,26 +163,49 @@ throwOOMIfNull info f = do
 
 --------------------------------------------------------------------------------
 
+-- | This class should be used to mark FFI return value with certain errno mechanism.
+--
+-- For example, 'UnixReturn CInt' should be used instead of 'CInt' if you are dealing
+-- with unix system calls which will return @-1@ on error and mark errno from @errno.h@.
+--
+-- Some calls never return interrupt or blocking errnos, just return 'False' in that case.
+--
 class IOReturn r where
+    -- | The errno type associated with 'r'
     data IOErrno r :: *
+    -- | Is this return value indicate an error?
     isError   :: Integral a => r a -> Bool
-    isInterrupt :: IOErrno r -> Bool
-    isBlock   :: IOErrno r -> Bool
-    getReturn :: Integral a => r a -> a
+    -- | How can i get a errno then?
     getErrno  :: Integral a => r a -> IO (IOErrno r)
+    -- | Is this errno indicate interrupted blocking call?
+    isInterrupt :: IOErrno r -> Bool
+    -- | Is this errno indicate no data on a non-blocking device?
+    isBlock   :: IOErrno r -> Bool
+    -- | OK, i want my return value if no errno.
+    getReturn :: Integral a => r a -> a
+    -- | Read the errno name for me.
     nameErrno :: IOErrno r -> IO String
+    -- | Read the errno description for me.
     descErrno :: IOErrno r -> IO String
-    throwErrno :: HasCallStack => IOErrno r -> String -> IO anything
+    -- | I can prepare 'IOEInfo' for you with name and description above,
+    -- but which exactly 'IOException' you want to throw?
+    throwErrno :: HasCallStack => IOErrno r -> IOEInfo -> IO a
 
-throwAllError :: (HasCallStack, IOReturn r, Integral a) => String -> IO (r a) -> IO a
-throwAllError dev f = do
+-- | Throw if 'isError' say so.
+--
+throwIfError :: (HasCallStack, IOReturn r, Integral a) => String -> IO (r a) -> IO a
+throwIfError dev f = do
     r <- f
     if (isError r)
     then do
         e <- getErrno r
-        throwErrno e dev
+        name <- nameErrno e
+        desc <- descErrno e
+        throwErrno e (IOEInfo name desc dev callStack)
     else return (getReturn r)
 
+-- | Like 'throwIfError', but retry if 'isInterrupt' return true.
+--
 retryInterrupt :: (HasCallStack, IOReturn r, Integral a) => String -> IO (r a) -> IO a
 retryInterrupt dev f = do
     r <- f
@@ -190,13 +214,19 @@ retryInterrupt dev f = do
         e <- getErrno r
         if (isInterrupt e)
         then retryInterrupt dev f
-        else throwErrno e dev
+        else do
+            name <- nameErrno e
+            desc <- descErrno e
+            throwErrno e (IOEInfo name desc dev callStack)
     else return (getReturn r)
 
-retryInterruptWaitBlock :: (HasCallStack, IOReturn r, Integral a) => String -> IO (r a) -> IO (r a) -> IO a
-retryInterruptWaitBlock dev f wait = do
-    f >>= loop
+-- | Like 'retryInterrupt', but try a different action if 'isBlock' return true.
+--
+retryInterruptWaitBlock :: forall r1 r2 a. (HasCallStack, IOReturn r1, IOReturn r2, Integral a)
+                        => String -> IO (r1 a) -> IO (r2 a) -> IO a
+retryInterruptWaitBlock dev f wait = f >>= loop
   where
+    loop :: IOReturn r => r a -> IO a
     loop r =
         if (isError r)
         then do
@@ -205,7 +235,10 @@ retryInterruptWaitBlock dev f wait = do
             then retryInterruptWaitBlock dev f wait
             else if isBlock e
                 then wait >>= loop
-                else throwErrno e dev
+                else do
+                    name <- nameErrno e
+                    desc <- descErrno e
+                    throwErrno e (IOEInfo name desc dev callStack)
         else return (getReturn r)
 
 -- | IO exceptions informations.
@@ -350,114 +383,108 @@ nameUnixErrno e
     | e == eXDEV           = "EXDEV"
     | otherwise            = show e
 
-throwUnixError :: HasCallStack => IOErrno UnixReturn -> String -> IO a
-throwUnixError e dev = do
-    name <- nameErrno e
-    desc <- descErrno e
-    let info = IOEInfo name desc dev callStack
-    case () of
-        _
-
-            | e == eOK             -> throwIO (OtherError              info)
-            | e == e2BIG           -> throwIO (ResourceExhausted       info)
-            | e == eACCES          -> throwIO (PermissionDenied        info)
-            | e == eADDRINUSE      -> throwIO (ResourceBusy            info)
-            | e == eADDRNOTAVAIL   -> throwIO (UnsupportedOperation    info)
-            | e == eADV            -> throwIO (OtherError              info)
-            | e == eAFNOSUPPORT    -> throwIO (UnsupportedOperation    info)
-            | e == eAGAIN          -> throwIO (ResourceExhausted       info)
-            | e == eALREADY        -> throwIO (AlreadyExists           info)
-            | e == eBADF           -> throwIO (InvalidArgument         info)
-            | e == eBADMSG         -> throwIO (InappropriateType       info)
-            | e == eBADRPC         -> throwIO (OtherError              info)
-            | e == eBUSY           -> throwIO (ResourceBusy            info)
-            | e == eCHILD          -> throwIO (NoSuchThing             info)
-            | e == eCOMM           -> throwIO (ResourceVanished        info)
-            | e == eCONNABORTED    -> throwIO (OtherError              info)
-            | e == eCONNREFUSED    -> throwIO (NoSuchThing             info)
-            | e == eCONNRESET      -> throwIO (ResourceVanished        info)
-            | e == eDEADLK         -> throwIO (ResourceBusy            info)
-            | e == eDESTADDRREQ    -> throwIO (InvalidArgument         info)
-            | e == eDIRTY          -> throwIO (UnsatisfiedConstraints  info)
-            | e == eDOM            -> throwIO (InvalidArgument         info)
-            | e == eDQUOT          -> throwIO (PermissionDenied        info)
-            | e == eEXIST          -> throwIO (AlreadyExists           info)
-            | e == eFAULT          -> throwIO (OtherError              info)
-            | e == eFBIG           -> throwIO (PermissionDenied        info)
-            | e == eFTYPE          -> throwIO (InappropriateType       info)
-            | e == eHOSTDOWN       -> throwIO (NoSuchThing             info)
-            | e == eHOSTUNREACH    -> throwIO (NoSuchThing             info)
-            | e == eIDRM           -> throwIO (ResourceVanished        info)
-            | e == eILSEQ          -> throwIO (InvalidArgument         info)
-            | e == eINPROGRESS     -> throwIO (AlreadyExists           info)
-            | e == eINTR           -> throwIO (Interrupted             info)
-            | e == eINVAL          -> throwIO (InvalidArgument         info)
-            | e == eIO             -> throwIO (HardwareFault           info)
-            | e == eISCONN         -> throwIO (AlreadyExists           info)
-            | e == eISDIR          -> throwIO (InappropriateType       info)
-            | e == eLOOP           -> throwIO (InvalidArgument         info)
-            | e == eMFILE          -> throwIO (ResourceExhausted       info)
-            | e == eMLINK          -> throwIO (ResourceExhausted       info)
-            | e == eMSGSIZE        -> throwIO (ResourceExhausted       info)
-            | e == eMULTIHOP       -> throwIO (UnsupportedOperation    info)
-            | e == eNAMETOOLONG    -> throwIO (InvalidArgument         info)
-            | e == eNETDOWN        -> throwIO (ResourceVanished        info)
-            | e == eNETRESET       -> throwIO (ResourceVanished        info)
-            | e == eNETUNREACH     -> throwIO (NoSuchThing             info)
-            | e == eNFILE          -> throwIO (ResourceExhausted       info)
-            | e == eNOBUFS         -> throwIO (ResourceExhausted       info)
-            | e == eNODATA         -> throwIO (NoSuchThing             info)
-            | e == eNODEV          -> throwIO (UnsupportedOperation    info)
-            | e == eNOENT          -> throwIO (NoSuchThing             info)
-            | e == eNOEXEC         -> throwIO (InvalidArgument         info)
-            | e == eNOLCK          -> throwIO (ResourceExhausted       info)
-            | e == eNOLINK         -> throwIO (ResourceVanished        info)
-            | e == eNOMEM          -> throwIO (ResourceExhausted       info)
-            | e == eNOMSG          -> throwIO (NoSuchThing             info)
-            | e == eNONET          -> throwIO (NoSuchThing             info)
-            | e == eNOPROTOOPT     -> throwIO (UnsupportedOperation    info)
-            | e == eNOSPC          -> throwIO (ResourceExhausted       info)
-            | e == eNOSR           -> throwIO (ResourceExhausted       info)
-            | e == eNOSTR          -> throwIO (InvalidArgument         info)
-            | e == eNOSYS          -> throwIO (UnsupportedOperation    info)
-            | e == eNOTBLK         -> throwIO (InvalidArgument         info)
-            | e == eNOTCONN        -> throwIO (InvalidArgument         info)
-            | e == eNOTDIR         -> throwIO (InappropriateType       info)
-            | e == eNOTEMPTY       -> throwIO (UnsatisfiedConstraints  info)
-            | e == eNOTSOCK        -> throwIO (InvalidArgument         info)
-            | e == eNOTTY          -> throwIO (IllegalOperation        info)
-            | e == eNXIO           -> throwIO (NoSuchThing             info)
-            | e == eOPNOTSUPP      -> throwIO (UnsupportedOperation    info)
-            | e == ePERM           -> throwIO (PermissionDenied        info)
-            | e == ePFNOSUPPORT    -> throwIO (UnsupportedOperation    info)
-            | e == ePIPE           -> throwIO (ResourceVanished        info)
-            | e == ePROCLIM        -> throwIO (PermissionDenied        info)
-            | e == ePROCUNAVAIL    -> throwIO (UnsupportedOperation    info)
-            | e == ePROGMISMATCH   -> throwIO (ProtocolError           info)
-            | e == ePROGUNAVAIL    -> throwIO (UnsupportedOperation    info)
-            | e == ePROTO          -> throwIO (ProtocolError           info)
-            | e == ePROTONOSUPPORT -> throwIO (ProtocolError           info)
-            | e == ePROTOTYPE      -> throwIO (ProtocolError           info)
-            | e == eRANGE          -> throwIO (UnsupportedOperation    info)
-            | e == eREMCHG         -> throwIO (ResourceVanished        info)
-            | e == eREMOTE         -> throwIO (IllegalOperation        info)
-            | e == eROFS           -> throwIO (PermissionDenied        info)
-            | e == eRPCMISMATCH    -> throwIO (ProtocolError           info)
-            | e == eRREMOTE        -> throwIO (IllegalOperation        info)
-            | e == eSHUTDOWN       -> throwIO (IllegalOperation        info)
-            | e == eSOCKTNOSUPPORT -> throwIO (UnsupportedOperation    info)
-            | e == eSPIPE          -> throwIO (UnsupportedOperation    info)
-            | e == eSRCH           -> throwIO (NoSuchThing             info)
-            | e == eSRMNT          -> throwIO (UnsatisfiedConstraints  info)
-            | e == eSTALE          -> throwIO (ResourceVanished        info)
-            | e == eTIME           -> throwIO (TimeExpired             info)
-            | e == eTIMEDOUT       -> throwIO (TimeExpired             info)
-            | e == eTOOMANYREFS    -> throwIO (ResourceExhausted       info)
-            | e == eTXTBSY         -> throwIO (ResourceBusy            info)
-            | e == eUSERS          -> throwIO (ResourceExhausted       info)
-            | e == eWOULDBLOCK     -> throwIO (OtherError              info)
-            | e == eXDEV           -> throwIO (UnsupportedOperation    info)
-            | otherwise            -> throwIO (OtherError              info)
+throwUnixError :: HasCallStack => IOErrno UnixReturn -> IOEInfo -> IO a
+throwUnixError e info
+    | e == eOK             = throwIO (OtherError              info)
+    | e == e2BIG           = throwIO (ResourceExhausted       info)
+    | e == eACCES          = throwIO (PermissionDenied        info)
+    | e == eADDRINUSE      = throwIO (ResourceBusy            info)
+    | e == eADDRNOTAVAIL   = throwIO (UnsupportedOperation    info)
+    | e == eADV            = throwIO (OtherError              info)
+    | e == eAFNOSUPPORT    = throwIO (UnsupportedOperation    info)
+    | e == eAGAIN          = throwIO (ResourceExhausted       info)
+    | e == eALREADY        = throwIO (AlreadyExists           info)
+    | e == eBADF           = throwIO (InvalidArgument         info)
+    | e == eBADMSG         = throwIO (InappropriateType       info)
+    | e == eBADRPC         = throwIO (OtherError              info)
+    | e == eBUSY           = throwIO (ResourceBusy            info)
+    | e == eCHILD          = throwIO (NoSuchThing             info)
+    | e == eCOMM           = throwIO (ResourceVanished        info)
+    | e == eCONNABORTED    = throwIO (OtherError              info)
+    | e == eCONNREFUSED    = throwIO (NoSuchThing             info)
+    | e == eCONNRESET      = throwIO (ResourceVanished        info)
+    | e == eDEADLK         = throwIO (ResourceBusy            info)
+    | e == eDESTADDRREQ    = throwIO (InvalidArgument         info)
+    | e == eDIRTY          = throwIO (UnsatisfiedConstraints  info)
+    | e == eDOM            = throwIO (InvalidArgument         info)
+    | e == eDQUOT          = throwIO (PermissionDenied        info)
+    | e == eEXIST          = throwIO (AlreadyExists           info)
+    | e == eFAULT          = throwIO (OtherError              info)
+    | e == eFBIG           = throwIO (PermissionDenied        info)
+    | e == eFTYPE          = throwIO (InappropriateType       info)
+    | e == eHOSTDOWN       = throwIO (NoSuchThing             info)
+    | e == eHOSTUNREACH    = throwIO (NoSuchThing             info)
+    | e == eIDRM           = throwIO (ResourceVanished        info)
+    | e == eILSEQ          = throwIO (InvalidArgument         info)
+    | e == eINPROGRESS     = throwIO (AlreadyExists           info)
+    | e == eINTR           = throwIO (Interrupted             info)
+    | e == eINVAL          = throwIO (InvalidArgument         info)
+    | e == eIO             = throwIO (HardwareFault           info)
+    | e == eISCONN         = throwIO (AlreadyExists           info)
+    | e == eISDIR          = throwIO (InappropriateType       info)
+    | e == eLOOP           = throwIO (InvalidArgument         info)
+    | e == eMFILE          = throwIO (ResourceExhausted       info)
+    | e == eMLINK          = throwIO (ResourceExhausted       info)
+    | e == eMSGSIZE        = throwIO (ResourceExhausted       info)
+    | e == eMULTIHOP       = throwIO (UnsupportedOperation    info)
+    | e == eNAMETOOLONG    = throwIO (InvalidArgument         info)
+    | e == eNETDOWN        = throwIO (ResourceVanished        info)
+    | e == eNETRESET       = throwIO (ResourceVanished        info)
+    | e == eNETUNREACH     = throwIO (NoSuchThing             info)
+    | e == eNFILE          = throwIO (ResourceExhausted       info)
+    | e == eNOBUFS         = throwIO (ResourceExhausted       info)
+    | e == eNODATA         = throwIO (NoSuchThing             info)
+    | e == eNODEV          = throwIO (UnsupportedOperation    info)
+    | e == eNOENT          = throwIO (NoSuchThing             info)
+    | e == eNOEXEC         = throwIO (InvalidArgument         info)
+    | e == eNOLCK          = throwIO (ResourceExhausted       info)
+    | e == eNOLINK         = throwIO (ResourceVanished        info)
+    | e == eNOMEM          = throwIO (ResourceExhausted       info)
+    | e == eNOMSG          = throwIO (NoSuchThing             info)
+    | e == eNONET          = throwIO (NoSuchThing             info)
+    | e == eNOPROTOOPT     = throwIO (UnsupportedOperation    info)
+    | e == eNOSPC          = throwIO (ResourceExhausted       info)
+    | e == eNOSR           = throwIO (ResourceExhausted       info)
+    | e == eNOSTR          = throwIO (InvalidArgument         info)
+    | e == eNOSYS          = throwIO (UnsupportedOperation    info)
+    | e == eNOTBLK         = throwIO (InvalidArgument         info)
+    | e == eNOTCONN        = throwIO (InvalidArgument         info)
+    | e == eNOTDIR         = throwIO (InappropriateType       info)
+    | e == eNOTEMPTY       = throwIO (UnsatisfiedConstraints  info)
+    | e == eNOTSOCK        = throwIO (InvalidArgument         info)
+    | e == eNOTTY          = throwIO (IllegalOperation        info)
+    | e == eNXIO           = throwIO (NoSuchThing             info)
+    | e == eOPNOTSUPP      = throwIO (UnsupportedOperation    info)
+    | e == ePERM           = throwIO (PermissionDenied        info)
+    | e == ePFNOSUPPORT    = throwIO (UnsupportedOperation    info)
+    | e == ePIPE           = throwIO (ResourceVanished        info)
+    | e == ePROCLIM        = throwIO (PermissionDenied        info)
+    | e == ePROCUNAVAIL    = throwIO (UnsupportedOperation    info)
+    | e == ePROGMISMATCH   = throwIO (ProtocolError           info)
+    | e == ePROGUNAVAIL    = throwIO (UnsupportedOperation    info)
+    | e == ePROTO          = throwIO (ProtocolError           info)
+    | e == ePROTONOSUPPORT = throwIO (ProtocolError           info)
+    | e == ePROTOTYPE      = throwIO (ProtocolError           info)
+    | e == eRANGE          = throwIO (UnsupportedOperation    info)
+    | e == eREMCHG         = throwIO (ResourceVanished        info)
+    | e == eREMOTE         = throwIO (IllegalOperation        info)
+    | e == eROFS           = throwIO (PermissionDenied        info)
+    | e == eRPCMISMATCH    = throwIO (ProtocolError           info)
+    | e == eRREMOTE        = throwIO (IllegalOperation        info)
+    | e == eSHUTDOWN       = throwIO (IllegalOperation        info)
+    | e == eSOCKTNOSUPPORT = throwIO (UnsupportedOperation    info)
+    | e == eSPIPE          = throwIO (UnsupportedOperation    info)
+    | e == eSRCH           = throwIO (NoSuchThing             info)
+    | e == eSRMNT          = throwIO (UnsatisfiedConstraints  info)
+    | e == eSTALE          = throwIO (ResourceVanished        info)
+    | e == eTIME           = throwIO (TimeExpired             info)
+    | e == eTIMEDOUT       = throwIO (TimeExpired             info)
+    | e == eTOOMANYREFS    = throwIO (ResourceExhausted       info)
+    | e == eTXTBSY         = throwIO (ResourceBusy            info)
+    | e == eUSERS          = throwIO (ResourceExhausted       info)
+    | e == eWOULDBLOCK     = throwIO (OtherError              info)
+    | e == eXDEV           = throwIO (UnsupportedOperation    info)
+    | otherwise            = throwIO (OtherError              info)
 
 --------------------------------------------------------------------------------
 
