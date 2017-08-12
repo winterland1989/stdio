@@ -222,10 +222,11 @@ retryInterrupt dev f = do
 
 -- | Like 'retryInterrupt', but try a different action if 'isBlock' return true.
 --
-retryInterruptWaitBlock :: forall r a. (HasCallStack, IOReturn r, Integral a)
-                        => String -> IO (r a) -> IO (r a) -> IO a
+retryInterruptWaitBlock :: forall r1 r2 a. (HasCallStack, IOReturn r1, IOReturn r2, Integral a)
+                        => String -> IO (r1 a) -> IO (r2 a) -> IO a
 retryInterruptWaitBlock dev f wait = f >>= loop
   where
+    loop :: (IOReturn r) => r a -> IO a
     loop r =
         if (isError r)
         then do

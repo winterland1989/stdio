@@ -86,8 +86,8 @@ data UVManager = UVManager
 initTableSize :: Int
 initTableSize = 128
 
-uvManager :: IORef (Array UVManager)
-uvManager = unsafePerformIO $ do
+uvManagerArray :: IORef (Array UVManager)
+uvManagerArray = unsafePerformIO $ do
     numCaps <- getNumCapabilities
     uvmArray <- newArr numCaps
     forM [0..numCaps-1] $ \ i -> do
@@ -98,7 +98,7 @@ uvManager = unsafePerformIO $ do
 getUVManager :: IO UVManager
 getUVManager = do
     (cap, _) <- threadCapability =<< myThreadId
-    uvmArray <- readIORef uvManager
+    uvmArray <- readIORef uvManagerArray
     indexArrM uvmArray (cap `rem` sizeofArr uvmArray)
 
 getBlockMVar :: UVManager -> Int -> IO (MVar ())
@@ -135,7 +135,7 @@ newUVManager siz cap = do
 
     idleCounter <- newCounter 0
 
-   --  _ <- mkWeakIORef blockTableRef $ hs_loop_close loop
+    _ <- mkWeakIORef blockTableRef $ hs_loop_close loop
 
     return (UVManager blockTableRef freeSlotList loop loopData loopLock idleCounter cap)
 
