@@ -44,8 +44,14 @@ import System.IO.UV.Base
 
 --------------------------------------------------------------------------------
 
+data UVRunningState
+    = UVRunning
+    | UVBlocking
+    | UVStopped
+  deriving (Show, Eq, Ord)
+
 data UVManager = UVManager
-    { uvmBlockTable  :: IORef (Array (MVar ()))     -- a array to store thread blocked on read or write
+    { uvmBlockTable  :: IORef (UnliftedArray (MVar ()))     -- a array to store thread blocked on read or write
 
     , uvmFreeSlotList :: MVar [Int]                 -- we generate two unique range limited 'Int' /slot/
                                                     -- for each uv_handle_t(one for read and another for
@@ -67,13 +73,18 @@ data UVManager = UVManager
     , uvmLoop        :: Ptr UVLoop                  -- the uv loop refrerence
     , uvmLoopData    :: Ptr UVLoopData              -- This is the pointer to uv_loop_t's data field
 
-    , uvmRunningLock :: MVar Bool                   -- during uv_run this lock shall be held!
+    , uvmRunningLock :: MVar UVRunningState         -- during uv_run this lock shall be held!
                                                     -- unlike epoll/ONESHOT, uv loop are NOT thread safe,
                                                     -- thus we can only add new event when uv_run is not
                                                     -- running, usually this is not a problem because
                                                     -- unsafe FFI can't run concurrently on one
                                                     -- capability, but with work stealing we'd better
                                                     -- ask for this lock before calling any uv APIs.
+
+    , uvmAsync       :: Ptr UVHandle                -- This ayncs handle is used when we want to break from
+                                                    -- a blocking uv_run, it will call a prdefined callback
+                                                    -- to stop the loop. This is the only thread safe
+                                                    -- wake up mechanism for libuv.
 
     , uvmIdleCounter :: Counter                     -- Counter for idle(no event) uv_runs, when counter
                                                     -- reaches 10, we start to increase waiting between
@@ -131,38 +142,62 @@ newUVManager siz cap = do
 
     loopData <- peek_uv_loop_data loop
 
-    loopLock <- newMVar False
+    runningLock <- newMVar UVStopped
+
+    async <- E.throwOOMIfNull "malloc block async handler for uv manager" $ hs_handle_init uV_ASYNC
+    hs_async_init_stop_loop loop async
 
     idleCounter <- newCounter 0
 
-    _ <- mkWeakIORef blockTableRef $ hs_loop_close loop
+    _ <- mkWeakIORef blockTableRef $ do
+        print cap >> hs_loop_close loop
 
-    return (UVManager blockTableRef freeSlotList loop loopData loopLock idleCounter cap)
+    return (UVManager blockTableRef freeSlotList loop loopData runningLock async idleCounter cap)
 
 -- | libuv is not thread safe, use this function to perform handle/request initialization.
 --
 withUVManager :: HasCallStack => UVManager -> (Ptr UVLoop -> IO a) -> IO a
-withUVManager uvm f = withMVar (uvmRunningLock uvm) $ \ _ -> f (uvmLoop uvm)
+withUVManager uvm f = do
+    r <- modifyMVar (uvmRunningLock uvm) $ \ running ->
+        case running of
+            UVBlocking -> do
+                E.throwIfError "uvm async handle" $ uv_async_send (uvmAsync uvm)
+                return (UVBlocking, Nothing)
+            s -> do
+                r <- f (uvmLoop uvm)
+                return (s, Just r)
+
+    case r of
+        Just r' -> return r'
+        _       -> yield >> withUVManager uvm f
 
 -- | libuv is not thread safe, use this function to start reading/writing.
 --
 -- This function also take care of restart uv manager in case of stopped.
 --
 withUVManagerEnsureRunning :: HasCallStack => UVManager -> IO a -> IO a
-withUVManagerEnsureRunning uvm f = modifyMVar (uvmRunningLock uvm) $ \ running -> do
-    r <- f
-    unless running $ do
-        void $ forkOn (uvmCap uvm) (startUVManager uvm)
-    return (True, r)
+withUVManagerEnsureRunning uvm f = do
+    r <- modifyMVar (uvmRunningLock uvm) $ \ running ->
+        case running of
+            UVStopped -> do
+                r <- f
+                void $ forkOn (uvmCap uvm) (startUVManager uvm)
+                return (UVRunning, Just r)
+            UVBlocking -> do
+                E.throwIfError "uvm async handle" $ uv_async_send (uvmAsync uvm)
+                return (UVBlocking, Nothing)
+            s -> do
+                r <- f
+                return (s, Just r)
+
+    case r of
+        Just r' -> return r'
+        _       -> yield >> withUVManagerEnsureRunning uvm f
+
 
 -- | Start the uv loop, the loop is stopped when there're not active I/O requests.
 --
--- Inside loop, we never do block waiting like the io manager in Mio does,
--- we take the golang net poller's approach instead:
--- simply run non-block poll with a bound increasing delay, the reason is that libuv's APIs is
--- generally not thread safe: you shouldn't add or remove events during uv_run,
--- which makes safe blocking poll problematic, because doing that will requrie us to do some thread
--- safe notification, and that's too complex.
+-- Inside loop, we do either blocking wait or non-blocking wait depending on idle counter.
 --
 startUVManager :: UVManager -> IO ()
 startUVManager uvm = do
@@ -171,37 +206,44 @@ startUVManager uvm = do
         if (c /= 0)
         then do
             let idleCounter = uvmIdleCounter uvm
-            e <- step uvm
+            e <- step uvm False
             ic <- readIORefU idleCounter
             if (e == 0)                     -- bump the idle counter if no events, there's no need to do atomic-ops
-            then when (ic < 205) $ writeIORefU idleCounter (ic+1)
+            then when (ic < 50) $ writeIORefU idleCounter (ic+1)
             else writeIORefU idleCounter 0
 
-            return (True, True)
+            return (UVRunning, True)
         else
-            return (False, False)
+            return (UVStopped, False)
 
     -- If not continue, new events will find running is locking on 'False'
     -- and fork new uv manager thread.
     when continue $ do
         let idleCounter = uvmIdleCounter uvm
         ic <- readIORefU idleCounter
-        if (ic > 200)                  -- we yield 200 times, then start to delay 1ms, 2ms ... up to 5 ms.
-        then threadDelay $ (ic - 200) * 1000
-        else yield                     -- it's important that we yeild enough time, CPU vs performance trade off here
+        if (ic >= 50)                   -- we yield 50 times, then start a blocking wait if still no events coming
+        then do
+            _ <- swapMVar (uvmRunningLock uvm) UVBlocking   -- after changing this, other thread can wake up us
+            step uvm True                                   -- by send async handler, and it's thread safe
+            _ <- swapMVar (uvmRunningLock uvm) UVRunning    -- it's OK to send multiple time, libuv only calls
+            writeIORefU idleCounter 0                       -- async callback once.
+            yield       -- we yield here, to give other thread a chance to register new event
+        else yield      -- it's important that we yeild enough time, CPU vs performance trade off here
         startUVManager uvm
 
   where
     -- call uv_run, return the event number
     --
-    step :: UVManager -> IO CSize
-    step (UVManager blockTableRef freeSlotList loop loopData _ _ _) = do
+    step :: UVManager -> Bool -> IO CSize
+    step (UVManager blockTableRef freeSlotList loop loopData _ _ _ _) block = do
             blockTable <- readIORef blockTableRef
 
             clearUVEventCounter loopData
-            (c, q) <- peekUVEventQueue loopData
 
-            E.retryInterrupt "uv manager" $ uv_run loop uV_RUN_NOWAIT
+            E.retryInterrupt "uv manager uv_run" $
+                if block
+                then uv_run_safe loop uV_RUN_ONCE
+                else uv_run loop uV_RUN_NOWAIT
 
             (c, q) <- peekUVEventQueue loopData
             forM_ [0..(fromIntegral c-1)] $ \ i -> do
@@ -211,7 +253,7 @@ startUVManager uvm = do
             return c
 
 allocSlot :: UVManager -> IO Int
-allocSlot (UVManager blockTableRef freeSlotList loop _ _ _ _) = do
+allocSlot (UVManager blockTableRef freeSlotList loop _ _ _ _ _) = do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do        -- free list is empty, we double it
@@ -234,5 +276,5 @@ allocSlot (UVManager blockTableRef freeSlotList loop _ _ _ _) = do
             return ([oldSiz+1..newSiz-1], oldSiz)    -- fill the free slot list
 
 freeSlot :: Int -> UVManager -> IO ()
-freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _) =
+freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)

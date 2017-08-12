@@ -58,6 +58,7 @@ import Data.Primitive.UnliftedArray
 import GHC.ST
 import GHC.Prim
 import GHC.Types (isTrue#)
+import GHC.MVar
 
 -- | Bottom value (@throw ('UndefinedElement' "Data.Array.uninitialized")@)
 -- for initialize new boxed array('Array', 'SmallArray'..).
@@ -393,9 +394,9 @@ instance Prim a => Arr MutablePrimArray PrimArray a where
     sameArr = samePrimArray
     {-# INLINE sameArr #-}
 
-#if MIN_VERSION_ghc_prim(0,6,2)
+#if MIN_VERSION_primitive(0,6,2)
 instance PrimUnlifted a => Arr MutableUnliftedArray UnliftedArray a where
-    newArr n = newUnliftedArray n uninitialized
+    newArr = unsafeNewUnliftedArray
     {-# INLINE newArr #-}
     newArrWith = newUnliftedArray
     {-# INLINE newArrWith #-}
@@ -478,4 +479,8 @@ instance PrimUnlifted a => Arr MutableUnliftedArray UnliftedArray a where
     sameArr (UnliftedArray arr1#) (UnliftedArray arr2#) = isTrue# (
         sameMutableArrayArray# (unsafeCoerce# arr1#) (unsafeCoerce# arr2#))
     {-# INLINE sameArr #-}
+
+instance PrimUnlifted (MVar a) where
+    toArrayArray# (MVar mv#) = unsafeCoerce# mv#
+    fromArrayArray# aa# = MVar (unsafeCoerce# aa#)
 #endif
