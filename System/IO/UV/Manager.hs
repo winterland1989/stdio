@@ -13,11 +13,21 @@ This module provide I/O manager which bridge libuv's async interface with ghc's 
 
 -}
 
-module System.IO.UV.Manager where
+module System.IO.UV.Manager
+  ( UVManager
+  , getUVManager
+  , getBlockMVar
+  , getBufferTable
+  , getResult
+  , allocSlot
+  , freeSlot
+  , withUVManager
+  , withUVManagerEnsureRunning
+  ) where
 
 import GHC.Stack.Compat
-import qualified System.IO.UV.Exception as E
 import qualified System.IO.Exception as E
+import qualified System.IO.UV.Exception as E
 import Data.Array
 import Data.Primitive.PrimArray
 import Data.Word
@@ -91,6 +101,20 @@ getUVManager = do
     uvmArray <- readIORef uvManager
     indexArrM uvmArray (cap `rem` sizeofArr uvmArray)
 
+getBlockMVar :: UVManager -> Int -> IO (MVar ())
+getBlockMVar uvm slot = do
+    blockTable <- readIORef (uvmBlockTable uvm)
+    indexArrM blockTable slot
+
+getBufferTable :: UVManager -> IO (Ptr (Ptr Word8), Ptr CSize)
+getBufferTable uvm = peekUVBufferTable (uvmLoopData uvm)
+
+getResult :: UVManager -> Int -> IO (E.UVReturn CSize)
+getResult uvm slot = do
+    resultTable <- peekUVResultTable (uvmLoopData uvm)
+    r <- peekElemOff resultTable slot
+    return (E.UVReturn r)
+
 newUVManager :: HasCallStack => Int -> Int -> IO UVManager
 newUVManager siz cap = do
 
@@ -111,8 +135,7 @@ newUVManager siz cap = do
 
     idleCounter <- newCounter 0
 
-    _ <- mkWeakMVar loopLock $ do
-        hs_loop_close loop
+   --  _ <- mkWeakIORef blockTableRef $ hs_loop_close loop
 
     return (UVManager blockTableRef freeSlotList loop loopData loopLock idleCounter cap)
 

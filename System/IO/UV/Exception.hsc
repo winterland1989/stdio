@@ -32,7 +32,7 @@ foreign import ccall unsafe uv_err_name :: IOErrno UVReturn -> IO CString
 
 --------------------------------------------------------------------------------
 
-throwUVError :: HasCallStack => IOErrno UVReturn -> IOEInfo -> IO a
+throwUVError :: IOErrno UVReturn -> IOEInfo -> IO a
 throwUVError e info
     | e == uV_EOF             = throwIO (EOF                     info)
     | e == uV_E2BIG           = throwIO (ResourceExhausted       info)

@@ -170,7 +170,7 @@ throwOOMIfNull info f = do
 --
 -- Some calls never return interrupt or blocking errnos, just return 'False' in that case.
 --
-class IOReturn r where
+class Integral (IOErrno r) => IOReturn r where
     -- | The errno type associated with 'r'
     data IOErrno r :: *
     -- | Is this return value indicate an error?
@@ -189,7 +189,7 @@ class IOReturn r where
     descErrno :: IOErrno r -> IO String
     -- | I can prepare 'IOEInfo' for you with name and description above,
     -- but which exactly 'IOException' you want to throw?
-    throwErrno :: HasCallStack => IOErrno r -> IOEInfo -> IO a
+    throwErrno :: IOErrno r -> IOEInfo -> IO a
 
 -- | Throw if 'isError' say so.
 --
@@ -222,19 +222,20 @@ retryInterrupt dev f = do
 
 -- | Like 'retryInterrupt', but try a different action if 'isBlock' return true.
 --
-retryInterruptWaitBlock :: forall r1 r2 a. (HasCallStack, IOReturn r1, IOReturn r2, Integral a)
-                        => String -> IO (r1 a) -> IO (r2 a) -> IO a
+retryInterruptWaitBlock :: forall r a. (HasCallStack, IOReturn r, Integral a)
+                        => String -> IO (r a) -> IO (r a) -> IO a
 retryInterruptWaitBlock dev f wait = f >>= loop
   where
-    loop :: IOReturn r => r a -> IO a
     loop r =
         if (isError r)
         then do
             e <- getErrno r
             if isInterrupt e
-            then retryInterruptWaitBlock dev f wait
+            then do
+                retryInterruptWaitBlock dev f wait
             else if isBlock e
-                then wait >>= loop
+                then do
+                    wait >>= loop
                 else do
                     name <- nameErrno e
                     desc <- descErrno e
@@ -276,7 +277,7 @@ instance IOReturn UnixReturn where
     descErrno e = strerror e >>= peekCString
     throwErrno = throwUnixError
 
-foreign import ccall unsafe "string.h" strerror :: IOErrno UnixReturn -> IO (Ptr CChar)
+foreign import ccall unsafe "string.h" strerror :: IOErrno UnixReturn -> IO CString
 foreign import ccall unsafe "HsBase.h __hscore_get_errno" get_errno :: IO (IOErrno UnixReturn)
 
 nameUnixErrno :: IOErrno UnixReturn -> String
@@ -383,7 +384,7 @@ nameUnixErrno e
     | e == eXDEV           = "EXDEV"
     | otherwise            = show e
 
-throwUnixError :: HasCallStack => IOErrno UnixReturn -> IOEInfo -> IO a
+throwUnixError :: IOErrno UnixReturn -> IOEInfo -> IO a
 throwUnixError e info
     | e == eOK             = throwIO (OtherError              info)
     | e == e2BIG           = throwIO (ResourceExhausted       info)

@@ -45,61 +45,56 @@ foreign import ccall unsafe "getWSErrorDescr" c_getWSError :: IOErrno WSAReturn 
 
 --------------------------------------------------------------------------------
 
-throwWSAError :: HasCallStack => WSAErrno -> String -> IO a
-throwWSAError e dev = do
-    name <- nameErrno e
-    desc <- descErrno e
-    let info = IOEInfo name desc dev callStack
-    case () of
-        _                                                                              
-            | e == wSAEINTR           -> throwIO (Interrupted             info) -- TODO :: rework the mapping
-            | e == wSAEBADF           -> throwIO (InvalidArgument         info)
-            | e == wSAEACCES          -> throwIO (PermissionDenied        info)
-            | e == wSAEFAULT          -> throwIO (UnsupportedOperation    info)
-            | e == wSAEINVAL          -> throwIO (UnsupportedOperation    info)
-            | e == wSAEMFILE          -> throwIO (ResourceExhausted       info)
-            | e == wSAEWOULDBLOCK     -> throwIO (UnsupportedOperation    info)
-            | e == wSAEINPROGRESS     -> throwIO (ResourceExhausted       info)
-            | e == wSAEALREADY        -> throwIO (UnsupportedOperation    info)
-            | e == wSAENOTSOCK        -> throwIO (UnsupportedOperation    info)
-            | e == wSAEDESTADDRREQ    -> throwIO (ResourceVanished        info)
-            | e == wSAEMSGSIZE        -> throwIO (OtherError              info)
-            | e == wSAEPROTOTYPE      -> throwIO (UnsupportedOperation    info)
-            | e == wSAENOPROTOOPT     -> throwIO (ResourceExhausted       info)
-            | e == wSAEPROTONOSUPPORT -> throwIO (NoSuchThing             info)
-            | e == wSAESOCKTNOSUPPORT -> throwIO (NoSuchThing             info)
-            | e == wSAEOPNOTSUPP      -> throwIO (InvalidArgument         info)
-            | e == wSAEPFNOSUPPORT    -> throwIO (ProtocolError           info)
-            | e == wSAEAFNOSUPPORT    -> throwIO (UnsupportedOperation    info)
-            | e == wSAEADDRINUSE      -> throwIO (UnsupportedOperation    info)
-            | e == wSAEADDRNOTAVAIL   -> throwIO (AlreadyExists           info)
-            | e == wSAENETDOWN        -> throwIO (InvalidArgument         info)
-            | e == wSAENETUNREACH     -> throwIO (ResourceBusy            info)
-            | e == wSAENETRESET       -> throwIO (ResourceVanished        info)
-            | e == wSAECONNABORTED    -> throwIO (OtherError              info)
-            | e == wSAECONNRESET      -> throwIO (ResourceVanished        info)
-            | e == wSAENOBUFS         -> throwIO (NoSuchThing             info)
-            | e == wSAEISCONN         -> throwIO (ResourceVanished        info)
-            | e == wSAENOTCONN        -> throwIO (InvalidArgument         info)
-            | e == wSAESHUTDOWN       -> throwIO (AlreadyExists           info)
-            | e == wSAETOOMANYREFS    -> throwIO (OtherError              info)
-            | e == wSAETIMEDOUT       -> throwIO (PermissionDenied        info)
-            | e == wSAECONNREFUSED    -> throwIO (NoSuchThing             info)
-            | e == wSAELOOP           -> throwIO (Interrupted             info)
-            | e == wSAENAMETOOLONG    -> throwIO (InvalidArgument         info)
-            | e == wSAEHOSTDOWN       -> throwIO (HardwareFault           info)
-            | e == wSAEHOSTUNREACH    -> throwIO (AlreadyExists           info)
-            | e == wSAENOTEMPTY       -> throwIO (NoSuchThing             info)
-            | e == wSAEPROCLIM        -> throwIO (ResourceVanished        info)
-            | e == wSAEUSERS          -> throwIO (InvalidArgument         info)
-            | e == wSAEDQUOT          -> throwIO (AlreadyExists           info)
-            | e == wSAESTALE          -> throwIO (OtherError              info)
-            | e == wSAEREMOTE         -> throwIO (PermissionDenied        info)
-            | e == wSAEDISCON         -> throwIO (NoSuchThing             info)
-            | e == wSASYSNOTREADY     -> throwIO (Interrupted             info)
-            | e == wSAVERNOTSUPPORTED -> throwIO (InvalidArgument         info)
-            | e == wSANOTINITIALISED  -> throwIO (HardwareFault           info)
-            | otherwise               -> throwIO (OtherError              info)
+throwWSAError :: WSAErrno -> IOEInfo -> IO a
+throwWSAError e info
+    | e == wSAEINTR           = throwIO (Interrupted             info) -- TODO :: rework the mapping
+    | e == wSAEBADF           = throwIO (InvalidArgument         info)
+    | e == wSAEACCES          = throwIO (PermissionDenied        info)
+    | e == wSAEFAULT          = throwIO (UnsupportedOperation    info)
+    | e == wSAEINVAL          = throwIO (UnsupportedOperation    info)
+    | e == wSAEMFILE          = throwIO (ResourceExhausted       info)
+    | e == wSAEWOULDBLOCK     = throwIO (UnsupportedOperation    info)
+    | e == wSAEINPROGRESS     = throwIO (ResourceExhausted       info)
+    | e == wSAEALREADY        = throwIO (UnsupportedOperation    info)
+    | e == wSAENOTSOCK        = throwIO (UnsupportedOperation    info)
+    | e == wSAEDESTADDRREQ    = throwIO (ResourceVanished        info)
+    | e == wSAEMSGSIZE        = throwIO (OtherError              info)
+    | e == wSAEPROTOTYPE      = throwIO (UnsupportedOperation    info)
+    | e == wSAENOPROTOOPT     = throwIO (ResourceExhausted       info)
+    | e == wSAEPROTONOSUPPORT = throwIO (NoSuchThing             info)
+    | e == wSAESOCKTNOSUPPORT = throwIO (NoSuchThing             info)
+    | e == wSAEOPNOTSUPP      = throwIO (InvalidArgument         info)
+    | e == wSAEPFNOSUPPORT    = throwIO (ProtocolError           info)
+    | e == wSAEAFNOSUPPORT    = throwIO (UnsupportedOperation    info)
+    | e == wSAEADDRINUSE      = throwIO (UnsupportedOperation    info)
+    | e == wSAEADDRNOTAVAIL   = throwIO (AlreadyExists           info)
+    | e == wSAENETDOWN        = throwIO (InvalidArgument         info)
+    | e == wSAENETUNREACH     = throwIO (ResourceBusy            info)
+    | e == wSAENETRESET       = throwIO (ResourceVanished        info)
+    | e == wSAECONNABORTED    = throwIO (OtherError              info)
+    | e == wSAECONNRESET      = throwIO (ResourceVanished        info)
+    | e == wSAENOBUFS         = throwIO (NoSuchThing             info)
+    | e == wSAEISCONN         = throwIO (ResourceVanished        info)
+    | e == wSAENOTCONN        = throwIO (InvalidArgument         info)
+    | e == wSAESHUTDOWN       = throwIO (AlreadyExists           info)
+    | e == wSAETOOMANYREFS    = throwIO (OtherError              info)
+    | e == wSAETIMEDOUT       = throwIO (PermissionDenied        info)
+    | e == wSAECONNREFUSED    = throwIO (NoSuchThing             info)
+    | e == wSAELOOP           = throwIO (Interrupted             info)
+    | e == wSAENAMETOOLONG    = throwIO (InvalidArgument         info)
+    | e == wSAEHOSTDOWN       = throwIO (HardwareFault           info)
+    | e == wSAEHOSTUNREACH    = throwIO (AlreadyExists           info)
+    | e == wSAENOTEMPTY       = throwIO (NoSuchThing             info)
+    | e == wSAEPROCLIM        = throwIO (ResourceVanished        info)
+    | e == wSAEUSERS          = throwIO (InvalidArgument         info)
+    | e == wSAEDQUOT          = throwIO (AlreadyExists           info)
+    | e == wSAESTALE          = throwIO (OtherError              info)
+    | e == wSAEREMOTE         = throwIO (PermissionDenied        info)
+    | e == wSAEDISCON         = throwIO (NoSuchThing             info)
+    | e == wSASYSNOTREADY     = throwIO (Interrupted             info)
+    | e == wSAVERNOTSUPPORTED = throwIO (InvalidArgument         info)
+    | e == wSANOTINITIALISED  = throwIO (HardwareFault           info)
+    | otherwise               = throwIO (OtherError              info)
 
 nameWSAErrno :: IOErrno WSAReturn -> String
 nameWSAErrno e
@@ -231,7 +226,7 @@ gai_strerror _ = return "gai_strerror not supported on your platform"
 
 -- | Wrapper `getAddrInfo/getNameInfo` functions and throw appropriate exceptions.
 -- 
-throwAddrInfoError :: HasCallStack => IOErrno AddrInfoReturn -> IOEInfo -> IO a
+throwAddrInfoError :: IOErrno AddrInfoReturn -> IOEInfo -> IO a
 throwAddrInfoError e info
     | e == eAI_ADDRFAMILY   = throwIO (UnsupportedOperation info)
     | e == eAI_AGAIN        = throwIO (ResourceExhausted info)
