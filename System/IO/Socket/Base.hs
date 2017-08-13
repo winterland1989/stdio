@@ -15,6 +15,7 @@ import System.IO.Handle
 import Data.IORef
 import Data.Array
 import Control.Monad
+import System.Posix.Types (CSsize(..))
 
 
 data TCP = TCP
@@ -36,29 +37,32 @@ closeTCP = undefined
 instance Input TCP where
     readInput tcp@(TCP handle slot readLock _ _ uvm fd) buf bufSiz = withMVar readLock $ \ _ -> do
         let dev = show tcp
-        pokeBufferTable uvm slot buf bufSiz
-        E.throwIfError dev $ do
-             withUVManagerEnsureRunning uvm (hs_read_start handle)
+        fromIntegral `fmap` E.retryInterruptWaitBlock dev
+            (c_recv fd buf (fromIntegral bufSiz) 0)
+            (do pokeBufferTable uvm slot buf bufSiz
+                E.throwIfError dev $ do
+                     withUVManagerEnsureRunning uvm (hs_read_start handle)
+                takeMVar =<< getBlockMVar uvm slot
+                E.throwIfError dev $ do getResult uvm slot)
 
-        takeMVar =<< getBlockMVar uvm slot
-
-        r <- E.throwIfError dev $ do getResult uvm slot
-        return (fromIntegral r)
 
 instance Output TCP where
-    writeOutput tcp@(TCP handle _ _ reqLock slot uvm fd) buf bufSiz = withMVar reqLock $ \ req ->  do
-        let dev = show tcp
-
-        pokeBufferTable uvm slot buf bufSiz
-        E.throwIfError (show tcp) $
-            withUVManagerEnsureRunning uvm (hs_write req handle)
-
-        takeMVar =<< getBlockMVar uvm slot
-
-        _ <- E.throwIfError dev $ getResult uvm slot
-        return ()
-
-
+    writeOutput tcp@(TCP handle _ _ reqLock slot uvm fd) buf bufSiz = withMVar reqLock $ \ req ->
+        loop req buf bufSiz
+      where
+        loop req buf bufSiz = do
+            let dev = show tcp
+            r <- E.retryInterruptWaitBlock dev
+                (c_send fd buf (fromIntegral bufSiz) 0) $ do
+                    pokeBufferTable uvm slot buf bufSiz
+                    E.throwIfError dev $
+                        withUVManagerEnsureRunning uvm (hs_write req handle)
+                    takeMVar =<< getBlockMVar uvm slot
+                    _ <- E.throwIfError dev $ getResult uvm slot
+                    return (fromIntegral bufSiz)
+            let r' = fromIntegral r
+            when (r' < bufSiz)  $
+                loop req (buf `plusPtr` r') (bufSiz - r')
 
 --------------------------------------------------------------------------------
 
@@ -160,11 +164,13 @@ accept :: HasCallStack
        -> IO SocketFd
 accept s@(TCPListener sock addr wait) = do
     addr <- newEmptyRawSockAddr
+    let dev = show addr
     withSockAddr addr $ \ addrPtr ->
         with (fromIntegral $ sockAddrSize addr) $ \ lenPtr -> do
-            SocketFd `fmap` E.retryInterruptWaitBlock (show addr)
+            SocketFd `fmap` E.retryInterruptWaitBlock dev
                 (c_accept sock addrPtr lenPtr)
-                (wait >> c_accept sock addrPtr lenPtr)
+                (do wait
+                    E.retryInterrupt dev $ c_accept sock addrPtr lenPtr)
 
 
 #if defined(SO_REUSEPORT) && defined(linux_HOST_OS)
@@ -204,10 +210,10 @@ foreign import CALLCONV unsafe "HsNet.h accept"
     c_accept :: CInt -> Ptr SockAddr -> Ptr CInt{-CSockLen???-} -> IO (E.WSAReturn CInt)
 
 foreign import CALLCONV unsafe "HsNet.h recv"
-    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CSize)
+    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CSsize)
 
 foreign import CALLCONV unsafe "HsNet.h send"
-    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CSize)
+    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CSsize)
 #else
 foreign import CALLCONV unsafe "HsNet.h socket"
     c_socket :: CInt -> CInt -> CInt -> IO (E.UnixReturn CInt)
@@ -222,8 +228,8 @@ foreign import CALLCONV unsafe "HsNet.h accept"
     c_accept :: CInt -> Ptr SockAddr -> Ptr CInt{-CSockLen???-} -> IO (E.UnixReturn CInt)
 
 foreign import CALLCONV unsafe "HsNet.h recv"
-    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CInt)
+    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CSsize)
 
 foreign import CALLCONV unsafe "HsNet.h send"
-    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CInt)
+    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CSsize)
 #endif
