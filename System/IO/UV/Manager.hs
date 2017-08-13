@@ -99,6 +99,7 @@ initTableSize :: Int
 initTableSize = 128
 
 uvManagerArray :: IORef (Array UVManager)
+{-# NOINLINE uvManagerArray #-}
 uvManagerArray = unsafePerformIO $ do
     numCaps <- getNumCapabilities
     uvmArray <- newArr numCaps
@@ -108,31 +109,43 @@ uvManagerArray = unsafePerformIO $ do
     newIORef iuvmArray
 
 getUVManager :: IO UVManager
+{-# INLINABLE getUVManager #-}
 getUVManager = do
     (cap, _) <- threadCapability =<< myThreadId
     uvmArray <- readIORef uvManagerArray
     indexArrM uvmArray (cap `rem` sizeofArr uvmArray)
 
+-- | Get 'MVar' from blocking table with given slot.
+--
+-- There's no need to take a lock here since the 'MVar' is the alwys the same one
+-- no matter how we resize the blocking table.
+--
 getBlockMVar :: UVManager -> Int -> IO (MVar ())
+{-# INLINABLE getBlockMVar #-}
 getBlockMVar uvm slot = do
     blockTable <- readIORef (uvmBlockTable uvm)
     indexArrM blockTable slot
 
+-- | Poke a prepared buffer and size into loop data under given slot.
+--
 pokeBufferTable :: UVManager -> Int -> Ptr Word8 -> Int -> IO ()
-pokeBufferTable uvm slot buf bufSiz = withMVar (uvmFreeSlotList uvm) $  \ _ -> do
+{-# INLINABLE pokeBufferTable #-}
+pokeBufferTable uvm slot buf bufSiz = withUVManager uvm $  \ _ -> do
     (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
     pokeElemOff bufTable slot buf
     pokeElemOff bufSizTable slot (fromIntegral bufSiz)
 
+-- | Peek result from loop data under given slot.
+--
 getResult :: UVManager -> Int -> IO (E.UVReturn CSsize)
-getResult uvm slot = withMVar (uvmFreeSlotList uvm) $  \ _ -> do
+{-# INLINABLE getResult #-}
+getResult uvm slot = withUVManager uvm $  \ _ -> do
     resultTable <- peekUVResultTable (uvmLoopData uvm)
     r <- peekElemOff resultTable slot
     return (E.UVReturn r)
 
 newUVManager :: HasCallStack => Int -> Int -> IO UVManager
 newUVManager siz cap = do
-
     mblockTable <- newArr siz
     forM_ [0..siz-1] $ \ i ->
         writeArr mblockTable i =<< newEmptyMVar
@@ -153,13 +166,14 @@ newUVManager siz cap = do
 
     idleCounter <- newCounter 0
 
-    -- _ <- mkWeakIORef blockTableRef $ do hs_loop_close loop
+    _ <- mkWeakIORef blockTableRef $ do hs_loop_close loop
 
     return (UVManager blockTableRef freeSlotList loop loopData runningLock async idleCounter cap)
 
 -- | libuv is not thread safe, use this function to perform handle/request initialization.
 --
 withUVManager :: HasCallStack => UVManager -> (Ptr UVLoop -> IO a) -> IO a
+{-# INLINABLE withUVManager #-}
 withUVManager uvm f = do
     r <- modifyMVar (uvmRunningLock uvm) $ \ running ->
         case running of
@@ -179,6 +193,7 @@ withUVManager uvm f = do
 -- This function also take care of restart uv manager in case of stopped.
 --
 withUVManagerEnsureRunning :: HasCallStack => UVManager -> IO a -> IO a
+{-# INLINABLE withUVManagerEnsureRunning #-}
 withUVManagerEnsureRunning uvm f = do
     r <- modifyMVar (uvmRunningLock uvm) $ \ running ->
         case running of
@@ -203,6 +218,7 @@ withUVManagerEnsureRunning uvm f = do
 -- Inside loop, we do either blocking wait or non-blocking wait depending on idle counter.
 --
 startUVManager :: UVManager -> IO ()
+{-# INLINABLE startUVManager #-}
 startUVManager uvm = do
     continue <- modifyMVar (uvmRunningLock uvm) $ \ _ -> do
         c <- uv_loop_alive(uvmLoop uvm)     -- we're holding the uv lock so no more new request can be add here
@@ -216,8 +232,7 @@ startUVManager uvm = do
             else writeIORefU idleCounter 0
 
             return (UVRunning, True)
-        else
-            return (UVStopped, False)
+        else return (UVStopped, False)
 
     -- If not continue, new events will find running is locking on 'False'
     -- and fork new uv manager thread.
@@ -256,10 +271,15 @@ startUVManager uvm = do
             return c
 
 allocSlot :: UVManager -> IO Int
-allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) = withUVManager uvm $ \ _ -> do
+{-# INLINABLE allocSlot #-}
+allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
-        []     -> do        -- free list is empty, we double it
+        []     -> withUVManager uvm $ \ _ -> do
+            -- free list is empty, we double it
+            -- but we shouldn't do it if uv_run doesn't finish yet
+            -- because we may re-allocate loop data in another thread
+            -- so we take the running lock first
 
             blockTable <- readIORef blockTableRef
             let oldSiz = sizeofArr blockTable
@@ -278,6 +298,8 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) = withUVMana
 
             return ([oldSiz+1..newSiz-1], oldSiz)    -- fill the free slot list
 
+
 freeSlot :: Int -> UVManager -> IO ()
+{-# INLINABLE freeSlot #-}
 freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)

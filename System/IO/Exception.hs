@@ -222,20 +222,22 @@ retryInterrupt dev f = do
 
 -- | Like 'retryInterrupt', but try a different action if 'isBlock' return true.
 --
-retryInterruptWaitBlock :: (HasCallStack, IOReturn r, Integral a)
-                        => String -> IO (r a) -> IO (r a) -> IO a
-retryInterruptWaitBlock dev f wait = f >>= loop
+-- The second action should handle errno on its own, we directly ask for its result.
+--
+retryInterruptWaitBlock :: forall r1 r2 a. (HasCallStack, IOReturn r1, IOReturn r2, Integral a)
+                        => String -> IO (r1 a) -> IO (r2 a) -> IO a
+retryInterruptWaitBlock dev f f2 = f >>= loop
   where
+    loop :: IOReturn r => r a -> IO a
     loop r =
         if (isError r)
         then do
             e <- getErrno r
             if isInterrupt e
             then do
-                retryInterruptWaitBlock dev f wait
+                retryInterruptWaitBlock dev f f2
             else if isBlock e
-                then do
-                    wait >>= loop
+                then f2 >>= loop
                 else do
                     name <- nameErrno e
                     desc <- descErrno e
