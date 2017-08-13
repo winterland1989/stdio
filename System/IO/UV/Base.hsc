@@ -4,6 +4,7 @@ module System.IO.UV.Base where
 import Foreign
 import Foreign.C
 import System.IO.UV.Exception (UVReturn(..))
+import System.Posix.Types (CSsize(..))
 
 -- The macro `#alignment` exists since GHC 8.0
 #if __GLASGOW_HASKELL__ < 800
@@ -30,7 +31,7 @@ clearUVEventCounter :: Ptr UVLoopData -> IO ()
 clearUVEventCounter p = do
     #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
 
-peekUVResultTable :: Ptr UVLoopData -> IO (Ptr CSize)
+peekUVResultTable :: Ptr UVLoopData -> IO (Ptr CSsize)
 peekUVResultTable p = do
     (#{peek hs_loop_data, result_table          } p)
 

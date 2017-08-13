@@ -36,28 +36,20 @@ closeTCP = undefined
 instance Input TCP where
     readInput tcp@(TCP handle slot readLock _ _ uvm fd) buf bufSiz = withMVar readLock $ \ _ -> do
         let dev = show tcp
-        (bufTable, bufSizTable) <- getBufferTable uvm
-
-        pokeElemOff bufTable slot buf
-        pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-
-        E.throwIfError dev $
-            withUVManagerEnsureRunning uvm (hs_read_start handle)
+        pokeBufferTable uvm slot buf bufSiz
+        E.throwIfError dev $ do
+             withUVManagerEnsureRunning uvm (hs_read_start handle)
 
         takeMVar =<< getBlockMVar uvm slot
 
-        r <- E.throwIfError dev $ getResult uvm slot
+        r <- E.throwIfError dev $ do getResult uvm slot
         return (fromIntegral r)
 
 instance Output TCP where
     writeOutput tcp@(TCP handle _ _ reqLock slot uvm fd) buf bufSiz = withMVar reqLock $ \ req ->  do
         let dev = show tcp
 
-        (bufTable, bufSizTable) <- getBufferTable uvm
-
-        pokeElemOff bufTable slot buf
-        pokeElemOff bufSizTable slot (fromIntegral bufSiz)
-
+        pokeBufferTable uvm slot buf bufSiz
         E.throwIfError (show tcp) $
             withUVManagerEnsureRunning uvm (hs_write req handle)
 
@@ -230,8 +222,8 @@ foreign import CALLCONV unsafe "HsNet.h accept"
     c_accept :: CInt -> Ptr SockAddr -> Ptr CInt{-CSockLen???-} -> IO (E.UnixReturn CInt)
 
 foreign import CALLCONV unsafe "HsNet.h recv"
-    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CSize)
+    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CInt)
 
 foreign import CALLCONV unsafe "HsNet.h send"
-    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CSize)
+    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.UnixReturn CInt)
 #endif

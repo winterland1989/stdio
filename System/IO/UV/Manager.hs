@@ -17,7 +17,7 @@ module System.IO.UV.Manager
   ( UVManager
   , getUVManager
   , getBlockMVar
-  , getBufferTable
+  , pokeBufferTable
   , getResult
   , allocSlot
   , freeSlot
@@ -41,6 +41,7 @@ import Control.Monad
 import Data.Primitive.Addr
 import System.IO.Unsafe
 import System.IO.UV.Base
+import System.Posix.Types (CSsize(..))
 
 --------------------------------------------------------------------------------
 
@@ -117,11 +118,14 @@ getBlockMVar uvm slot = do
     blockTable <- readIORef (uvmBlockTable uvm)
     indexArrM blockTable slot
 
-getBufferTable :: UVManager -> IO (Ptr (Ptr Word8), Ptr CSize)
-getBufferTable uvm = peekUVBufferTable (uvmLoopData uvm)
+pokeBufferTable :: UVManager -> Int -> Ptr Word8 -> Int -> IO ()
+pokeBufferTable uvm slot buf bufSiz = withMVar (uvmFreeSlotList uvm) $  \ _ -> do
+    (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
+    pokeElemOff bufTable slot buf
+    pokeElemOff bufSizTable slot (fromIntegral bufSiz)
 
-getResult :: UVManager -> Int -> IO (E.UVReturn CSize)
-getResult uvm slot = do
+getResult :: UVManager -> Int -> IO (E.UVReturn CSsize)
+getResult uvm slot = withMVar (uvmFreeSlotList uvm) $  \ _ -> do
     resultTable <- peekUVResultTable (uvmLoopData uvm)
     r <- peekElemOff resultTable slot
     return (E.UVReturn r)
@@ -149,8 +153,7 @@ newUVManager siz cap = do
 
     idleCounter <- newCounter 0
 
-    _ <- mkWeakIORef blockTableRef $ do
-        print cap >> hs_loop_close loop
+    -- _ <- mkWeakIORef blockTableRef $ do hs_loop_close loop
 
     return (UVManager blockTableRef freeSlotList loop loopData runningLock async idleCounter cap)
 
@@ -253,7 +256,7 @@ startUVManager uvm = do
             return c
 
 allocSlot :: UVManager -> IO Int
-allocSlot (UVManager blockTableRef freeSlotList loop _ _ _ _ _) = do
+allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) = withUVManager uvm $ \ _ -> do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do        -- free list is empty, we double it
