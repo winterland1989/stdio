@@ -99,6 +99,7 @@ initTableSize :: Int
 initTableSize = 128
 
 uvManagerArray :: IORef (Array UVManager)
+{-# NOINLINE uvManagerArray #-}
 uvManagerArray = unsafePerformIO $ do
     numCaps <- getNumCapabilities
     uvmArray <- newArr numCaps
@@ -132,7 +133,6 @@ getResult uvm slot = withMVar (uvmFreeSlotList uvm) $  \ _ -> do
 
 newUVManager :: HasCallStack => Int -> Int -> IO UVManager
 newUVManager siz cap = do
-
     mblockTable <- newArr siz
     forM_ [0..siz-1] $ \ i ->
         writeArr mblockTable i =<< newEmptyMVar
@@ -153,7 +153,7 @@ newUVManager siz cap = do
 
     idleCounter <- newCounter 0
 
-    -- _ <- mkWeakIORef blockTableRef $ do hs_loop_close loop
+    _ <- mkWeakIORef blockTableRef $ do hs_loop_close loop
 
     return (UVManager blockTableRef freeSlotList loop loopData runningLock async idleCounter cap)
 
@@ -216,8 +216,7 @@ startUVManager uvm = do
             else writeIORefU idleCounter 0
 
             return (UVRunning, True)
-        else
-            return (UVStopped, False)
+        else return (UVStopped, False)
 
     -- If not continue, new events will find running is locking on 'False'
     -- and fork new uv manager thread.
@@ -259,7 +258,10 @@ allocSlot :: UVManager -> IO Int
 allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) = withUVManager uvm $ \ _ -> do
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
-        []     -> do        -- free list is empty, we double it
+        []     -> do
+            -- free list is empty, we double it
+            -- but we shouldn't do it if uv_run doesn't finish yet
+            -- because we may re-allocate loop data in another thread
 
             blockTable <- readIORef blockTableRef
             let oldSiz = sizeofArr blockTable

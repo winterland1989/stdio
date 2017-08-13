@@ -106,6 +106,7 @@ void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
 }
 
 void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
+    if (nread != 0 ){
         size_t slot = (size_t)stream->data;
         hs_loop_data* loop_data = stream->loop->data;
 
@@ -116,6 +117,7 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
         loop_data->event_counter += 1;
 
         uv_read_stop(stream);
+    }
 }
 
 int hs_read_start(uv_stream_t* stream){
