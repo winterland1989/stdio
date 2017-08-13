@@ -43,7 +43,7 @@ instance Input TCP where
                 E.throwIfError dev $ do
                      withUVManagerEnsureRunning uvm (hs_read_start handle)
                 takeMVar =<< getBlockMVar uvm slot
-                E.throwIfError dev $ do getResult uvm slot)
+                getResult uvm slot)
 
 
 instance Output TCP where
@@ -58,8 +58,11 @@ instance Output TCP where
                     E.throwIfError dev $
                         withUVManagerEnsureRunning uvm (hs_write req handle)
                     takeMVar =<< getBlockMVar uvm slot
-                    _ <- E.throwIfError dev $ getResult uvm slot
-                    return (fromIntegral bufSiz)
+                    r <- getResult uvm slot
+                    if r > 0
+                    then return (fromIntegral bufSiz)
+                    else return r
+
             let r' = fromIntegral r
             when (r' < bufSiz)  $
                 loop req (buf `plusPtr` r') (bufSiz - r')
@@ -169,8 +172,7 @@ accept s@(TCPListener sock addr wait) = do
         with (fromIntegral $ sockAddrSize addr) $ \ lenPtr -> do
             SocketFd `fmap` E.retryInterruptWaitBlock dev
                 (c_accept sock addrPtr lenPtr)
-                (do wait
-                    E.retryInterrupt dev $ c_accept sock addrPtr lenPtr)
+                (wait >> c_accept sock addrPtr lenPtr)
 
 
 #if defined(SO_REUSEPORT) && defined(linux_HOST_OS)
