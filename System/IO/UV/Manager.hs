@@ -11,6 +11,18 @@ Portability : non-portable
 
 This module provide I/O manager which bridge libuv's async interface with ghc's light weight thread.
 
+The main procedures for doing event I/O is:
+
++ Allocate a slot number using 'allocSlot'.
++ Prepare you I/O buffer and write them to uv loop with 'pokeBufferTable'(both read and write).
++ Block your thread with a 'MVar', using 'getBlockMVar' to get it.
++ Read the result with 'getResult', for read it's the read bytes number, for write it will be zero.
+  Use 'E.throwIfError' to guard error situations.
++ Return the slot back uv manager with 'freeSlot'.
+
+Usually slots are cache in the I/O device so that you don't have to allocate new one before each I/O operation.
+Check "System.IO.Socket.TCP" as an example.
+
 -}
 
 module System.IO.UV.Manager
@@ -154,14 +166,14 @@ newUVManager siz cap = do
 
     freeSlotList <- newMVar [0..siz-1]
 
-    loop <- E.throwOOMIfNull "uv manager" $
+    loop <- E.throwOOMIfNull uvManagerStr $
         hs_loop_init (fromIntegral siz)
 
     loopData <- peek_uv_loop_data loop
 
     runningLock <- newMVar UVStopped
 
-    async <- E.throwOOMIfNull "malloc block async handler for uv manager" $ hs_handle_init uV_ASYNC
+    async <- E.throwOOMIfNull uvManagerStr $ hs_handle_init uV_ASYNC
     hs_async_init_stop_loop loop async
 
     idleCounter <- newCounter 0
@@ -178,7 +190,7 @@ withUVManager uvm f = do
     r <- modifyMVar (uvmRunningLock uvm) $ \ running ->
         case running of
             UVBlocking -> do
-                E.throwIfError "uvm async handle" $ uv_async_send (uvmAsync uvm)
+                E.throwIfError uvManagerStr $ uv_async_send (uvmAsync uvm)
                 return (UVBlocking, Nothing)
             s -> do
                 r <- f (uvmLoop uvm)
@@ -186,7 +198,7 @@ withUVManager uvm f = do
 
     case r of
         Just r' -> return r'
-        _       -> yield >> withUVManager uvm f
+        _       -> yield >> withUVManager uvm f -- we yield here, because uv_run is probably not finished yet
 
 -- | libuv is not thread safe, use this function to start reading/writing.
 --
@@ -202,7 +214,7 @@ withUVManagerEnsureRunning uvm f = do
                 void $ forkOn (uvmCap uvm) (startUVManager uvm)
                 return (UVRunning, Just r)
             UVBlocking -> do
-                E.throwIfError "uvm async handle" $ uv_async_send (uvmAsync uvm)
+                E.throwIfError uvManagerStr $ uv_async_send (uvmAsync uvm)
                 return (UVBlocking, Nothing)
             s -> do
                 r <- f
@@ -234,7 +246,7 @@ startUVManager uvm = do
             return (UVRunning, True)
         else return (UVStopped, False)
 
-    -- If not continue, new events will find running is locking on 'False'
+    -- If not continue, new events will find running is locking on 'UVStopped'
     -- and fork new uv manager thread.
     when continue $ do
         let idleCounter = uvmIdleCounter uvm
@@ -251,14 +263,13 @@ startUVManager uvm = do
 
   where
     -- call uv_run, return the event number
-    --
     step :: UVManager -> Bool -> IO CSize
     step (UVManager blockTableRef freeSlotList loop loopData _ _ _ _) block = do
             blockTable <- readIORef blockTableRef
 
             clearUVEventCounter loopData
 
-            E.retryInterrupt "uv manager uv_run" $
+            E.retryInterrupt uvManagerStr $
                 if block
                 then uv_run_safe loop uV_RUN_ONCE
                 else uv_run loop uV_RUN_NOWAIT
@@ -270,6 +281,8 @@ startUVManager uvm = do
                 void $ tryPutMVar lock ()
             return c
 
+-- | Allocate a slot number for given handler or request.
+--
 allocSlot :: UVManager -> IO Int
 {-# INLINABLE allocSlot #-}
 allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
@@ -299,7 +312,14 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
             return ([oldSiz+1..newSiz-1], oldSiz)    -- fill the free slot list
 
 
+-- | Return slot back to the uv manager where it allocate from.
+--
 freeSlot :: Int -> UVManager -> IO ()
 {-# INLINABLE freeSlot #-}
 freeSlot slot  (UVManager _ freeSlotList _ _ _ _ _ _) =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)
+
+--------------------------------------------------------------------------------
+
+uvManagerStr :: String
+uvManagerStr = "uv manager"

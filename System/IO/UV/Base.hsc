@@ -17,7 +17,6 @@ import System.Posix.Types (CSsize(..))
 newtype UVSlot = UVSlot CSize 
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
-
 --------------------------------------------------------------------------------
 
 data UVLoopData
