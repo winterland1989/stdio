@@ -3,6 +3,7 @@
 module System.IO.Socket.Base where
 
 import qualified System.IO.Exception as E
+import qualified System.IO.Socket.Exception as E
 import System.IO.Socket.Address
 import Foreign.C
 import Foreign

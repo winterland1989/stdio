@@ -11,9 +11,10 @@ import qualified Data.ByteString.Internal as B
 import GHC.ForeignPtr
 import Control.Monad
 import Data.IORef.Unboxed
+import Network.Socket (withSocketsDo)
 
 main :: IO ()
-main = do
+main = withSocketsDo $ do
     sock <- socket aF_INET sOCK_STREAM iPPROTO_TCP
     b <- bind sock $ SockAddrInet (fromIntegral 8888) inetAny
     l <- listen b 32768

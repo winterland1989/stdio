@@ -26,7 +26,7 @@ import Foreign.Storable
 -- | The standard errno handling already take care of socket error on unix systems, but on windows
 -- The errno is different, so does the errno handling.
 --
-newtype WSAReturn = WSAReturn CInt 
+newtype WSAReturn a = WSAReturn a 
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
 
 instance IOReturn WSAReturn where
@@ -34,9 +34,10 @@ instance IOReturn WSAReturn where
         deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
     isError (WSAReturn r) = r == -1
     isInterrupt e = False
-    isBlock e = wSAEWOULDBLOCK
-    getErrno _ == wsa_getLastError
-    nameErrno = retur . nameWSAErrno
+    isBlock e = e == wSAEWOULDBLOCK
+    getErrno _ = wsa_getLastError
+    getReturn (WSAReturn a) = a
+    nameErrno = return . nameWSAErrno
     descErrno e = c_getWSError e >>= peekCString
     throwErrno = throwWSAError
 
@@ -45,7 +46,7 @@ foreign import ccall unsafe "getWSErrorDescr" c_getWSError :: IOErrno WSAReturn 
 
 --------------------------------------------------------------------------------
 
-throwWSAError :: WSAErrno -> IOEInfo -> IO a
+throwWSAError :: IOErrno WSAReturn -> IOEInfo -> IO a
 throwWSAError e info
     | e == wSAEINTR           = throwIO (Interrupted             info) -- TODO :: rework the mapping
     | e == wSAEBADF           = throwIO (InvalidArgument         info)
