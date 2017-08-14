@@ -39,7 +39,11 @@ instance Input TCP where
     readInput tcp@(TCP handle slot readLock _ _ uvm fd) buf bufSiz = withMVar readLock $ \ _ -> do
         let dev = show tcp
         fromIntegral `fmap` E.retryInterruptWaitBlock dev
-            (c_recv fd buf (fromIntegral bufSiz) 0)
+#if defined(mingw32_HOST_OS)
+                (fromIntegral `fmap` c_recv fd buf (fromIntegral bufSiz) 0 :: IO (E.WSAReturn CSsize)) 
+#else
+                (c_send fd buf (fromIntegral bufSiz) 0)
+#endif
             (do pokeBufferTable uvm slot buf bufSiz
                 E.throwIfError dev $ do
                      withUVManagerEnsureRunning uvm (hs_read_start handle)
@@ -54,15 +58,19 @@ instance Output TCP where
         loop req buf bufSiz = do
             let dev = show tcp
             r <- E.retryInterruptWaitBlock dev
-                (c_send fd buf (fromIntegral bufSiz) 0) $ do
-                    pokeBufferTable uvm slot buf bufSiz
+#if defined(mingw32_HOST_OS)
+                (fromIntegral `fmap` c_send fd buf (fromIntegral bufSiz) 0 :: IO (E.WSAReturn CSsize)) 
+#else
+                (c_send fd buf (fromIntegral bufSiz) 0)
+#endif
+                (do pokeBufferTable uvm slot buf bufSiz
                     E.throwIfError dev $
                         withUVManagerEnsureRunning uvm (hs_write req handle)
                     takeMVar =<< getBlockMVar uvm slot
                     r <- getResult uvm slot
-                    if r > 0
+                    if r >= 0
                     then return (fromIntegral bufSiz)
-                    else return r
+                    else return r)
 
             let r' = fromIntegral r
             when (r' < bufSiz)  $
@@ -213,10 +221,10 @@ foreign import CALLCONV unsafe "HsNet.h accept"
     c_accept :: CInt -> Ptr SockAddr -> Ptr CInt{-CSockLen???-} -> IO (E.WSAReturn CInt)
 
 foreign import CALLCONV unsafe "HsNet.h recv"
-    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CSsize)
+    c_recv :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CInt)
 
 foreign import CALLCONV unsafe "HsNet.h send"
-    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CSsize)
+    c_send :: CInt -> Ptr Word8 -> CSize -> CInt -> IO (E.WSAReturn CInt)
 #else
 foreign import CALLCONV unsafe "HsNet.h socket"
     c_socket :: CInt -> CInt -> CInt -> IO (E.UnixReturn CInt)

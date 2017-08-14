@@ -25,7 +25,7 @@ uv_loop_t* hs_loop_init(size_t siz){
     size_t* buffer_size_table = malloc(siz*sizeof(size_t));
     if (buffer_size_table == NULL) return NULL;
 
-    size_t* result_table = malloc(siz*sizeof(size_t));
+    size_t* result_table = malloc(siz*sizeof(ssize_t));
     if (result_table == NULL) return NULL;
 
     loop_data->event_queue             = event_queue;
@@ -128,7 +128,7 @@ void hs_write_cb(uv_write_t* req, int status){
     size_t slot = (size_t)req->data;
     hs_loop_data* loop_data = req->handle->loop->data;
 
-    loop_data->result_table[slot] = status;                   // 0 in case of success, < 0 otherwise.
+    loop_data->result_table[slot] = (ssize_t)status;                   // 0 in case of success, < 0 otherwise.
 
     loop_data->event_queue[loop_data->event_counter] = slot;   // push the slot to event queue
     loop_data->event_counter += 1;
@@ -191,7 +191,7 @@ int uv_tcp_open_win32(uv_tcp_t* handle, uv_os_sock_t sock) {
 void hs_connection_cb(uv_stream_t* server, int status){
     size_t slot = (size_t)server->data;
     hs_loop_data* loop_data = server->loop->data;
-    loop_data->result_table[slot] = status;                  // 0 in case of success, < 0 otherwise.
+    loop_data->result_table[slot] = (ssize_t)status;         // 0 in case of success, < 0 otherwise.
     loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
     loop_data->event_counter += 1;
 }
@@ -207,7 +207,7 @@ void hs_poll_cb(uv_poll_t* handle, int status, int events){
     size_t slot = (size_t)handle->data;
     hs_loop_data* loop_data = handle->loop->data;
 
-    loop_data->result_table[slot] = status;                  // 0 in case of success, < 0 otherwise.
+    loop_data->result_table[slot] = (ssize_t)status;         // 0 in case of success, < 0 otherwise.
     loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
     loop_data->event_counter += 1;
 

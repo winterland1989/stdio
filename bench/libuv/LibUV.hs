@@ -12,9 +12,11 @@ import GHC.ForeignPtr
 import Control.Monad
 import Data.IORef.Unboxed
 import Network.Socket (withSocketsDo)
+import System.IO
 
 main :: IO ()
 main = withSocketsDo $ do
+    hSetBuffering stdout LineBuffering
     sock <- socket aF_INET sOCK_STREAM iPPROTO_TCP
     b <- bind sock $ SockAddrInet (fromIntegral 8888) inetAny
     l <- listen b 32768
