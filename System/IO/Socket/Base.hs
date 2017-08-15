@@ -40,9 +40,9 @@ instance Input TCP where
         let dev = show tcp
         fromIntegral `fmap` E.retryInterruptWaitBlock dev
 #if defined(mingw32_HOST_OS)
-                (fromIntegral `fmap` c_recv fd buf (fromIntegral bufSiz) 0 :: IO (E.WSAReturn CSsize)) 
+                (fromIntegral `fmap` c_recv fd buf (fromIntegral bufSiz) 0 :: IO (E.WSAReturn CSsize))
 #else
-                (c_send fd buf (fromIntegral bufSiz) 0)
+                (c_recv fd buf (fromIntegral bufSiz) 0)
 #endif
             (do pokeBufferTable uvm slot buf bufSiz
                 E.throwIfError dev $ do
@@ -59,7 +59,7 @@ instance Output TCP where
             let dev = show tcp
             r <- E.retryInterruptWaitBlock dev
 #if defined(mingw32_HOST_OS)
-                (fromIntegral `fmap` c_send fd buf (fromIntegral bufSiz) 0 :: IO (E.WSAReturn CSsize)) 
+                (fromIntegral `fmap` c_send fd buf (fromIntegral bufSiz) 0 :: IO (E.WSAReturn CSsize))
 #else
                 (c_send fd buf (fromIntegral bufSiz) 0)
 #endif
