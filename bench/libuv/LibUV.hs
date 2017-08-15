@@ -3,6 +3,7 @@ module Main where
 
 import System.IO.Handle
 import System.IO.Socket.Base
+import System.IO.Socket.TCP
 import System.IO.Socket.Address
 import Control.Concurrent
 import Foreign
@@ -27,6 +28,7 @@ main = withSocketsDo $ do
         c <- atomicAddCounter_ capCounter 1
         forkOn c $ do
             tcp <- newTCP sock'
+            setTCPNodelay tcp True
             forever $ do
                 recvbuf <- mallocPlainForeignPtrBytes 2048
                 withForeignPtr recvbuf $ \ p -> do

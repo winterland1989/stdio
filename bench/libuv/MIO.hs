@@ -22,6 +22,7 @@ main = do
         c <- atomicAddCounter_ capCounter 1
         forkOn c $ do
             forever $ do
+                setSocketOption sock' NoDelay 1
                 _ <- recv sock' 2048
                 sendAll sock' sendbuf
   where

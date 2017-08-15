@@ -152,6 +152,8 @@ foreign import ccall unsafe uv_tcp_open :: Ptr UVHandle -> CInt -> IO (UVReturn 
 #endif
 
 foreign import ccall unsafe uv_tcp_simultaneous_accepts :: Ptr UVHandle -> CInt -> IO (UVReturn CInt)
+foreign import ccall unsafe uv_tcp_nodelay :: Ptr UVHandle -> CInt -> IO (UVReturn CInt)
+foreign import ccall unsafe uv_tcp_keepalive :: Ptr UVHandle -> CInt -> CUInt -> IO (UVReturn CInt)
 
 --------------------------------------------------------------------------------
 -- uv_poll_t
