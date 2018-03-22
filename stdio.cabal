@@ -40,29 +40,35 @@ library
                             GHC.Stack.Compat
 
                             System.IO.Exception 
+                            System.IO.Buffer
                             -- System.IO.File
-                            System.IO.Handle
+                            -- System.IO.Handle
                             System.LowResTimer
 
                             -- System.IO.TTY
                             
-                            System.IO.UV.Base
-                            System.IO.UV.Exception
+                            System.IO.UV.Exception 
+                            System.IO.UV.Stream
+                            System.IO.UV.Internal
                             System.IO.UV.Manager
+
+                            System.IO.Net
+                            System.IO.Net.SockAddr
+
                             -- System.IO.Socket
-                            System.IO.Socket.Address
-                            System.IO.Socket.Base
-                            System.IO.Socket.TCP
-                            System.IO.Socket.Exception
+                            -- System.IO.Socket.Address
+                            -- System.IO.Socket.Base
+                            -- System.IO.Socket.TCP
+                            -- System.IO.Socket.Exception
+
 
 
     -- other-modules:          System.IO.UV
     -- other-extensions:    
-    extra-libraries:         uv
+    extra-libraries:        uv
     build-depends:          base >=4.7 && <5.0
                         ,   ghc-prim  >= 0.4
                         ,   primitive >= 0.6.2
-                        ,   network
                         ,   deepseq
                         ,   template-haskell 
                         ,   unboxed-ref >= 0.4
