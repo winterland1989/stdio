@@ -8,7 +8,7 @@
 module Data.Builder where
 
 import Control.Monad.Primitive
-import Control.Monad.ST
+import GHC.Prim (RealWorld)
 import Control.Monad
 import qualified Data.Vector as V
 import qualified Data.Array as A
@@ -25,26 +25,26 @@ import System.IO.Unsafe (unsafeInterleaveIO, unsafeDupablePerformIO)
 
 -- | 'AllocateStrategy' will decide how each 'BuildStep' proceed when previous buffer is not enough.
 --
-data AllocateStrategy m
+data AllocateStrategy
     = DoubleBuffer       -- Double the buffer and continue building
     | InsertChunk {-# UNPACK #-} !Int   -- Insert a new chunk and continue building
-    | OneShotAction (V.Bytes -> m ())   -- Freeze current chunk and perform action with it.
+    | OneShotAction (V.Bytes -> IO ())   -- Freeze current chunk and perform action with it.
                                         -- Use the 'V.Bytes' argument outside the action is dangerous
                                         -- since we will reuse the buffer after action finished.
 
 -- | Helper type to help ghc unpack
 --
-data Buffer s = Buffer {-# UNPACK #-} !(A.MutablePrimArray s Word8)  -- well, the buffer content
+data Buffer = Buffer {-# UNPACK #-} !(A.MutablePrimArray RealWorld Word8)  -- well, the buffer content
                        {-# UNPACK #-} !Int  -- writing offset
 
 -- | @BuilderStep@ is a function that fill buffer under given conditions.
 --
-type BuildStep m = Buffer (PrimState m) -> m [V.Bytes]
+type BuildStep = Buffer -> IO [V.Bytes]
 
 -- | @Builder@ is a monoid to help compose @BuilderStep@. With next @BuilderStep@ continuation,
 -- We can do interesting things like perform some action, or interleave the build process.
 --
-newtype Builder = Builder { runBuilder :: AllocateStrategy IO -> BuildStep IO -> BuildStep IO }
+newtype Builder = Builder { runBuilder :: AllocateStrategy -> BuildStep -> BuildStep }
 
 #if MIN_VERSION_base(4,9,0)
 instance Semigroup Builder where
@@ -133,7 +133,7 @@ ensureFree !n = Builder $ \ strategy k buffer@(Buffer buf offset) -> do
 --
 -- | Handle chunk boundary
 --
-doubleBuffer :: Int -> BuildStep IO -> BuildStep IO
+doubleBuffer :: Int -> BuildStep -> BuildStep
 doubleBuffer !wantSiz k buffer@(Buffer buf offset) = do
     !siz <- A.sizeofMutableArr buf
     let !siz' = max (offset + wantSiz `shiftL` 1)
@@ -142,7 +142,7 @@ doubleBuffer !wantSiz k buffer@(Buffer buf offset) = do
     k (Buffer buf' offset)                 -- continue building
 {-# INLINE doubleBuffer #-}
 
-insertChunk :: Int -> Int -> BuildStep IO -> BuildStep IO
+insertChunk :: Int -> Int -> BuildStep -> BuildStep
 insertChunk !chunkSiz !wantSiz k buffer@(Buffer buf offset) = do
     !siz <- A.sizeofMutableArr buf
     case () of
@@ -161,7 +161,7 @@ insertChunk !chunkSiz !wantSiz k buffer@(Buffer buf offset) = do
                 k (Buffer buf' 0 )
 {-# INLINE insertChunk #-}
 
-oneShotAction :: (V.Bytes -> IO ()) -> Int -> BuildStep IO -> BuildStep IO
+oneShotAction :: (V.Bytes -> IO ()) -> Int -> BuildStep -> BuildStep
 oneShotAction action !wantSiz k buffer@(Buffer buf offset) = do
     !siz <- A.sizeofMutableArr buf
     case () of
@@ -191,7 +191,7 @@ buildBytesWith initSiz (Builder b) = unsafeDupablePerformIO $ do
     [bs] <- b DoubleBuffer lastStep (Buffer buf 0 )
     return bs
   where
-    lastStep :: Buffer RealWorld -> IO [V.PrimVector Word8]
+    lastStep :: Buffer -> IO [V.PrimVector Word8]
     lastStep (Buffer buf offset) = do
         siz <- A.sizeofMutableArr buf
         when (offset < siz) (A.shrinkMutableArr buf offset)

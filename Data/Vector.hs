@@ -518,6 +518,8 @@ packN n0 = \ ws0 -> runST (do let n = max 4 n0
                 writeArr mba' i x
                 return (IPair (i+1) mba')
 
+-- | Index pair type for writing high performance loops
+--
 data IPair a = IPair {-# UNPACK #-}!Int a
 
 -- | /O(n)/

@@ -37,6 +37,7 @@ library
                             Data.Binary
                             Data.Builder
 
+                            Foreign.PrimArray
                             GHC.Stack.Compat
 
                             System.IO.Exception 

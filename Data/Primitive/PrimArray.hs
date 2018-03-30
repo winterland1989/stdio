@@ -36,6 +36,11 @@ Here is an example of a RGB pixel 'Prim' instance.
 @
 
 Now you can use 'PrimArray Pixel' with either this module or "Data.Array/Data.Vector".
+
+If you're trying to do FFI with primitive array, please use functions from "Foreign.PrimArray" instead of
+using 'withPrimArrayContent' \/ 'withMutablePrimArrayContents' directly, Read notes in "Foreign.PrimArray"
+to understand why these functions are dangerous.
+
 -}
 
 
@@ -103,6 +108,7 @@ newtype MutablePrimArray s a = MutablePrimArray (MutableByteArray s)
     deriving (Typeable, Data)
 
 -- | Create a new mutable primitive array of the specified size.
+--
 newPrimArray :: forall m a . (PrimMonad m, Prim a) => Int -> m (MutablePrimArray (PrimState m) a)
 {-# INLINE newPrimArray #-}
 newPrimArray n = MutablePrimArray `fmap` newByteArray (n*siz)
@@ -148,7 +154,7 @@ mutablePrimArrayContents (MutablePrimArray mba) =
 -- This operation is only safe on /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or
 -- 'newAlignedPinnedPrimArray'.
 --
-withPrimArrayContents :: PrimArray a -> (Ptr a -> IO b) -> IO b
+withPrimArrayContents :: PrimMonad m => PrimArray a -> (Ptr a -> m b) -> m b
 {-# INLINE withPrimArrayContents #-}
 withPrimArrayContents (PrimArray ba) f = do
     let !(Addr addr#) = byteArrayContents ba
@@ -162,7 +168,7 @@ withPrimArrayContents (PrimArray ba) f = do
 -- This operation is only safe on /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or
 -- 'newAlignedPinnedPrimArray'.
 --
-withMutablePrimArrayContents :: MutablePrimArray RealWorld a -> (Ptr a -> IO b) -> IO b
+withMutablePrimArrayContents :: PrimMonad m => MutablePrimArray (PrimState m) a -> (Ptr a -> m b) -> m b
 {-# INLINE withMutablePrimArrayContents #-}
 withMutablePrimArrayContents (MutablePrimArray mba) f = do
     let !(Addr addr#) = mutableByteArrayContents mba

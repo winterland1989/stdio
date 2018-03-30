@@ -26,14 +26,17 @@ import Control.Monad
 import Control.Monad.ST
 import GHC.Prim
 import Foreign.Ptr
+import Foreign.C.Types (CSize(..))
+import System.Posix.Types (CSsize(..))
+import Foreign.PrimArray
 import Data.Word
 import Data.IORef
 import Data.IORef.Unboxed
 import Data.Typeable
-import qualified Data.Array as A
-import qualified Data.Primitive.PrimArray as A
+import Data.Primitive.PrimArray
 import qualified Data.Text as T
 import qualified Data.Vector as V
+import qualified Data.Builder as B
 import qualified Data.Text.UTF8Codec as T
 import GHC.Stack.Compat
 
@@ -42,35 +45,40 @@ import GHC.Stack.Compat
 -- Convention: 'input' should return 0 on EOF.
 --
 class Input i where
-    readInput :: HasCallStack => i -> Ptr Word8 ->  Int -> IO Int
+    readInput :: HasCallStack => i -> Ptr Word8 -> Int -> IO Int
 
 -- | Output device
 --
 class Output o where
     writeOutput :: HasCallStack => o -> Ptr Word8 -> Int -> IO ()
 
-data InputBuffer i = InputBuffer
+data BufferedInput i = BufferedInput
     { bufInput    :: i
     , bufSize     :: {-# UNPACK #-} !Int
     , bufPushBack :: {-# UNPACK #-} !(IORef V.Bytes)
-    , inputBuffer :: {-# UNPACK #-} !(IORef (A.MutablePrimArray RealWorld Word8))
+    , inputBuffer :: {-# UNPACK #-} !(IORef (MutablePrimArray RealWorld Word8))
     }
 
-data OutputBuffer o = OutputBuffer
+data BufferedOutput o = BufferedOutput
     { bufOutput     :: o
     , bufIndex      :: {-# UNPACK #-} !(IORefU Int)
-    , outputBuffer  :: {-# UNPACK #-} !(A.MutablePrimArray RealWorld Word8)
+    , outputBuffer  :: {-# UNPACK #-} !(MutablePrimArray RealWorld Word8)
     }
 
-newInputBuffer :: input -> Int -> IO (InputBuffer input)
-newInputBuffer i bufSiz = do
+newBufferedInput :: input -> Int -> IO (BufferedInput input)
+newBufferedInput i bufSiz = do
     pb <- newIORef V.empty
-    embuf <- A.newArr 0
-    inputBuffer <- newIORef embuf
-    return (InputBuffer i bufSiz pb inputBuffer)
+    buf <- newPinnedPrimArray bufSiz
+    inputBuffer <- newIORef buf
+    return (BufferedInput i bufSiz pb inputBuffer)
 
+newOutputBuffer :: output -> Int -> IO (BufferedOutput output)
+newOutputBuffer o bufSiz = do
+    index <- newIORefU 0
+    buf <- newPinnedPrimArray bufSiz
+    return (BufferedOutput o index buf)
 
--- | Request bytes from 'InputBuffer'.
+-- | Request bytes from 'BufferedInput'.
 --
 -- The buffering logic is quite simple:
 --
@@ -78,29 +86,25 @@ newInputBuffer i bufSiz = do
 -- If we read N bytes, and N is larger than half of the buffer size, then we freeze buffer and return,
 -- otherwise we copy buffer into result and reuse buffer afterward.
 --
-readBuffer :: (HasCallStack, Input i) => InputBuffer i -> IO V.Bytes
-readBuffer InputBuffer{..} = do
+readBuffer :: (HasCallStack, Input i) => BufferedInput i -> IO V.Bytes
+readBuffer BufferedInput{..} = do
     pb <- readIORef bufPushBack
     if V.null pb
     then do
         rbuf <- readIORef inputBuffer
-        bufSiz <- A.sizeofMutableArr rbuf
-        buf <- if bufSiz == 0                 -- spare bufffer is empty
-            then A.newPinnedPrimArray bufSize  -- create a new one
-            else return rbuf
-        l <- readInput bufInput (A.mutablePrimArrayContents buf) bufSize
+        bufSiz <- sizeofMutablePrimArray rbuf
+        l <- readInput bufInput (mutablePrimArrayContents rbuf) bufSize
         if l < bufSize `quot` 2                -- read less than half size
         then do
-            mba <- A.newArr l                   -- copy result into new array
-            A.copyMutableArr mba 0 buf 0 l
-            ba <- A.unsafeFreezeArr mba
-            writeIORef inputBuffer buf
+            mba <- newPrimArray l              -- copy result into new array
+            copyMutablePrimArray mba 0 rbuf 0 l
+            ba <- unsafeFreezePrimArray mba
             return $! V.fromArr ba 0 l
-        else do                                 -- freeze buf into result
+        else do                                -- freeze buf into result
             when (bufSiz /= 0) $ do
-                embuf <- A.newArr 0
-                writeIORef inputBuffer embuf
-            ba <- A.unsafeFreezeArr buf
+                buf' <- newPinnedPrimArray bufSiz
+                writeIORef inputBuffer buf'
+            ba <- unsafeFreezePrimArray rbuf
             return $! V.fromArr ba 0 l
     else do
         writeIORef bufPushBack V.empty
@@ -110,7 +114,7 @@ readBuffer InputBuffer{..} = do
 --
 -- If EOF reached before N bytes read, a 'ShortReadException' will be thrown
 --
-readExactly :: (HasCallStack, Input i) => Int -> InputBuffer i -> IO V.Bytes
+readExactly :: (HasCallStack, Input i) => Int -> BufferedInput i -> IO V.Bytes
 readExactly n h = V.concat `fmap` (go h n)
   where
     go h n = do
@@ -140,15 +144,15 @@ instance Exception ShortReadException where
 
 -- | Push bytes back into buffer
 --
-unReadBuffer :: (HasCallStack, Input i) => V.Bytes -> InputBuffer i -> IO ()
-unReadBuffer pb' InputBuffer{..} = do
+unReadBuffer :: (HasCallStack, Input i) => V.Bytes -> BufferedInput i -> IO ()
+unReadBuffer pb' BufferedInput{..} = do
     modifyIORef' bufPushBack $ \ pb -> pb' `V.append` pb
 
 -- | Read until reach a magic bytes
 --
 -- If EOF reached before meet a magic byte, a 'ShortReadException' will be thrown.
 
-readToMagic :: (HasCallStack, Input i) => Word8 -> InputBuffer i -> IO V.Bytes
+readToMagic :: (HasCallStack, Input i) => Word8 -> BufferedInput i -> IO V.Bytes
 readToMagic magic h = V.concat `fmap` (go h magic)
   where
     go h magic = do
@@ -167,7 +171,7 @@ readToMagic magic h = V.concat `fmap` (go h magic)
 
 -- | Read a line
 --
-readLine :: (HasCallStack, Input i) => InputBuffer i -> IO T.Text
+readLine :: (HasCallStack, Input i) => BufferedInput i -> IO T.Text
 readLine h = do
     bss <- go h (V.c2w '\n')
     case T.validateUTF8 (V.concat bss) of
@@ -195,8 +199,8 @@ readLine h = do
 
 -- | Read a chunk of text
 --
-readTextChunk :: (HasCallStack, Input i) => InputBuffer i -> IO T.Text
-readTextChunk h@InputBuffer{..} = do
+readTextChunk :: (HasCallStack, Input i) => BufferedInput i -> IO T.Text
+readTextChunk h@BufferedInput{..} = do
     chunk <- readBuffer h
     if V.null chunk
     then return T.empty
@@ -206,12 +210,12 @@ readTextChunk h@InputBuffer{..} = do
         if minLen > vl                              -- is this chunk partial?
         then do                                     -- if so, try continue reading first
             rbuf <- readIORef inputBuffer
-            bufSiz <- A.sizeofMutableArr rbuf
-            buf <- if bufSiz == 0                  -- spare bufffer is empty
-                then A.newPinnedPrimArray bufSize   -- create a new one
+            bufSiz <- sizeofMutablePrimArray rbuf
+            buf <- if bufSiz == 0                 -- spare bufffer is empty
+                then newPinnedPrimArray bufSize   -- create a new one
                 else return rbuf
-            A.copyArr buf 0 vba vs vl               -- copy the partial chunk into buffer and try read new bytes
-            l <- readInput bufInput (A.mutablePrimArrayContents buf `plusPtr` vl) (bufSize - vl)
+            copyPrimArray rbuf 0 vba vs vl         -- copy the partial chunk into buffer and try read new bytes
+            l <- readInput bufInput (mutablePrimArrayContents buf `plusPtr` vl) (bufSize - vl)
             let l' = l + vl
             if l' < bufSize `quot` 2                -- read less than half size
             then if l' == vl
@@ -219,16 +223,16 @@ readTextChunk h@InputBuffer{..} = do
                     throwIO (UTF8PartialBytesException chunk
                         (IOEInfo "" "utf8 decode error" callStack))
                 else do
-                    mba <- A.newArr l'              -- copy result into new array
-                    A.copyMutableArr mba 0 buf 0 l'
-                    ba <- A.unsafeFreezeArr mba
+                    mba <- newPrimArray l'              -- copy result into new array
+                    copyMutablePrimArray mba 0 buf 0 l'
+                    ba <- unsafeFreezePrimArray mba
                     writeIORef inputBuffer buf
                     decode (V.fromArr ba 0 l')
             else do                                 -- freeze buf into result
                 when (bufSiz /= 0) $ do
-                    embuf <- A.newArr 0
+                    embuf <- newPrimArray 0
                     writeIORef inputBuffer embuf
-                ba <- A.unsafeFreezeArr buf
+                ba <- unsafeFreezePrimArray buf
                 decode (V.fromArr ba 0 l')
         else decode chunk
   where
@@ -251,20 +255,19 @@ instance Exception UTF8DecodeException where
 
 --------------------------------------------------------------------------------
 
-
 -- | Write 'V.Bytes' into buffered handle.
 --
 -- Copy 'V.Bytes' to buffer if it can hold, otherwise
 -- write both buffer(if not empty) and 'V.Bytes'.
 --
-writeBuffer :: (Output o) => OutputBuffer o -> V.Bytes -> IO ()
-writeBuffer o@OutputBuffer{..} v@(V.PrimVector ba s l) = do
+writeBuffer :: (Output o) => BufferedOutput o -> V.Bytes -> IO ()
+writeBuffer o@BufferedOutput{..} v@(V.PrimVector ba s l) = do
     i <- readIORefU bufIndex
-    bufSize <- A.sizeofMutableArr outputBuffer
+    bufSize <- sizeofMutablePrimArray outputBuffer
     if i + l <= bufSize
     then do
         -- current buffer can hold it
-        copyByteArray outputBuffer i ba s l     -- copy to buffer
+        copyPrimArray outputBuffer i ba s l   -- copy to buffer
         writeIORefU bufIndex (i+l)              -- update index
     else do
         if (i > 0)
@@ -275,22 +278,40 @@ writeBuffer o@OutputBuffer{..} v@(V.PrimVector ba s l) = do
 
             writeBuffer o v -- try write to buffer again
         else
-            -- directly write bytes to output
-            if isPrimArrayPinned ba
-            then do
-                -- which is mostly the case, since default buffer size is larger than unpinned limit
-                withMutablePrimArrayContents ba $ \ ptr ->
-                    writeOutput bufOutput (ptr `addrToPtr` s) l
-            else do
-                -- this is almost impossible, so we just create an pinned copy and send it
-                buf <- newPinnedPrimArray l
-                copyPrimArray buf 0 ba s l
-                withMutablePrimArrayContents buf $ \ ptr -> writeOutput bufOutput ptr i
+            withPrimVectorSafe v (writeOutput bufOutput)
+
+
+-- | Write 'V.Bytes' into buffered handle.
+--
+-- Copy 'V.Bytes' to buffer if it can hold, otherwise
+-- write both buffer(if not empty) and 'V.Bytes'.
+--
+writeBuilder :: (Output o) => BufferedOutput o -> B.Builder -> IO ()
+writeBuilder BufferedOutput{..} (B.Builder b) = do
+    i <- readIORefU bufIndex
+    originBufSiz <- sizeofMutablePrimArray outputBuffer
+    _ <- b (B.OneShotAction action) (lastStep originBufSiz) (B.Buffer outputBuffer i)
+    return ()
+  where
+    action bytes = withPrimVectorSafe bytes (writeOutput bufOutput)
+
+    lastStep originBufSiz (B.Buffer buf offset)
+        | sameMutablePrimArray buf outputBuffer = do
+            writeIORefU bufIndex offset   -- record new buffer index
+            return []
+        | offset >= originBufSiz = do
+            withMutablePrimArrayContents buf $ \ ptr -> writeOutput bufOutput ptr offset
+            writeIORefU bufIndex 0
+            return [] -- to match 'BuildStep' return type
+        | otherwise = do
+            copyMutablePrimArray outputBuffer 0 buf 0 offset
+            writeIORefU bufIndex offset
+            return [] -- to match 'BuildStep' return type
 
 -- | Flush the buffer(if not empty).
 --
-flush :: Output f => OutputBuffer f -> IO ()
-flush OutputBuffer{..} = do
+flush :: Output f => BufferedOutput f -> IO ()
+flush BufferedOutput{..} = do
     i <- readIORefU bufIndex
     withMutablePrimArrayContents outputBuffer $ \ ptr -> writeOutput bufOutput ptr i
     writeIORefU bufIndex 0
