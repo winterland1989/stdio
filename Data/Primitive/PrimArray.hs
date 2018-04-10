@@ -122,13 +122,15 @@ newPinnedPrimArray n = MutablePrimArray `fmap` newAlignedPinnedByteArray (n*siz)
   where siz = sizeOf (undefined :: a)
         align = alignment (undefined :: a)
 
--- | Create a /pinned/ primitive array of the specified size and respect given
+-- | Create a /pinned/ primitive array of the specified size and respect given primitive type's
 -- alignment. The garbage collector is guaranteed not to move it.
+--
 newAlignedPinnedPrimArray
-  :: forall m a. (PrimMonad m, Prim a) => Int -> Int -> m (MutablePrimArray (PrimState m) a)
+  :: forall m a. (PrimMonad m, Prim a) => Int -> m (MutablePrimArray (PrimState m) a)
 {-# INLINE newAlignedPinnedPrimArray #-}
-newAlignedPinnedPrimArray n align = MutablePrimArray `fmap` newAlignedPinnedByteArray (n*siz) align
+newAlignedPinnedPrimArray n = MutablePrimArray `fmap` newAlignedPinnedByteArray (n*siz) align
   where siz = sizeOf (undefined :: a)
+        align = alignment (undefined :: a)
 
 -- | Yield a pointer to the array's data.
 -- This operation is only safe on /pinned/ primitive arrays allocated by 'newPinnedPrimArray' or

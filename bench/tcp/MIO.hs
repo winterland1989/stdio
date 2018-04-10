@@ -21,11 +21,17 @@ main = do
         (sock' , addr) <- accept sock
         c <- atomicAddCounter_ capCounter 1
         forkOn c $ do
-            forever $ do
-                setSocketOption sock' NoDelay 1
-                _ <- recv sock' 2048
-                sendAll sock' sendbuf
+            setSocketOption sock' NoDelay 1
+            echo sock'
   where
+    echo sock = do
+        r <- recv sock 2048
+        if (B.length r /= 0)
+        then do
+            sendAll sock sendbuf
+            echo sock
+        else close sock
+
     sendbuf =
         "HTTP/1.1 200 OK\r\n\
         \Content-Type: text/html; charset=UTF-8\r\n\

@@ -71,8 +71,8 @@ newBufferedInput i bufSiz = do
     inputBuffer <- newIORef buf
     return (BufferedInput i pb inputBuffer)
 
-newOutputBuffer :: output -> Int -> IO (BufferedOutput output)
-newOutputBuffer o bufSiz = do
+newBufferedOutput :: output -> Int -> IO (BufferedOutput output)
+newBufferedOutput o bufSiz = do
     index <- newIORefU 0
     buf <- newPinnedPrimArray bufSiz
     return (BufferedOutput o index buf)

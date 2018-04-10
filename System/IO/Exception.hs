@@ -75,10 +75,10 @@ module System.IO.Exception
   , throwUVIfMinus_
     -- * Resource management
   , Resource
-  , resource
-  , resource_
-  , with
-  , with'
+  , initResource
+  , initResource_
+  , withResource
+  , withResource'
     -- * Re-exports
   , module Control.Exception
   , HasCallStack
@@ -279,6 +279,13 @@ throwUVError e info
 --
 -- The only safe way to use a 'Resource' is 'with' \/ 'with\''.
 --
+-- 'MonadIO' instance is provided so that you can lift 'IO' computation inside
+-- 'Resource', this is convenient for propagate 'Resource' around since many
+-- 'IO' computations carry finalizers.
+--
+-- A convention in stdio is that functions returning a 'Resource' should be
+-- named in @initXXX@ format, users are strongly recommended to follow this convention.
+--
 newtype Resource a = Resource { acquire :: IO (a, IO ()) }
 
 -- | Create 'Resource' from create and release action.
@@ -286,17 +293,20 @@ newtype Resource a = Resource { acquire :: IO (a, IO ()) }
 -- Note, 'resource' doesn't open resource itself, resource is created when you use
 -- 'with' \/ 'with''.
 --
-resource :: IO a -> (a -> IO ()) -> Resource a
-resource create release = Resource $ do
+initResource :: IO a -> (a -> IO ()) -> Resource a
+{-# INLINE initResource #-}
+initResource create release = Resource $ do
     r <- create
     return $ (r, release r)
 
 -- | Create 'Resource' from create and release action.
 --
--- This function is useful when you want to add some initialization and clean up action.
+-- This function is useful when you want to add some initialization and clean up action
+-- inside 'Resource' monad.
 --
-resource_ :: IO () -> IO () -> Resource ()
-resource_ create release = Resource $ do
+initResource_ :: IO () -> IO () -> Resource ()
+{-# INLINE initResource_ #-}
+initResource_ create release = Resource $ do
     r <- create
     return $ (r, release)
 
@@ -316,6 +326,7 @@ instance Applicative Resource where
         return (f x, release2 >> release1)
 
 instance Monad Resource where
+    {-# INLINE return #-}
     return = pure
     {-# INLINE (>>=) #-}
     m >>= f = Resource $ do
@@ -324,6 +335,7 @@ instance Monad Resource where
         return (x, release2 >> release1)
 
 instance MonadIO Resource where
+    {-# INLINE liftIO #-}
     liftIO f = Resource $ fmap (\ a -> (a, dummyRelease)) f
         where dummyRelease = return ()
 
@@ -333,8 +345,8 @@ instance MonadIO Resource where
 -- Be care don't leak the resource through computation return value, because
 -- after the computation finishes, the resource is closed already.
 --
-with :: Resource a -> (a -> IO b) -> IO b
-with resource k = bracket (acquire resource)
+withResource :: Resource a -> (a -> IO b) -> IO b
+withResource resource k = bracket (acquire resource)
                                  (\(_, release) -> release)
                                  (\(a, _) -> k a)
 
@@ -342,15 +354,12 @@ with resource k = bracket (acquire resource)
 -- be closed.
 --
 -- The difference from 'with' is that the computation will receive an extra
--- close action, which can be used to close the resource early that the whole
--- computation finished, the close can be called multiple times, and only the first
--- call will clean up the resource.
+-- close action, which can be used to close the resource early before the whole
+-- computation finished, the close action can be called multiple times,
+-- only the first call will clean up the resource.
 --
--- Be care don't leak the resource through computation return value, because
--- after the computation finishes, the resource is closed already.
---
-with' :: Resource a -> (a -> IO () -> IO b) -> IO b
-with' resource k = do
+withResource' :: Resource a -> (a -> IO () -> IO b) -> IO b
+withResource' resource k = do
     c <- newCounter 0
     bracket (do (a, release) <- acquire resource
                 let release' = do

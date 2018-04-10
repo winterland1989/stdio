@@ -1,6 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UnliftedFFITypes #-}
+{-# LANGUAGE MagicHash #-}
 
 module System.IO.UV.Internal where
 
@@ -58,9 +60,9 @@ newtype UVRunMode = UVRunMode CInt
 peekUVLoopData :: Ptr UVLoop -> IO (Ptr UVLoopData)
 peekUVLoopData p = #{peek uv_loop_t, data} p
 
--- | An uv loop resource with given slot size.
-uvLoop :: HasCallStack => CSize -> Resource (Ptr UVLoop)
-uvLoop siz = resource (throwOOMIfNull $ hs_uv_loop_init siz) hs_uv_loop_close
+-- | An uv loop initResource with given slot size.
+initUVLoop :: HasCallStack => CSize -> Resource (Ptr UVLoop)
+initUVLoop siz = initResource (throwOOMIfNull $ hs_uv_loop_init siz) hs_uv_loop_close
 foreign import ccall unsafe hs_uv_loop_init      :: CSize -> IO (Ptr UVLoop)
 foreign import ccall unsafe hs_uv_loop_close     :: Ptr UVLoop -> IO ()
 
@@ -127,8 +129,8 @@ data UVReq
 pokeUVReqData :: Ptr UVReq -> UVSlot -> IO ()
 pokeUVReqData p slot =  #{poke uv_req_t, data} p slot
 
-uvReq :: HasCallStack => UVReqType -> Resource (Ptr UVReq)
-uvReq typ = resource (throwOOMIfNull (hs_uv_req_alloc typ)) hs_uv_req_free
+initUVReq :: HasCallStack => UVReqType -> Resource (Ptr UVReq)
+initUVReq typ = initResource (throwOOMIfNull (hs_uv_req_alloc typ)) hs_uv_req_free
 
 foreign import ccall unsafe hs_uv_req_alloc :: UVReqType -> IO (Ptr UVReq)
 foreign import ccall unsafe hs_uv_req_free :: Ptr UVReq -> IO ()
@@ -151,8 +153,8 @@ newtype UVReqType = UVReqType CInt
 
 --------------------------------------------------------------------------------
 
-uvAsyncWake :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
-uvAsyncWake loop = resource 
+initUVAsyncWake :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
+initUVAsyncWake loop = initResource 
     (do handle <- throwOOMIfNull (hs_uv_handle_alloc uV_ASYNC)
         throwUVIfMinus_ (hs_uv_async_wake_init loop handle) `onException` (hs_uv_handle_free handle)
         return handle
@@ -167,22 +169,18 @@ foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO CInt
 
 --------------------------------------------------------------------------------
 
-uvTimer :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
-uvTimer loop = resource 
+initUVTimer :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
+initUVTimer loop = initResource 
     (do handle <- throwOOMIfNull (hs_uv_handle_alloc uV_TIMER)
         throwUVIfMinus_ (uv_timer_init loop handle) `onException` (hs_uv_handle_free handle)
         return handle
     )
     (hs_uv_handle_close) -- handle is free in uv_close callback
+foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
 
 uvTimerWakeStart :: HasCallStack => Ptr UVHandle -> Word64 -> IO ()
 uvTimerWakeStart handle timeo = throwUVIfMinus_ $ hs_uv_timer_wake_start handle timeo
 foreign import ccall unsafe hs_uv_timer_wake_start :: Ptr UVHandle -> Word64 -> IO CInt
-
-uvTimerInit :: HasCallStack => Ptr UVLoop -> Ptr UVHandle -> Resource ()
-uvTimerInit loop handle =
-    resource_ (throwUVIfMinus_ $ uv_timer_init loop handle) (hs_uv_handle_close handle)
-foreign import ccall unsafe uv_timer_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
 
 uvTimerStart :: HasCallStack => Ptr UVHandle -> Word64 -> Word64 -> IO ()
 uvTimerStart handle timeo repeat = throwUVIfMinus_ $ uv_timer_start handle timeo repeat
@@ -219,3 +217,6 @@ foreign import ccall unsafe uv_tcp_bind :: Ptr UVHandle -> Ptr SockAddr -> CUInt
 uvTCPConnect :: HasCallStack => Ptr UVReq -> Ptr UVHandle -> Ptr SockAddr -> IO ()
 uvTCPConnect req handle addr = throwUVIfMinus_ $ hs_uv_tcp_connect req handle addr
 foreign import ccall unsafe hs_uv_tcp_connect :: Ptr UVReq -> Ptr UVHandle -> Ptr SockAddr -> IO CInt
+
+--------------------------------------------------------------------------------
+

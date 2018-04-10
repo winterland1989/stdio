@@ -111,6 +111,14 @@ void hs_uv_handle_close(uv_handle_t* handle){
     uv_close(handle, hs_uv_handle_free);
 }
 
+// Get handle's OS file
+int hs_uv_fileno(uv_handle_t* handle){
+    uv_os_fd_t fd;
+    int r;
+    r = uv_fileno(handle, &fd);
+    if (r < 0) { return r; } else { return (int)fd; }
+}
+
 // Initialize a uv_req_t with give type, return NULL on fail.
 uv_handle_t* hs_uv_req_alloc(uv_req_type typ){
     return malloc(uv_req_size(typ));
@@ -120,6 +128,7 @@ uv_handle_t* hs_uv_req_alloc(uv_req_type typ){
 void hs_uv_req_free(uv_req_t* req){
     free(req);
 }
+
 
 /********************************************************************************/
 
@@ -131,7 +140,8 @@ void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
 }
 
 void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
-    if (nread != 0 ){                                            // 0 is not EOF, UV_EOF is
+    if (nread != 0 ){                                           // 0 is not EOF, it's EAGAIN/EWOULDBLOCK
+                                                                // we choose to ingore 0 case
         size_t slot = (size_t)stream->data;
         hs_loop_data* loop_data = stream->loop->data;
 
@@ -140,13 +150,12 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
 
         loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
         loop_data->event_counter += 1;
-
         uv_read_stop(stream);
     }
 }
 
 int hs_uv_read_start(uv_stream_t* stream){
-    return uv_read_start(stream, hs_alloc_cb ,hs_read_cb);
+    return uv_read_start(stream, hs_alloc_cb, hs_read_cb);
 }
 
 void hs_write_cb(uv_write_t* req, int status){
@@ -204,8 +213,8 @@ void uv_connection_init(uv_stream_t* handle){
   handle->stream.conn.shutdown_req = NULL;
 }
 
-int hs_uv_tcp_open(uv_tcp_t* handle, uv_os_sock_t sock) {
-  int r = uv_tcp_open(handle, sock);
+int hs_uv_tcp_open(uv_tcp_t* handle, int sock) {
+  int r = uv_tcp_open(handle, (uv_os_sock_t)sock);
   if (r == 0) {
     uv_connection_init((uv_stream_t*)handle);
     handle->flags |= UV_HANDLE_BOUND | UV_HANDLE_READABLE | UV_HANDLE_WRITABLE;
@@ -213,8 +222,8 @@ int hs_uv_tcp_open(uv_tcp_t* handle, uv_os_sock_t sock) {
   return r;
 }
 #else
-int hs_uv_tcp_open(uv_tcp_t* handle, uv_os_sock_t sock) {
-  return uv_tcp_open(handle, sock);
+int hs_uv_tcp_open(uv_tcp_t* handle, int sock) {
+  return uv_tcp_open(handle, (uv_os_sock_t)sock);
 }
 #endif
 
@@ -240,9 +249,70 @@ void hs_connection_cb(uv_stream_t* server, int status){
 }
 
 int hs_uv_listen(uv_stream_t* stream, int backlog){
-    uv_listen(stream, backlog, hs_connection_cb);
+    return uv_listen(stream, backlog, hs_connection_cb);
 }
 
+int hs_uv_accept(uv_stream_t* server, uv_stream_t* client) {
+  int err;
+
+  if (server->accepted_fd == -1)
+    return UV_EAGAIN;
+
+  switch (client->type) {
+    case UV_NAMED_PIPE:
+    case UV_TCP:
+      err = uv__stream_open(client,
+                            server->accepted_fd,
+                            UV_STREAM_READABLE | UV_STREAM_WRITABLE);
+      if (err) {
+        /* TODO handle error */
+        uv__close(server->accepted_fd);
+        goto done;
+      }
+      break;
+
+    case UV_UDP:
+      err = uv_udp_open((uv_udp_t*) client, server->accepted_fd);
+      if (err) {
+        uv__close(server->accepted_fd);
+        goto done;
+      }
+      break;
+
+    default:
+      return UV_EINVAL;
+  }
+
+  client->flags |= UV_HANDLE_BOUND;
+
+done:
+  /* Process queued fds */
+  if (server->queued_fds != NULL) {
+    uv__stream_queued_fds_t* queued_fds;
+
+    queued_fds = server->queued_fds;
+
+    /* Read first */
+    server->accepted_fd = queued_fds->fds[0];
+
+    /* All read, free */
+    assert(queued_fds->offset > 0);
+    if (--queued_fds->offset == 0) {
+      uv__free(queued_fds);
+      server->queued_fds = NULL;
+    } else {
+      /* Shift rest */
+      memmove(queued_fds->fds,
+              queued_fds->fds + 1,
+              queued_fds->offset * sizeof(*queued_fds->fds));
+    }
+  } else {
+    server->accepted_fd = -1;
+    if (err == 0)
+      uv__io_start(server->loop, &server->io_watcher, POLLIN);
+  }
+  return err;
+}
 
 /********************************************************************************/
 

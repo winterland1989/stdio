@@ -57,7 +57,20 @@ will result in severe memory issue.
 
 -}
 
-module Foreign.PrimArray where
+module Foreign.PrimArray
+  ( -- ** Unsafe FFI
+    withPrimArrayUnsafe
+  , withMutablePrimArrayUnsafe
+  , withPrimVectorUnsafe
+  , withPrimUnsafe
+    -- ** Safe FFI
+  , withPrimArraySafe
+  , withMutablePrimArraySafe
+  , withPrimVectorSafe
+  , withPrimSafe
+  -- ** re-export
+  , module GHC.Prim
+  ) where
 
 import GHC.Prim
 import Data.Primitive
@@ -113,6 +126,14 @@ withPrimVectorUnsafe :: forall m a b. (PrimMonad m, Prim a)
 withPrimVectorUnsafe (PrimVector arr s l) f = withPrimArrayUnsafe arr $ \ ba# _ -> f ba# s l
 
 
+-- | Create an one element primitive array and use it as a pointer to the primitive element.
+--
+withPrimUnsafe :: forall m a b. (PrimMonad m, Prim a) => (MutableByteArray# (PrimState m) -> m a) -> m a
+withPrimUnsafe f = do
+    mpa@(MutablePrimArray (MutableByteArray mba#)) <- newPrimArray 1    -- All heap objects are WORD aligned
+    f mba#                                                              -- so no need to do extra alignment
+    readPrimArray mpa 0
+
 -- | Pass primitive array to safe FFI as pointer.
 --
 -- Use proper pointer type and @CSize/CSsize@ to marshall @Ptr a@ and @Int@ arguments on C side.
@@ -164,3 +185,11 @@ withPrimVectorSafe v@(PrimVector arr s l) f
         withMutablePrimArrayContents buf $ \ ptr -> f ptr l
   where
     siz = sizeOf (undefined :: a)
+
+-- | Create an one element primitive array and use it as a pointer to the primitive element.
+--
+withPrimSafe :: forall m a b. (PrimMonad m, Prim a) => (MutableByteArray# (PrimState m) -> m a) -> m a
+withPrimSafe f = do
+    mpa@(MutablePrimArray (MutableByteArray mba#)) <- newAlignedPinnedPrimArray 1
+    f mba#
+    readPrimArray mpa 0

@@ -31,12 +31,10 @@ module System.IO.UV.Manager
   , getUVManager
   , getBlockMVar
   , pokeBufferTable
-  , uvSlot
-  , allocSlot
-  , freeSlot
   , withUVManager
   , withUVManager'
-  , uvHandle
+  , initUVSlot
+  , initUVHandle
   ) where
 
 import GHC.Stack.Compat
@@ -111,6 +109,10 @@ data UVManager = UVManager
                                                     -- number for starting uv manager with `forkOn`
     }
 
+instance Eq UVManager where
+    uvm == uvm' =
+        uvmCap uvm == uvmCap uvm'
+
 initTableSize :: Int
 initTableSize = 128
 
@@ -122,7 +124,7 @@ uvManagerArray = unsafePerformIO $ do
     s <- newQSemN 0
     forM [0..numCaps-1] $ \ i -> do
         -- fork uv manager thread
-        forkOn i . with (uvManager initTableSize i) $ \ m -> do
+        forkOn i . withResource (initUVManager initTableSize i) $ \ m -> do
             writeArr uvmArray i m
             signalQSemN s 1
             startUVManager m
@@ -149,19 +151,29 @@ getBlockMVar uvm (UVSlot slot) = do
 
 -- | Poke a prepared buffer and size into loop data under given slot.
 --
+-- NOTE, this is not protected with 'withUVManager' for effcient reason, you should merge this action
+-- with other uv action and put them together inside a 'withUVManager' or 'withUVManager\''. for example:
+--
+--  @@@
+--      ...
+--      withUVManager' uvm $ do
+--          pokeBufferTable uvm rslot buf len
+--          uvReadStart handle
+--      ...
+--  @@@
+--
 pokeBufferTable :: UVManager -> UVSlot -> Ptr Word8 -> Int -> IO ()
 {-# INLINABLE pokeBufferTable #-}
-pokeBufferTable uvm (UVSlot slot) buf bufSiz = withUVManager uvm $  \ _ -> do
+pokeBufferTable uvm (UVSlot slot) buf bufSiz = do
     (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
     pokeElemOff bufTable (fromIntegral slot) buf
     pokeElemOff bufSizTable (fromIntegral slot) (fromIntegral bufSiz)
 
-
-uvManager :: HasCallStack => Int -> Int -> Resource UVManager
-uvManager siz cap = do
-    loop <- uvLoop (fromIntegral siz)
-    async <- uvAsyncWake loop
-    timer <- uvTimer loop
+initUVManager :: HasCallStack => Int -> Int -> Resource UVManager
+initUVManager siz cap = do
+    loop  <- initUVLoop (fromIntegral siz)
+    async <- initUVAsyncWake loop
+    timer <- initUVTimer loop
 
     liftIO $ do
         mblockTable <- newArr siz
@@ -180,17 +192,18 @@ uvManager siz cap = do
 
         return (UVManager blockTableRef freeSlotList loop loopData running async timer idleCounter cap)
 
--- | libuv is not thread safe, use this function to perform handle/request initialization.
+-- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
+--
+-- libuv is not thread safe, use this function to perform any action which will mutate uv_loop's state.
 --
 withUVManager :: HasCallStack => UVManager -> (Ptr UVLoop -> IO a) -> IO a
-{-# INLINABLE withUVManager #-}
 withUVManager uvm f = do
 
     r <- withMVar (uvmRunning uvm) $ \ running ->
         if running
         then do
             uvAsyncSend (uvmAsync uvm) -- if uv_run is running, it will stop
-                                                            -- if uv_run is not running, next running won't block
+                                       -- if uv_run is not running, next running won't block
             return Nothing
         else do
             r <- f (uvmLoop uvm)
@@ -200,6 +213,14 @@ withUVManager uvm f = do
         Just r' -> return r'
         _       -> yield >> withUVManager uvm f -- we yield here, because uv_run is probably not finished yet
 
+-- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
+--
+-- Some action did not request uv_loop pointer explicitly, but will mutate uv_loop underhood, for example:
+-- @uv_read_start@. These actions have to be protected by locking the uv_loop.
+--
+-- In fact most of the libuv's functions are not thread safe, and 'uv_run' can be running concurrently
+-- without this lock.
+--
 withUVManager' :: HasCallStack => UVManager -> IO a -> IO a
 withUVManager' uvm f = withUVManager uvm (\ _ -> f)
 
@@ -254,14 +275,15 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
                 lock <- indexArrM blockTable (fromIntegral slot)
                 r <- peekElemOff resultTable (fromIntegral slot)
                 void $ tryPutMVar lock (fromIntegral r)   -- unlock ghc thread with MVar
+
             return c
 
 --------------------------------------------------------------------------------
 
 -- | 'bracket' wrapper for 'allocSlot/freeSlot'.
 --
-uvSlot :: HasCallStack => UVManager -> Resource UVSlot
-uvSlot uvm = resource (allocSlot uvm) (freeSlot uvm)
+initUVSlot :: HasCallStack => UVManager -> Resource UVSlot
+initUVSlot uvm = initResource (allocSlot uvm) (freeSlot uvm)
 
 -- | Allocate a slot number for given handler or request.
 --
@@ -301,13 +323,23 @@ freeSlot (UVManager _ freeSlotList _ _ _ _ _ _ _) slot =
 
 --------------------------------------------------------------------------------
 
-uvHandle :: HasCallStack
+-- | Safely lock an uv manager and perform uv_handle initialization.
+--
+-- Initialization an UV handle usually take two step:
+--
+--   * allocate an uv_handle struct with proper size
+--   * lock a particular uv_loop from a uv manager, and perform custom initialization, such as @uv_tcp_init@.
+--
+-- And this is what 'initUVHandle' do, all you need to do is to provide the manager you want to hook the handle
+-- onto(usually the one on the same capability, i.e. the one obtained by 'getUVManager'),
+-- and provide a custom initialization function.
+--
+initUVHandle :: HasCallStack
          => UVHandleType
          -> (Ptr UVLoop -> Ptr UVHandle -> IO (Ptr UVHandle))
          -> UVManager
          -> Resource (Ptr UVHandle)
-uvHandle typ init uvm = do
-    resource
+initUVHandle typ init uvm = initResource
         (do handle <- hs_uv_handle_alloc typ
             withUVManager uvm (\ loop -> init loop handle) `onException` (hs_uv_handle_free handle)
             return handle

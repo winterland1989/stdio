@@ -1,3 +1,6 @@
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE RecordWildCards #-}
+
 {-|
 Module      : System.IO.Net
 Description : TCP or IPC servers and clients
@@ -20,51 +23,58 @@ net.createServer().listen(
 
 module System.IO.Net (
     UVStream
-  , tcp
-  , connect
+  , initTCPConnection
+  , ServerConfig(..)
+  , startServer
   , module System.IO.Net.SockAddr
   ) where
 
 
 import System.IO.Net.SockAddr
 import System.IO.Exception
-import System.IO.Buffer
+import System.IO.Buffered
 import System.IO.UV.Manager
 import System.IO.UV.Stream
 import System.IO.UV.Internal
 import Control.Concurrent.MVar
 import Foreign.Ptr
+import Foreign.C.Types (CInt(..))
+import Data.Int
+import Data.IORef.Unboxed
+import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.IO.Class
+import Data.Primitive.PrimArray
+import Foreign.PrimArray
 
 
-uvTCP :: HasCallStack => UVManager -> Resource (Ptr UVHandle)
-uvTCP = uvHandle uV_TCP (\ loop handle -> uv_tcp_init loop handle >> return handle)
+initTCPHandle :: HasCallStack => UVManager -> Resource (Ptr UVHandle)
+initTCPHandle = initUVHandle uV_TCP (\ loop handle -> uv_tcp_init loop handle >> return handle)
 
-tcp :: HasCallStack => Resource UVStream
-tcp = do
-    uvm <- liftIO getUVManager
-    rslot <- uvSlot uvm
-    wslot <- uvSlot uvm
-    handle <- uvTCP uvm
-    req <- uvReq uV_WRITE
+initTCPStream :: HasCallStack => Resource UVStream
+initTCPStream = do
+    uvm    <- liftIO getUVManager
+    rslot  <- initUVSlot uvm
+    wslot  <- initUVSlot uvm
+    handle <- initTCPHandle uvm
+    req    <- initUVReq uV_WRITE
     liftIO $ do
         pokeUVHandleData handle rslot
         pokeUVReqData req wslot
         return (UVStream handle rslot req wslot uvm)
 
 
-connect :: HasCallStack
+initTCPConnection :: HasCallStack
         => SockAddr
         -> Maybe SockAddr
         -> Resource UVStream
-connect target local = do
-    conn <- tcp
+initTCPConnection target local = do
+    conn <- initTCPStream
     let uvm = uvsManager conn
         handle = uvsHandle conn
-    connSlot <- uvSlot uvm
-    connReq <- uvReq uV_CONNECT
+    connSlot <- initUVSlot uvm
+    connReq <- initUVReq uV_CONNECT
     liftIO $ do
         forM_ local $ \ local' -> withSockAddr local' $ \ localPtr ->
             uvTCPBind handle localPtr False
@@ -82,30 +92,48 @@ connect target local = do
 data ServerConfig = ServerConfig
     { serverAddr :: SockAddr
     , serverListeningThreadNum :: Int
+    , serverBackLog            :: Int
     , serverWorker :: UVStream -> IO ()
-    , serverErrorHandler :: Exception -> IO ()
+    , serverErrorHandler :: SomeIOException -> IO ()
     }
 
-data Server = Server
+startServer :: ServerConfig -> IO ()
+startServer ServerConfig{..} =
+    withResource initTCPStream $ \ server ->
+    withSockAddr serverAddr $ \ addrPtr -> do
 
-startServer :: ServerConfig -> IO Server
-startServer ServerConfig{..} = do
-    with tcp $ \ UVStream{..} ->
-        withSockAddr serverAddr $ \ addrPtr -> do
+        let serverHandle = uvsHandle server
+            serverManager = uvsManager server
 
-            uvTCPBind uvsHandle addrPtr False
-            uvDisableSimultaneousAccept uvsHandle
+        uvTCPBind serverHandle addrPtr False
+        uvDisableSimultaneousAccept serverHandle
 
-            m <- getBlockMVar uvm (uvsReadSlot uvs)
-            tryTakeMVar m
-            withUVManager' uvm $ uvTCPListen handle target'
+        (c, _) <- threadCapability =<< myThreadId
+        cLimit <- getNumCapabilities
+        cCounter <- newCounter c
+
+        m <- getBlockMVar serverManager (uvsReadSlot server)
+        tryTakeMVar m
+        withUVManager' serverManager $ uvListen serverHandle (fromIntegral serverBackLog)
+
+        forever $ do
+
             throwUVIfMinus_ $ takeMVar m
 
+            c <- readIORefU cCounter
+            let c' = if (c < cLimit) then (c+1) else 0
+            writeIORefU cCounter c'
 
-
-
-
-closeServer :: Server -> IO ()
+            forkOn c' . withResource initTCPStream $ \ client -> do
+                if uvsManager server == uvsManager client
+                then do
+                    withUVManager' (uvsManager client) $ uvAccept serverHandle (uvsHandle client)
+                    serverWorker client
+                else do
+                    withUVManager' (uvsManager server) $
+                        withUVManager' (uvsManager client) $
+                            uvAccept serverHandle (uvsHandle client)
+                    serverWorker client
 
 --------------------------------------------------------------------------------
 
@@ -116,3 +144,14 @@ uvDisableSimultaneousAccept :: HasCallStack => Ptr UVHandle -> IO ()
 uvDisableSimultaneousAccept handle = throwUVIfMinus_ (uv_tcp_simultaneous_accepts handle 0)
 foreign import ccall unsafe uv_tcp_simultaneous_accepts  :: Ptr UVHandle -> CInt -> IO CInt
 
+uvListen :: HasCallStack => Ptr UVHandle -> CInt -> IO ()
+uvListen handle backlog = throwUVIfMinus_ (hs_uv_listen handle backlog)
+foreign import ccall unsafe hs_uv_listen  :: Ptr UVHandle -> CInt -> IO CInt
+
+uvFileno :: HasCallStack => Ptr UVHandle -> IO CInt
+uvFileno = throwUVIfMinus . hs_uv_fileno
+foreign import ccall unsafe hs_uv_fileno :: Ptr UVHandle -> IO CInt
+
+uvAccept :: HasCallStack => Ptr UVHandle -> Ptr UVHandle -> IO ()
+uvAccept server client = throwUVIfMinus_ $ hs_uv_accept server client
+foreign import ccall unsafe hs_uv_accept :: Ptr UVHandle -> Ptr UVHandle -> IO CInt

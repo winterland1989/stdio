@@ -31,3 +31,61 @@ int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr
 
 int hs_uv_timer_wake_start(uv_timer_t* handle, uint64_t timeout);
 int hs_uv_async_wake_init(uv_loop_t* loop, uv_async_t* async);
+
+
+
+#if !defined(_WIN32)
+int uv__close(int fd); /* preserves errno */
+int uv__stream_open(uv_stream_t* stream, int fd, int flags);
+typedef struct uv__stream_queued_fds_s uv__stream_queued_fds_t;
+void uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events);
+struct uv__stream_queued_fds_s {
+  unsigned int size;
+  unsigned int offset;
+  int fds[1];
+};
+void uv__free(void* ptr);
+
+/* handle flags */
+enum {
+  UV_CLOSING              = 0x01,   /* uv_close() called but not finished. */
+  UV_CLOSED               = 0x02,   /* close(2) finished. */
+  UV_STREAM_READING       = 0x04,   /* uv_read_start() called. */
+  UV_STREAM_SHUTTING      = 0x08,   /* uv_shutdown() called but not complete. */
+  UV_STREAM_SHUT          = 0x10,   /* Write side closed. */
+  UV_STREAM_READABLE      = 0x20,   /* The stream is readable */
+  UV_STREAM_WRITABLE      = 0x40,   /* The stream is writable */
+  UV_STREAM_BLOCKING      = 0x80,   /* Synchronous writes. */
+  UV_STREAM_READ_PARTIAL  = 0x100,  /* read(2) read less than requested. */
+  UV_STREAM_READ_EOF      = 0x200,  /* read(2) read EOF. */
+  UV_TCP_NODELAY          = 0x400,  /* Disable Nagle. */
+  UV_TCP_KEEPALIVE        = 0x800,  /* Turn on keep-alive. */
+  UV_TCP_SINGLE_ACCEPT    = 0x1000, /* Only accept() when idle. */
+  UV_HANDLE_IPV6          = 0x10000, /* Handle is bound to a IPv6 socket. */
+  UV_UDP_PROCESSING       = 0x20000, /* Handle is running the send callback queue. */
+  UV_HANDLE_BOUND         = 0x40000  /* Handle is bound to an address and port */
+};
+
+
+#endif
+
+#if defined(__linux__)
+# include "linux-syscalls.h"
+#endif /* __linux__ */
+
+#if defined(__MVS__)
+# include "os390-syscalls.h"
+#endif /* __MVS__ */
+
+#if defined(__sun)
+# include <sys/port.h>
+# include <port.h>
+#endif /* __sun */
+
+#if defined(_AIX)
+# define reqevents events
+# define rtnevents revents
+# include <sys/poll.h>
+#else
+# include <poll.h>
+#endif /* _AIX */
