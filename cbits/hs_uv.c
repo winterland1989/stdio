@@ -231,6 +231,19 @@ int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr
     return uv_tcp_connect(req, handle, addr, hs_connect_cb);
 }
 
+void hs_connection_cb(uv_stream_t* server, int status){
+    size_t slot = (size_t)server->data;
+    hs_loop_data* loop_data = server->loop->data;
+    loop_data->result_table[slot] = (ssize_t)status;         // 0 in case of success, < 0 otherwise.
+    loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+    loop_data->event_counter += 1;
+}
+
+int hs_uv_listen(uv_stream_t* stream, int backlog){
+    uv_listen(stream, backlog, hs_connection_cb);
+}
+
+
 /********************************************************************************/
 
 // a empty callback for wake up uv_run

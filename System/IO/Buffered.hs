@@ -17,7 +17,7 @@ This module provide basic I/O interface stdio use.
 
 -}
 
-module System.IO.Buffer where
+module System.IO.Buffered where
 
 
 import System.IO.Exception
@@ -37,7 +37,7 @@ import Data.Primitive.PrimArray
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Builder as B
-import qualified Data.Text.UTF8Codec as T
+import qualified Data.Text.UTF8Codec as UTF8
 import GHC.Stack.Compat
 
 -- | Input device
@@ -54,7 +54,6 @@ class Output o where
 
 data BufferedInput i = BufferedInput
     { bufInput    :: i
-    , bufSize     :: {-# UNPACK #-} !Int
     , bufPushBack :: {-# UNPACK #-} !(IORef V.Bytes)
     , inputBuffer :: {-# UNPACK #-} !(IORef (MutablePrimArray RealWorld Word8))
     }
@@ -70,7 +69,7 @@ newBufferedInput i bufSiz = do
     pb <- newIORef V.empty
     buf <- newPinnedPrimArray bufSiz
     inputBuffer <- newIORef buf
-    return (BufferedInput i bufSiz pb inputBuffer)
+    return (BufferedInput i pb inputBuffer)
 
 newOutputBuffer :: output -> Int -> IO (BufferedOutput output)
 newOutputBuffer o bufSiz = do
@@ -93,8 +92,8 @@ readBuffer BufferedInput{..} = do
     then do
         rbuf <- readIORef inputBuffer
         bufSiz <- sizeofMutablePrimArray rbuf
-        l <- readInput bufInput (mutablePrimArrayContents rbuf) bufSize
-        if l < bufSize `quot` 2                -- read less than half size
+        l <- readInput bufInput (mutablePrimArrayContents rbuf) bufSiz
+        if l < bufSiz `quot` 2                -- read less than half size
         then do
             mba <- newPrimArray l              -- copy result into new array
             copyMutablePrimArray mba 0 rbuf 0 l
@@ -197,42 +196,37 @@ readLine h = do
                 return (chunk : chunks)
 
 
--- | Read a chunk of text
+-- | Read a chunk of utf8 text
 --
-readTextChunk :: (HasCallStack, Input i) => BufferedInput i -> IO T.Text
-readTextChunk h@BufferedInput{..} = do
+readTextChunkUTF8 :: (HasCallStack, Input i) => BufferedInput i -> IO T.Text
+readTextChunkUTF8 h@BufferedInput{..} = do
     chunk <- readBuffer h
     if V.null chunk
     then return T.empty
     else do
         let (V.PrimVector vba vs vl) = chunk
-            minLen = T.decodeCharLen vba vs
+            minLen = UTF8.decodeCharLen vba vs
         if minLen > vl                              -- is this chunk partial?
         then do                                     -- if so, try continue reading first
             rbuf <- readIORef inputBuffer
             bufSiz <- sizeofMutablePrimArray rbuf
-            buf <- if bufSiz == 0                 -- spare bufffer is empty
-                then newPinnedPrimArray bufSize   -- create a new one
-                else return rbuf
             copyPrimArray rbuf 0 vba vs vl         -- copy the partial chunk into buffer and try read new bytes
-            l <- readInput bufInput (mutablePrimArrayContents buf `plusPtr` vl) (bufSize - vl)
+            l <- readInput bufInput (mutablePrimArrayContents rbuf `plusPtr` vl) (bufSiz - vl)
             let l' = l + vl
-            if l' < bufSize `quot` 2                -- read less than half size
+            if l' < bufSiz `quot` 2                -- read less than half size
             then if l' == vl
                 then do                             -- no new bytes read, partial before EOF
                     throwIO (UTF8PartialBytesException chunk
                         (IOEInfo "" "utf8 decode error" callStack))
                 else do
                     mba <- newPrimArray l'              -- copy result into new array
-                    copyMutablePrimArray mba 0 buf 0 l'
+                    copyMutablePrimArray mba 0 rbuf 0 l'
                     ba <- unsafeFreezePrimArray mba
-                    writeIORef inputBuffer buf
                     decode (V.fromArr ba 0 l')
             else do                                 -- freeze buf into result
-                when (bufSiz /= 0) $ do
-                    embuf <- newPrimArray 0
-                    writeIORef inputBuffer embuf
-                ba <- unsafeFreezePrimArray buf
+                rbuf' <- newPinnedPrimArray bufSiz
+                writeIORef inputBuffer rbuf'
+                ba <- unsafeFreezePrimArray rbuf
                 decode (V.fromArr ba 0 l')
         else decode chunk
   where
@@ -263,8 +257,8 @@ instance Exception UTF8DecodeException where
 writeBuffer :: (Output o) => BufferedOutput o -> V.Bytes -> IO ()
 writeBuffer o@BufferedOutput{..} v@(V.PrimVector ba s l) = do
     i <- readIORefU bufIndex
-    bufSize <- sizeofMutablePrimArray outputBuffer
-    if i + l <= bufSize
+    bufSiz <- sizeofMutablePrimArray outputBuffer
+    if i + l <= bufSiz
     then do
         -- current buffer can hold it
         copyPrimArray outputBuffer i ba s l   -- copy to buffer

@@ -20,7 +20,7 @@ net.createServer().listen(
 
 module System.IO.Net (
     UVStream
-  , connection
+  , tcp
   , connect
   , module System.IO.Net.SockAddr
   ) where
@@ -42,8 +42,8 @@ import Control.Monad.IO.Class
 uvTCP :: HasCallStack => UVManager -> Resource (Ptr UVHandle)
 uvTCP = uvHandle uV_TCP (\ loop handle -> uv_tcp_init loop handle >> return handle)
 
-connection :: HasCallStack => Resource UVStream
-connection = do
+tcp :: HasCallStack => Resource UVStream
+tcp = do
     uvm <- liftIO getUVManager
     rslot <- uvSlot uvm
     wslot <- uvSlot uvm
@@ -56,11 +56,11 @@ connection = do
 
 
 connect :: HasCallStack
-    => SockAddr
-    -> Maybe SockAddr
-    -> Resource UVStream
+        => SockAddr
+        -> Maybe SockAddr
+        -> Resource UVStream
 connect target local = do
-    conn <- connection
+    conn <- tcp
     let uvm = uvsManager conn
         handle = uvsHandle conn
     connSlot <- uvSlot uvm
@@ -79,23 +79,40 @@ connect target local = do
 
 
 
-{-
 data ServerConfig = ServerConfig
-    { serverEndPoint :: Either V.Bytes SockAddr
+    { serverAddr :: SockAddr
     , serverListeningThreadNum :: Int
-    , serverWorker :: TCPConn -> IO ()
+    , serverWorker :: UVStream -> IO ()
     , serverErrorHandler :: Exception -> IO ()
     }
 
 data Server = Server
 
 startServer :: ServerConfig -> IO Server
+startServer ServerConfig{..} = do
+    with tcp $ \ UVStream{..} ->
+        withSockAddr serverAddr $ \ addrPtr -> do
+
+            uvTCPBind uvsHandle addrPtr False
+            uvDisableSimultaneousAccept uvsHandle
+
+            m <- getBlockMVar uvm (uvsReadSlot uvs)
+            tryTakeMVar m
+            withUVManager' uvm $ uvTCPListen handle target'
+            throwUVIfMinus_ $ takeMVar m
+
+
+
+
 
 closeServer :: Server -> IO ()
 
 --------------------------------------------------------------------------------
 
-foreign import ccall unsafe "socket"
-    c_socket :: CInt -> CInt -> CInt -> IO (E.WSAReturn CInt)
--}
+-- | Disable so called simultaneous accept, we can loop accept until EAGAIN in haskell
+-- side instead of get multiple event in C side.
+--
+uvDisableSimultaneousAccept :: HasCallStack => Ptr UVHandle -> IO ()
+uvDisableSimultaneousAccept handle = throwUVIfMinus_ (uv_tcp_simultaneous_accepts handle 0)
+foreign import ccall unsafe uv_tcp_simultaneous_accepts  :: Ptr UVHandle -> CInt -> IO CInt
 

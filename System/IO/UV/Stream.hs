@@ -2,7 +2,7 @@ module System.IO.UV.Stream where
 
 import System.IO.UV.Manager
 import System.IO.Exception
-import System.IO.Buffer
+import System.IO.Buffered
 import System.IO.UV.Internal
 import Foreign.Ptr
 import Foreign.C.Types

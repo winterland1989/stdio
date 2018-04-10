@@ -630,6 +630,9 @@ null v = length v == 0
 
 -- | /O(m+n)/
 --
+-- There's no need to guard empty vector because we guard them for you, so
+-- appending empty vectors are no-ops.
+--
 append :: Vec v a => v a -> v a -> v a
 {-# INLINE append #-}
 append (VecPat _ _ 0) b                    = b

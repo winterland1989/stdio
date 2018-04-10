@@ -65,18 +65,18 @@ instance Show Text where
 instance NFData Text where
     rnf (Text bs) = rnf bs
 
-data UTF8DecodeResult
+data DecodeResult
     = Success !Text
     | PartialBytes !Text !V.Bytes
     | InvalidBytes !V.Bytes
   deriving (Show, Eq)
 
-validateUTF8 :: V.Bytes -> UTF8DecodeResult
+validateUTF8 :: V.Bytes -> DecodeResult
 {-# INLINE validateUTF8 #-}
 validateUTF8 bs@(V.PrimVector ba s l) = go s
   where
     end = s + l
-    go :: Int -> UTF8DecodeResult
+    go :: Int -> DecodeResult
     go !i
         | i < end = case validateChar ba i end of
             r

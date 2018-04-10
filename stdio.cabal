@@ -41,7 +41,7 @@ library
                             GHC.Stack.Compat
 
                             System.IO.Exception 
-                            System.IO.Buffer
+                            System.IO.Buffered
                             -- System.IO.File
                             -- System.IO.Handle
                             System.LowResTimer
