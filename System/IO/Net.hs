@@ -108,10 +108,6 @@ startServer ServerConfig{..} =
         uvTCPBind serverHandle addrPtr False
         uvDisableSimultaneousAccept serverHandle
 
-        (c, _) <- threadCapability =<< myThreadId
-        cLimit <- getNumCapabilities
-        cCounter <- newCounter c
-
         m <- getBlockMVar serverManager (uvsReadSlot server)
         tryTakeMVar m
         withUVManager' serverManager $ uvListen serverHandle (fromIntegral serverBackLog)
@@ -120,11 +116,7 @@ startServer ServerConfig{..} =
 
             throwUVIfMinus_ $ takeMVar m
 
-            c <- readIORefU cCounter
-            let c' = if (c < cLimit) then (c+1) else 0
-            writeIORefU cCounter c'
-
-            forkOn c' . withResource initTCPStream $ \ client -> do
+            forkBa . withResource initTCPStream $ \ client -> do
                 if uvsManager server == uvsManager client
                 then do
                     withUVManager' (uvsManager client) $ uvAccept serverHandle (uvsHandle client)

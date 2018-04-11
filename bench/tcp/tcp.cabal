@@ -25,6 +25,7 @@ executable libuv
   -- other-extensions:    
   c-sources:          ../../cbits/bytes.c
                       ../../cbits/hs_uv.c
+                      ../../cbits/cap_queue_size.c
   extra-libraries:         uv
   build-depends:       base >=4.9 && <5.0
                     ,   stm

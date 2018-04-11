@@ -35,6 +35,7 @@ module System.IO.UV.Manager
   , withUVManager'
   , initUVSlot
   , initUVHandle
+  , forkBa
   ) where
 
 import GHC.Stack.Compat
@@ -101,9 +102,16 @@ data UVManager = UVManager
     , uvmTimer       :: Ptr UVHandle                -- This timer handle is used when we want to break from
                                                     -- a blocking uv_run in non-threaded GHC rts.
 
-    , uvmIdleCounter :: Counter                     -- Counter for idle(no event) uv_runs, when counter
-                                                    -- reaches 10, we start to increase waiting between
-                                                    -- uv_run, until delay reach 8 milliseconds
+    , uvmCapQueueSize :: Counter                    -- Cache for current capability's run_queue size,
+                                                    -- Knowing this value is useful in many ways:
+                                                    -- 1) we can safely choose to do a blocking safe poll
+                                                    -- if the queue size is small enough.
+                                                    -- 2) we can do some simple load balance based on queue
+                                                    -- size distribution, since thread contain uv action
+                                                    -- usually don't work well with work stealing, we
+                                                    -- should provide active load balance for some applications
+                                                    -- such as web server, see 'forkBa'.
+
 
     , uvmCap :: Int                                 -- the capability uv manager should run on, we save this
                                                     -- number for starting uv manager with `forkOn`
@@ -188,9 +196,9 @@ initUVManager siz cap = do
 
         running <- newMVar False
 
-        idleCounter <- newCounter 0
+        queueSize <- newCounter 0
 
-        return (UVManager blockTableRef freeSlotList loop loopData running async timer idleCounter cap)
+        return (UVManager blockTableRef freeSlotList loop loopData running async timer queueSize cap)
 
 -- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
 --
@@ -229,25 +237,22 @@ withUVManager' uvm f = withUVManager uvm (\ _ -> f)
 -- Inside loop, we do either blocking wait or non-blocking wait depending on idle counter.
 --
 startUVManager :: HasCallStack => UVManager -> IO ()
-startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
+startUVManager uvm@(UVManager _ _ _ _ running _ _ queueSize _) = do
 
-    ic <- readIORefU idleCounter
-    e <- if (ic < 10)
-        then do
-            e <- withMVar running $ \ _ -> step uvm False   -- nonblock poll, we just hold the running lock
-            yield
-            return e
-        else do
-            -- let's do a blocking poll
-            _ <- swapMVar running True         -- after changing this, other thread can wake up us
-            e <- step uvm True                 -- by send async handler, and it's thread safe
-            _ <- swapMVar running False
-            yield                              -- we yield here, to give other thread a chance to register new event
-            return e
+    siz <- get_mycap_queue_size
+    writeIORefU queueSize (fromIntegral siz)
 
-    if (e == 0)                            -- bump the idle counter if no events, there's no need to do atomic-ops
-    then writeIORefU idleCounter (ic+1)
-    else writeIORefU idleCounter 0
+    if (siz > 2)
+    then do
+        _ <- withMVar running $ \ _ -> step uvm False   -- nonblock poll, we just hold the running lock
+        yield
+    else do
+        -- let's do a blocking poll
+        _ <- swapMVar running True         -- after changing this, other thread can wake up us
+        _ <- step uvm True                 -- by send async handler, and it's thread safe
+        _ <- swapMVar running False
+        yield                              -- we yield here, to give other thread a chance to register new event
+
 
     startUVManager uvm
 
@@ -346,3 +351,22 @@ initUVHandle typ init uvm = initResource
         )
         (hs_uv_handle_close) -- handle is free in uv_close callback
 
+
+forkBa :: IO () -> IO ThreadId
+forkBa io = do
+    !uvmArr <- readIORef uvManagerArray
+    let !siz = sizeofArr uvmArr
+        !firstUVM = indexArr uvmArr 0
+    (minUVM, _) <- foldM (go uvmArr) (firstUVM, maxBound :: Int) [0..siz-1]
+    forkOn (uvmCap minUVM) io
+  where
+    go :: Array UVManager -> (UVManager, Int) -> Int -> IO (UVManager, Int)
+    go uvmArr (minUVM, minQueueSize) i = do
+        let !uvm = indexArr uvmArr i
+        queueSiz <- readIORefU (uvmCapQueueSize uvm)
+        if queueSiz <= minQueueSize
+        then return (uvm, queueSiz)
+        else return (minUVM, minQueueSize)
+
+
+foreign import ccall unsafe get_mycap_queue_size :: IO CUInt

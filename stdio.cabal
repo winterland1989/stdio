@@ -79,6 +79,7 @@ library
     install-includes:   hs_uv.h
     c-sources:          cbits/bytes.c
                         cbits/hs_uv.c
+                        cbits/cap_queue_size.c
 
 
     -- hs-source-dirs:      
