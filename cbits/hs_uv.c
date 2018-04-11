@@ -322,7 +322,7 @@ void uv_timer_wake_cb(uv_timer_t* handle){}
 // a timer handler whose sole purpose is to break current uv_run from other thread
 // this is used with none-threaded GHC rts.
 int hs_uv_timer_wake_start(uv_timer_t* handle, uint64_t timeout){
-    return uv_timer_start(handle, uv_timer_wake_cb, timeout, 0);
+    return uv_timer_start(handle, uv_timer_wake_cb, timeout, timeout);
 }
 
 // a async handler whose sole purpose is to break current uv_run from other thread

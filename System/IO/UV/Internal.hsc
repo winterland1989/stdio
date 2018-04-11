@@ -186,6 +186,14 @@ uvTimerStart :: HasCallStack => Ptr UVHandle -> Word64 -> Word64 -> IO ()
 uvTimerStart handle timeo repeat = throwUVIfMinus_ $ uv_timer_start handle timeo repeat
 foreign import ccall unsafe uv_timer_start :: Ptr UVHandle -> Word64 -> Word64 -> IO CInt
 
+uvTimerAgain :: HasCallStack => Ptr UVHandle -> IO ()
+uvTimerAgain = throwUVIfMinus_ . uv_timer_again
+foreign import ccall unsafe uv_timer_again :: Ptr UVHandle -> IO CInt
+
+uvTimerSetRepeat :: HasCallStack => Ptr UVHandle -> Word64 -> IO ()
+uvTimerSetRepeat handle timeo = throwUVIfMinus_ $ uv_timer_set_repeat handle timeo
+foreign import ccall unsafe  uv_timer_set_repeat :: Ptr UVHandle -> Word64 -> IO CInt 
+
 uvTimerStop :: HasCallStack => Ptr UVHandle -> IO ()
 uvTimerStop = throwUVIfMinus_ . uv_timer_stop
 foreign import ccall unsafe uv_timer_stop :: Ptr UVHandle -> IO CInt

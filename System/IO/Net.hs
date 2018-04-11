@@ -120,11 +120,13 @@ startServer ServerConfig{..} =
                 if uvsManager server == uvsManager client
                 then do
                     withUVManager' (uvsManager client) $ uvAccept serverHandle (uvsHandle client)
+                    uvTCPNodelay (uvsHandle client) True
                     serverWorker client
                 else do
                     withUVManager' (uvsManager server) $
                         withUVManager' (uvsManager client) $
                             uvAccept serverHandle (uvsHandle client)
+                    uvTCPNodelay (uvsHandle client) True
                     serverWorker client
 
 --------------------------------------------------------------------------------
