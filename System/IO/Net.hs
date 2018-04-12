@@ -1,4 +1,5 @@
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 
 {-|
@@ -91,7 +92,6 @@ initTCPConnection target local = do
 
 data ServerConfig = ServerConfig
     { serverAddr :: SockAddr
-    , serverListeningThreadNum :: Int
     , serverBackLog            :: Int
     , serverWorker :: UVStream -> IO ()
     , serverErrorHandler :: SomeIOException -> IO ()
@@ -114,20 +114,13 @@ startServer ServerConfig{..} =
 
         forever $ do
 
-            throwUVIfMinus_ $ takeMVar m
+            fd <- throwUVIfMinus $ takeMVar m
 
             forkBa . withResource initTCPStream $ \ client -> do
-                if uvsManager server == uvsManager client
-                then do
-                    withUVManager' (uvsManager client) $ uvAccept serverHandle (uvsHandle client)
+                withUVManager' (uvsManager client) $ do
+                    uvTCPOpen (uvsHandle client) (fromIntegral fd)
                     uvTCPNodelay (uvsHandle client) True
-                    serverWorker client
-                else do
-                    withUVManager' (uvsManager server) $
-                        withUVManager' (uvsManager client) $
-                            uvAccept serverHandle (uvsHandle client)
-                    uvTCPNodelay (uvsHandle client) True
-                    serverWorker client
+                serverWorker client
 
 --------------------------------------------------------------------------------
 
@@ -145,7 +138,3 @@ foreign import ccall unsafe hs_uv_listen  :: Ptr UVHandle -> CInt -> IO CInt
 uvFileno :: HasCallStack => Ptr UVHandle -> IO CInt
 uvFileno = throwUVIfMinus . hs_uv_fileno
 foreign import ccall unsafe hs_uv_fileno :: Ptr UVHandle -> IO CInt
-
-uvAccept :: HasCallStack => Ptr UVHandle -> Ptr UVHandle -> IO ()
-uvAccept server client = throwUVIfMinus_ $ hs_uv_accept server client
-foreign import ccall unsafe hs_uv_accept :: Ptr UVHandle -> Ptr UVHandle -> IO CInt

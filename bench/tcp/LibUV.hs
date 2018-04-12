@@ -19,7 +19,6 @@ main = do
     hSetBuffering stdout LineBuffering
     let conf = ServerConfig
             (SockAddrInet 8888 inetAny)
-            1
             32768
             (\ uvs ->
                 catch (echo uvs) (\ (e :: SomeException) -> return ())
