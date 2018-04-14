@@ -1,6 +1,7 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 {-|
 Module      : System.IO.Net
@@ -90,12 +91,14 @@ initTCPConnection target local = do
 
 
 
-data ServerConfig = ServerConfig
+data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
     { serverAddr :: SockAddr
     , serverBackLog            :: Int
     , serverWorker :: UVStream -> IO ()
-    , serverErrorHandler :: SomeIOException -> IO ()
+    , serverErrorHandler :: ex -> IO ()
+    , workerErrorHandler :: ey -> IO ()
     }
+
 
 startServer :: ServerConfig -> IO ()
 startServer ServerConfig{..} =
@@ -104,32 +107,37 @@ startServer ServerConfig{..} =
 
         let serverHandle = uvsHandle server
             serverManager = uvsManager server
+            serverSlot = uvsReadSlot server
 
-        uvTCPBind serverHandle addrPtr False
-        uvDisableSimultaneousAccept serverHandle
-
-        m <- getBlockMVar serverManager (uvsReadSlot server)
+        m <- getBlockMVar serverManager serverSlot
         tryTakeMVar m
-        withUVManager' serverManager $ uvListen serverHandle (fromIntegral serverBackLog)
+        acceptBuf <- newPinnedPrimArray (serverBackLog * 2)
+
+        handle serverErrorHandler $ do
+            uvTCPBind serverHandle addrPtr False
+
+            withUVManager' serverManager $ do
+                pokeBufferTable serverManager serverSlot
+                    (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32)) 0
+                uvListen serverHandle (fromIntegral serverBackLog)
 
         forever $ do
-
-            fd <- throwUVIfMinus $ takeMVar m
-
-            forkBa . withResource initTCPStream $ \ client -> do
-                withUVManager' (uvsManager client) $ do
-                    uvTCPOpen (uvsHandle client) (fromIntegral fd)
-                    uvTCPNodelay (uvsHandle client) True
-                serverWorker client
+            accepted_number <- takeMVar m
+            -- we lock uv manager here in case of next uv_run overwrite current accept buffer
+            withUVManager' serverManager . forM_ [0..accepted_number-1] $ \ i -> do
+                status <-  readPrimArray acceptBuf (i*2)
+                fd <- readPrimArray acceptBuf (i*2+1)
+                if status < 0
+                then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return status)
+                else do
+                    forkBa . withResource initTCPStream $ \ client -> do
+                        handle workerErrorHandler $ do
+                            withUVManager' (uvsManager client) $ do
+                                uvTCPOpen (uvsHandle client) (fromIntegral fd)
+                                uvTCPNodelay (uvsHandle client) True
+                            serverWorker client
 
 --------------------------------------------------------------------------------
-
--- | Disable so called simultaneous accept, we can loop accept until EAGAIN in haskell
--- side instead of get multiple event in C side.
---
-uvDisableSimultaneousAccept :: HasCallStack => Ptr UVHandle -> IO ()
-uvDisableSimultaneousAccept handle = throwUVIfMinus_ (uv_tcp_simultaneous_accepts handle 0)
-foreign import ccall unsafe uv_tcp_simultaneous_accepts  :: Ptr UVHandle -> CInt -> IO CInt
 
 uvListen :: HasCallStack => Ptr UVHandle -> CInt -> IO ()
 uvListen handle backlog = throwUVIfMinus_ (hs_uv_listen handle backlog)

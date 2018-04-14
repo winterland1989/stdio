@@ -23,7 +23,7 @@ uv_loop_t* hs_uv_loop_init(size_t siz){
     size_t* event_queue = malloc(siz*sizeof(size_t));
     char** buffer_table = malloc(siz*sizeof(char*));
     size_t* buffer_size_table = malloc(siz*sizeof(size_t));
-    ssize_t* result_table = malloc(siz*sizeof(ssize_t));
+    ssize_t* result_table = calloc(siz, sizeof(ssize_t));
 
     if (loop_data == NULL || event_queue == NULL || buffer_table == NULL || 
             buffer_size_table == NULL || result_table == NULL){
@@ -55,17 +55,15 @@ uv_loop_t* hs_uv_loop_resize(uv_loop_t* loop, size_t siz){
     size_t* event_queue_new       = realloc(loop_data->event_queue, (siz*sizeof(size_t)));
     char** buffer_table_new       = realloc(loop_data->buffer_table, (siz*sizeof(char*)));
     size_t* buffer_size_table_new = realloc(loop_data->buffer_size_table, (siz*sizeof(size_t)));
-    ssize_t* result_table_new      = realloc(loop_data->result_table, (siz*sizeof(ssize_t)));
+    ssize_t* result_table_new      = calloc(siz, sizeof(ssize_t));
 
     if (event_queue_new == NULL || buffer_table_new == NULL || 
             buffer_size_table_new == NULL || result_table_new == NULL){
-
         // release new memory
         if (event_queue_new != loop_data->event_queue) free(event_queue_new);
         if (buffer_table_new != loop_data->buffer_table) free(buffer_table_new);
         if (buffer_size_table_new != loop_data->buffer_size_table) free(buffer_size_table_new);
-        if (result_table_new != loop_data->result_table) free(result_table_new);
-
+        free(result_table_new);
         return NULL;
     } else {
         loop_data->event_queue             = event_queue_new;
@@ -82,8 +80,12 @@ void hs_uv_walk_close_cb(uv_handle_t* handle, void* arg){
 
 // This function close all the handles live on that loop and the loop itself,
 // then release all the memory.
+// https://stackoverflow.com/questions/25615340/closing-libuv-handles-correctly
+//
 void hs_uv_loop_close(uv_loop_t* loop){
+    uv_stop(loop);
     uv_walk(loop, hs_uv_walk_close_cb, NULL);
+    uv_run(loop, UV_RUN_NOWAIT);
     while(uv_loop_close(loop) == UV_EBUSY);
 
     hs_loop_data* loop_data = loop->data;
@@ -140,17 +142,21 @@ void hs_alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf){
 }
 
 void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
-    if (nread != 0 ){                                           // 0 is not EOF, it's EAGAIN/EWOULDBLOCK
-                                                                // we choose to ingore 0 case
-        size_t slot = (size_t)stream->data;
-        hs_loop_data* loop_data = stream->loop->data;
+    size_t slot = (size_t)stream->data;
+    hs_loop_data* loop_data = stream->loop->data;
 
-        loop_data->result_table[slot] = nread;                   // save the read result_table,
-                                                                 // > 0 in case of success, < 0 otherwise.
+    if (nread == 0 || nread == UV_ENOBUFS) return;
 
+    if (loop_data->result_table[slot] == 0) {
         loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
         loop_data->event_counter += 1;
-        uv_read_stop(stream);
+    }
+    if (nread > 0) {
+        loop_data->result_table[slot] += nread;
+        loop_data->buffer_table[slot] = buf->base + nread; 
+        loop_data->buffer_size_table[slot] = buf->len - nread;
+    } else if (nread < 0) {
+        loop_data->result_table[slot] = nread;
     }
 }
 
@@ -240,30 +246,35 @@ int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr
     return uv_tcp_connect(req, handle, addr, hs_connect_cb);
 }
 
+#if defined(_WIN32)
+# TODO hack win32 accept code
+#else
 // we don't consider ipc case in stdio
-ssize_t hs_uv_accept(uv_stream_t* server) {
-  ssize_t fd;
-  if (server->accepted_fd == -1)
-    return UV_EAGAIN;
-  
-  fd = (ssize_t)server->accepted_fd;
+int32_t hs_uv_accept(uv_stream_t* server) {
+  int32_t fd = (int32_t)server->accepted_fd;
   server->accepted_fd = -1;
-  uv__io_start(server->loop, &server->io_watcher, POLLIN);
-
   return fd;
 }
+#endif
 
 void hs_listen_cb(uv_stream_t* server, int status){
     size_t slot = (size_t)server->data;
     hs_loop_data* loop_data = server->loop->data;
-    loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
-    if (status < 0) {
-        loop_data->result_table[slot] = (ssize_t)status;        
-    } else {
 
-        loop_data->result_table[slot] = hs_uv_accept(server);       
+    size_t accepted_number = loop_data->result_table[slot];
+
+    if (accepted_number == 0) {
+        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+        loop_data->event_counter += 1;
     }
-    loop_data->event_counter += 1;
+
+   int32_t*  accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
+
+    accept_buf[accepted_number*2] = (int32_t)status;
+    if (status >= 0) {
+        accept_buf[accepted_number*2+1] = (int32_t)hs_uv_accept(server);       
+    }
+    loop_data->result_table[slot] = accepted_number + 1;
 }
 
 int hs_uv_listen(uv_stream_t* stream, int backlog){
@@ -286,3 +297,4 @@ int hs_uv_timer_wake_start(uv_timer_t* handle, uint64_t timeout){
 int hs_uv_async_wake_init(uv_loop_t* loop, uv_async_t* async){
     return uv_async_init(loop, async, NULL);
 }
+

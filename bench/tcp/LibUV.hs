@@ -6,40 +6,55 @@ module Main where
 import System.IO.Net
 import System.IO.Buffered
 import Control.Concurrent
-import Foreign
+import Foreign.ForeignPtr
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
 import GHC.ForeignPtr
 import Control.Monad
 import System.IO.Exception
+import System.IO.UV.Stream
 import System.IO
+import Data.IORef.Unboxed
 
 main :: IO ()
 main = do
     hSetBuffering stdout LineBuffering
+    acceptCounter <- newCounter 0
+    startCounter <- newCounter 0
+    readCounter <- newCounter 0
+    finishCounter <- newCounter 0
     let conf = ServerConfig
             (SockAddrInet 8888 inetAny)
-            32768
-            (\ uvs ->
-                catch (echo uvs) (\ (e :: SomeException) -> return ())
-            )
-            print
+            128
+            (\ uvs ->do
+                atomicAddCounter acceptCounter 1
+                echo startCounter readCounter finishCounter uvs)
+            (print :: SomeException -> IO())
+            (print :: SomeException -> IO())
 
+    forkIO $ do
+        threadDelay 4000000
+        print =<< readIORefU acceptCounter
+        print =<< readIORefU startCounter
+        print =<< readIORefU readCounter
+        print =<< readIORefU finishCounter
     startServer conf
-
   where
-    echo uvs = do
+    echo startCounter readCounter finishCounter uvs = do
+        atomicAddCounter startCounter 1
         recvbuf <- mallocPlainForeignPtrBytes 2048
         r <- withForeignPtr recvbuf $ \ p -> do
             readInput uvs p 2048
-
-        when (r /= 0) $ do
+        atomicAddCounter readCounter 1
+        if (r /= 0)
+        then do
 
             let (B.PS sendbuffp _ l) = sendbuf
             withForeignPtr sendbuffp $ \ p ->
                 writeOutput uvs p l
 
-            echo uvs
+            echo startCounter readCounter finishCounter uvs
+        else void $ atomicAddCounter finishCounter 1
 
     sendbuf =
         "HTTP/1.1 200 OK\r\n\

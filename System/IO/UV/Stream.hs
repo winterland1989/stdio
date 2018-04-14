@@ -9,6 +9,7 @@ import System.IO.Buffered
 import System.IO.UV.Internal
 import Foreign.Ptr
 import Foreign.C.Types
+import Data.Word
 import Control.Concurrent.MVar
 
 data UVStream = UVStream
@@ -35,7 +36,6 @@ instance Input UVStream where
         if  | r > 0  -> return r
             -- r == 0 should be impossible, since we guard this situation in c side, but we handle it anyway
             -- nread might be 0, which does not indicate an error or EOF. This is equivalent to EAGAIN or EWOULDBLOCK under read(2)
-            | r == 0 -> readInput uvs buf len
             | r == fromIntegral uV_EOF -> return 0
             | r < 0 ->  throwUVIfMinus (return r)
 

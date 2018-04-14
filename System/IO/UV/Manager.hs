@@ -31,6 +31,7 @@ module System.IO.UV.Manager
   ( UVManager
   , getUVManager
   , getBlockMVar
+  , peekBufferTable
   , pokeBufferTable
   , withUVManager
   , withUVManager'
@@ -60,7 +61,7 @@ import System.Posix.Types (CSsize(..))
 import System.IO.Exception
 import System.IO.UV.Internal
 
-#define IDLE_LIMIT 100
+#define IDLE_LIMIT 2
 
 --------------------------------------------------------------------------------
 
@@ -105,6 +106,9 @@ data UVManager = UVManager
                                                     -- number for starting uv manager with `forkOn`
     }
 
+instance Show UVManager where
+    show uvm = "UVManager on capability " ++ show (uvmCap uvm)
+
 instance Eq UVManager where
     uvm == uvm' =
         uvmCap uvm == uvmCap uvm'
@@ -141,13 +145,13 @@ getUVManager = do
 --
 getBlockMVar :: UVManager -> UVSlot -> IO (MVar Int)
 {-# INLINABLE getBlockMVar #-}
-getBlockMVar uvm (UVSlot slot) = do
+getBlockMVar uvm slot = do
     blockTable <- readIORef (uvmBlockTable uvm)
     indexArrM blockTable (fromIntegral slot)
 
 -- | Poke a prepared buffer and size into loop data under given slot.
 --
--- NOTE, this is not protected with 'withUVManager' for effcient reason, you should merge this action
+-- NOTE, this action is not protected with 'withUVManager' for effcient reason, you should merge this action
 -- with other uv action and put them together inside a 'withUVManager' or 'withUVManager\''. for example:
 --
 --  @@@
@@ -160,10 +164,16 @@ getBlockMVar uvm (UVSlot slot) = do
 --
 pokeBufferTable :: UVManager -> UVSlot -> Ptr Word8 -> Int -> IO ()
 {-# INLINABLE pokeBufferTable #-}
-pokeBufferTable uvm (UVSlot slot) buf bufSiz = do
+pokeBufferTable uvm slot buf bufSiz = do
     (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
     pokeElemOff bufTable (fromIntegral slot) buf
     pokeElemOff bufSizTable (fromIntegral slot) (fromIntegral bufSiz)
+
+peekBufferTable :: UVManager -> UVSlot -> IO Int
+{-# INLINABLE peekBufferTable #-}
+peekBufferTable uvm slot = do
+    (bufTable, bufSizTable) <- peekUVBufferTable (uvmLoopData uvm)
+    fromIntegral <$> peekElemOff bufSizTable (fromIntegral slot)
 
 initUVManager :: HasCallStack => Int -> Int -> Resource UVManager
 initUVManager siz cap = do
@@ -277,8 +287,7 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
                 -- we use uV_RUN_ONCE with 1ms timeout instead of uV_RUN_NOWAIT
                 -- because we don't want to spin CPU cycles on GHC scheduler too much
                 -- and 1ms is the shortest timeout we can achieve with libuv's timer
-                uvTimerWakeStart timer 1
-                void $ uvRun loop uV_RUN_ONCE
+                void $ uvRun loop uV_RUN_NOWAIT
 
             (c, q) <- peekUVEventQueue loopData
             resultTable <- peekUVResultTable (uvmLoopData uvm)
@@ -286,9 +295,11 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)
                 r <- peekElemOff resultTable (fromIntegral slot)
-                void $ tryPutMVar lock (fromIntegral r)   -- unlock ghc thread with MVar
+                pokeElemOff resultTable (fromIntegral slot) 0 -- clear the result, accept loop rely on this behavior
+                void $ putMVar lock (fromIntegral r)   -- unlock ghc thread with MVar
 
             return c
+
 
 --------------------------------------------------------------------------------
 
@@ -303,7 +314,7 @@ allocSlot :: HasCallStack => UVManager -> IO UVSlot
 allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _ _) =
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
-        []     -> withUVManager uvm $ \ _ -> do
+        []     -> withUVManager' uvm $ do
             -- free list is empty, we double it
             -- but we shouldn't do it if uv_run doesn't finish yet
             -- because we may re-allocate loop data in another thread
@@ -356,7 +367,7 @@ initUVHandle typ init uvm = initResource
             withUVManager uvm (\ loop -> init loop handle) `onException` (hs_uv_handle_free handle)
             return handle
         )
-        (hs_uv_handle_close) -- handle is free in uv_close callback
+        (withUVManager' uvm . hs_uv_handle_close) -- handle is free in uv_close callback
 
 
 -- | Fork a new GHC thread with active load-balancing.
@@ -376,8 +387,10 @@ forkBa io = do
         !firstUVM = indexArr uvmArr 0
     firstIdle <- readIORefU (uvmIdleCounter firstUVM)
     mostIdleUVM <- go uvmArr siz 1 firstIdle firstUVM
-    uvAsyncSend (uvmAsync mostIdleUVM) -- wake up the target capability's event loop
-    forkOn (uvmCap mostIdleUVM) io
+    tid <- forkOn (uvmCap mostIdleUVM) io   -- append new thread to target capability's run_queue
+    uvAsyncSend (uvmAsync mostIdleUVM)      -- wake up the target capability's event loop, so that
+                                            -- until new thread start, target's uv manager will not run
+    return tid
   where
     go :: Array UVManager -> Int -> Int -> Int -> UVManager -> IO UVManager
     go !uvmArr !siz !i !maxIdle !uvm
