@@ -1,4 +1,5 @@
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ExistentialQuantification #-}
@@ -126,7 +127,7 @@ startServer ServerConfig{..} =
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
             withUVManager' serverManager . forM_ [0..accepted_number-1] $ \ i -> do
                 status <-  readPrimArray acceptBuf (i*2)
-                fd <- readPrimArray acceptBuf (i*2+1)
+                !fd <- readPrimArray acceptBuf (i*2+1)
                 if status < 0
                 then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return status)
                 else do
@@ -136,6 +137,8 @@ startServer ServerConfig{..} =
                                 uvTCPOpen (uvsHandle client) (fromIntegral fd)
                                 uvTCPNodelay (uvsHandle client) True
                             serverWorker client
+
+        print "??"
 
 --------------------------------------------------------------------------------
 

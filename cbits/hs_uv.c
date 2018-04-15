@@ -271,7 +271,7 @@ void hs_listen_cb(uv_stream_t* server, int status){
    int32_t*  accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
 
     accept_buf[accepted_number*2] = (int32_t)status;
-    if (status >= 0) {
+    if (status == 0) {
         accept_buf[accepted_number*2+1] = (int32_t)hs_uv_accept(server);       
     }
     loop_data->result_table[slot] = accepted_number + 1;

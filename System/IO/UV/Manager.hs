@@ -114,7 +114,7 @@ instance Eq UVManager where
         uvmCap uvm == uvmCap uvm'
 
 initTableSize :: Int
-initTableSize = 64
+initTableSize = 1024
 
 uvManagerArray :: IORef (Array UVManager)
 {-# NOINLINE uvManagerArray #-}
