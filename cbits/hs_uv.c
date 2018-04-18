@@ -158,6 +158,7 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
     } else if (nread < 0) {
         loop_data->result_table[slot] = nread;
     }
+    uv_read_stop(stream);
 }
 
 int hs_uv_read_start(uv_stream_t* stream){
