@@ -75,7 +75,7 @@ uv_loop_t* hs_uv_loop_resize(uv_loop_t* loop, size_t siz){
 }
 
 void hs_uv_walk_close_cb(uv_handle_t* handle, void* arg){
-    uv_close(handle, hs_uv_handle_free);
+    if (uv_is_closing(handle) == 0) uv_close(handle, hs_uv_handle_free);
 }
 
 // This function close all the handles live on that loop and the loop itself,
@@ -252,7 +252,6 @@ int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr
 // we don't consider ipc case in stdio
 int32_t hs_uv_accept(uv_stream_t* server) {
   int32_t fd = (int32_t)server->accepted_fd;
-  server->accepted_fd = -1;
   return fd;
 }
 #endif
@@ -266,19 +265,25 @@ void hs_listen_cb(uv_stream_t* server, int status){
     if (accepted_number == 0) {
         loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
         loop_data->event_counter += 1;
-    }
 
-   int32_t*  accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
+       int32_t*  accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
 
-    accept_buf[accepted_number*2] = (int32_t)status;
-    if (status == 0) {
-        accept_buf[accepted_number*2+1] = (int32_t)hs_uv_accept(server);       
+        if (status == 0) {
+            accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);       
+        } else {
+            accept_buf[accepted_number] = (int32_t)status;
+        }
+        loop_data->result_table[slot] = accepted_number + 1;
     }
-    loop_data->result_table[slot] = accepted_number + 1;
 }
 
 int hs_uv_listen(uv_stream_t* stream, int backlog){
     return uv_listen(stream, backlog, hs_listen_cb);
+}
+
+void hs_uv_listen_resume(uv_stream_t* stream){
+    stream->accepted_fd = -1;
+    uv__io_start(stream->loop, &stream->io_watcher, POLLIN);
 }
 
 /********************************************************************************/

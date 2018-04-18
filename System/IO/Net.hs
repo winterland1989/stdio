@@ -111,40 +111,41 @@ startServer ServerConfig{..} =
             serverSlot = uvsReadSlot server
 
         m <- getBlockMVar serverManager serverSlot
+        acceptBuf <- newPinnedPrimArray serverBackLog
         tryTakeMVar m
-        acceptBuf <- newPinnedPrimArray (serverBackLog * 2)
 
-        handle serverErrorHandler $ do
+
+        handle serverErrorHandler . withUVManager' serverManager $ do
             uvTCPBind serverHandle addrPtr False
-
-            withUVManager' serverManager $ do
-                pokeBufferTable serverManager serverSlot
-                    (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32)) 0
-                uvListen serverHandle (fromIntegral serverBackLog)
+            pokeBufferTable serverManager serverSlot
+                (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32)) 0
+            uvListen serverHandle (fromIntegral serverBackLog)
 
         forever $ do
             accepted_number <- takeMVar m
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
-            withUVManager' serverManager . forM_ [0..accepted_number-1] $ \ i -> do
-                status <-  readPrimArray acceptBuf (i*2)
-                !fd <- readPrimArray acceptBuf (i*2+1)
-                if status < 0
-                then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return status)
+            forM_ [0..accepted_number-1] $ \ i -> do
+                fd <-  readPrimArray acceptBuf i
+                if fd < 0
+                then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return fd)
                 else do
-                    forkBa . withResource initTCPStream $ \ client -> do
+                    forkOn 0 . withResource initTCPStream $ \ client -> do
                         handle workerErrorHandler $ do
                             withUVManager' (uvsManager client) $ do
                                 uvTCPOpen (uvsHandle client) (fromIntegral fd)
                                 uvTCPNodelay (uvsHandle client) True
                             serverWorker client
 
-        print "??"
+            withUVManager' serverManager (uvListenResume serverHandle)
+
 
 --------------------------------------------------------------------------------
 
 uvListen :: HasCallStack => Ptr UVHandle -> CInt -> IO ()
 uvListen handle backlog = throwUVIfMinus_ (hs_uv_listen handle backlog)
 foreign import ccall unsafe hs_uv_listen  :: Ptr UVHandle -> CInt -> IO CInt
+
+foreign import ccall unsafe "hs_uv_listen_resume" uvListenResume :: Ptr UVHandle -> IO ()
 
 uvFileno :: HasCallStack => Ptr UVHandle -> IO CInt
 uvFileno = throwUVIfMinus . hs_uv_fileno

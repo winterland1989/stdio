@@ -61,7 +61,7 @@ import System.Posix.Types (CSsize(..))
 import System.IO.Exception
 import System.IO.UV.Internal
 
-#define IDLE_LIMIT 2
+#define IDLE_LIMIT 20
 
 --------------------------------------------------------------------------------
 
@@ -114,7 +114,7 @@ instance Eq UVManager where
         uvmCap uvm == uvmCap uvm'
 
 initTableSize :: Int
-initTableSize = 1024
+initTableSize = 64
 
 uvManagerArray :: IORef (Array UVManager)
 {-# NOINLINE uvManagerArray #-}
@@ -252,7 +252,6 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
             yield
             return e
         else do
-            -- let's do a blocking poll
             _ <- swapMVar running True         -- after changing this, other thread can wake up us
             e <- step uvm True                 -- by send async handler, and it's thread safe
             _ <- swapMVar running False
@@ -277,7 +276,6 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
             then if rtsSupportsBoundThreads
                 then do
                     uvTimerStop timer
-                    -- if rts support multiple capability, we choose safe FFI call with run once mode
                     void $ uvRunSafe loop uV_RUN_ONCE
                 else do
                     -- use a 2ms timeout blocking poll on non-threaded rts
