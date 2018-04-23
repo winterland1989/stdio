@@ -1,24 +1,23 @@
 #include <uv.h>
+#include <HsFFI.h>
 
 int uv_translate_sys_error(int sys_errno);
 
 typedef struct {
-   size_t    event_counter;
-   size_t*   event_queue;
-   char**    buffer_table;
-   size_t*   buffer_size_table;
-   ssize_t*  result_table;          
-} hs_loop_data;
+    HsStablePtr mvar;
+    char*       buffer;
+    ssize_t     buffer_siz;
+    int         cap;
+} hs_context_data;
 
-uv_loop_t* hs_uv_loop_init(size_t siz);
-uv_loop_t* hs_uv_loop_resize(uv_loop_t* loop, size_t siz);
+uv_loop_t* hs_uv_loop_init(size_t counter);
 void hs_uv_loop_close(uv_loop_t* loop);
 
 uv_handle_t* hs_uv_handle_alloc(uv_handle_type typ);
 void hs_uv_handle_free(uv_handle_t* handle);
 void hs_uv_handle_close(uv_handle_t* handle);
 
-uv_handle_t* hs_uv_req_alloc(uv_req_type typ);
+uv_req_t* hs_uv_req_alloc(uv_req_type typ);
 void hs_uv_req_free(uv_req_t* req);
 
 int hs_uv_read_start(uv_stream_t* stream);
@@ -39,6 +38,7 @@ int uv__close(int fd); /* preserves errno */
 int uv__stream_open(uv_stream_t* stream, int fd, int flags);
 typedef struct uv__stream_queued_fds_s uv__stream_queued_fds_t;
 void uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events);
+void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events);
 struct uv__stream_queued_fds_s {
   unsigned int size;
   unsigned int offset;
@@ -68,14 +68,6 @@ enum {
 
 
 #endif
-
-#if defined(__linux__)
-# include "linux-syscalls.h"
-#endif /* __linux__ */
-
-#if defined(__MVS__)
-# include "os390-syscalls.h"
-#endif /* __MVS__ */
 
 #if defined(__sun)
 # include <sys/port.h>

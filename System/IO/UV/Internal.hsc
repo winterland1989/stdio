@@ -9,40 +9,17 @@ module System.IO.UV.Internal where
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Ptr
+import Foreign.StablePtr
 import Foreign.Storable
 import Data.Word
 import System.Posix.Types (CSsize(..))
 import System.IO.Exception
 import Data.Bits
 import System.IO.Net.SockAddr (SockAddr, SocketFamily(..))
+import GHC.Conc.Sync(PrimMVar)
 
 #include "uv.h"
 #include "hs_uv.h"
-
-newtype UVSlot = UVSlot CIntPtr
-    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
-
---------------------------------------------------------------------------------
-
-data UVLoopData
-
-peekUVEventQueue :: Ptr UVLoopData -> IO (CSize, Ptr UVSlot)
-peekUVEventQueue p = (,)
-    <$> (#{peek hs_loop_data, event_counter          } p)
-    <*> (#{peek hs_loop_data, event_queue            } p)
-
-clearUVEventCounter :: Ptr UVLoopData -> IO ()
-clearUVEventCounter p = do
-    #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
-
-peekUVResultTable :: Ptr UVLoopData -> IO (Ptr CSsize)
-peekUVResultTable p = do
-    (#{peek hs_loop_data, result_table          } p)
-
-peekUVBufferTable :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
-peekUVBufferTable p = (,)
-    <$> (#{peek hs_loop_data, buffer_table          } p)
-    <*> (#{peek hs_loop_data, buffer_size_table     } p)
 
 --------------------------------------------------------------------------------
 
@@ -57,19 +34,14 @@ newtype UVRunMode = UVRunMode CInt
   uV_RUN_NOWAIT  = UV_RUN_NOWAIT}
 
 -- | Peek loop data pointer from uv loop  pointer.
-peekUVLoopData :: Ptr UVLoop -> IO (Ptr UVLoopData)
-peekUVLoopData p = #{peek uv_loop_t, data} p
+peekUVLoopData :: Ptr UVLoop -> IO Int
+peekUVLoopData p = fromIntegral <$> (#{peek uv_loop_t, data} p :: IO CIntPtr)
 
--- | An uv loop initResource with given slot size.
-initUVLoop :: HasCallStack => CSize -> Resource (Ptr UVLoop)
-initUVLoop siz = initResource (throwOOMIfNull $ hs_uv_loop_init siz) hs_uv_loop_close
+-- | Initialize an uv loop.
+initUVLoop :: HasCallStack => Int -> Resource (Ptr UVLoop)
+initUVLoop siz = initResource (throwOOMIfNull $ hs_uv_loop_init (fromIntegral siz)) hs_uv_loop_close
 foreign import ccall unsafe hs_uv_loop_init      :: CSize -> IO (Ptr UVLoop)
 foreign import ccall unsafe hs_uv_loop_close     :: Ptr UVLoop -> IO ()
-
--- | Resize the uv loop to given slot size, throwOOMIfNull if fail.
-uvLoopResize :: HasCallStack => Ptr UVLoop -> CSize -> IO (Ptr UVLoop)
-uvLoopResize loop newsiz = throwOOMIfNull $ hs_uv_loop_resize loop newsiz
-foreign import ccall unsafe hs_uv_loop_resize    :: Ptr UVLoop -> CSize -> IO (Ptr UVLoop)
 
 -- | uv_run with usafe FFI.
 uvRun :: HasCallStack => Ptr UVLoop -> UVRunMode -> IO CInt
@@ -89,13 +61,26 @@ foreign import ccall unsafe uv_loop_alive :: Ptr UVLoop -> IO CInt
 --------------------------------------------------------------------------------
 
 data UVHandle
-
-pokeUVHandleData :: Ptr UVHandle -> UVSlot -> IO ()
-pokeUVHandleData p slot =  #{poke uv_handle_t, data} p slot 
+data UVContext
 
 foreign import ccall unsafe hs_uv_handle_alloc  :: UVHandleType -> IO (Ptr UVHandle)
 foreign import ccall unsafe hs_uv_handle_close :: Ptr UVHandle -> IO ()
-foreign import ccall unsafe hs_uv_handle_free :: Ptr UVHandle -> IO ()
+
+peekUVHandleContext :: Ptr UVHandle -> IO (Ptr UVContext)
+peekUVHandleContext p =  #{peek uv_handle_t, data} p
+
+pokeUVHandleContextMVar :: StablePtr PrimMVar -> Int -> Ptr UVContext -> IO () 
+pokeUVHandleContextMVar mvar cap p = do
+    #{poke hs_context_data, mvar}       p mvar
+    #{poke hs_context_data, cap}        p (fromIntegral cap :: CInt)
+
+pokeUVHandleContextBuffer :: Ptr Word8 -> Int -> Ptr UVContext -> IO () 
+pokeUVHandleContextBuffer buf bufLen p = do
+    #{poke hs_context_data, buffer}     p buf
+    #{poke hs_context_data, buffer_siz} p (fromIntegral bufLen :: CSsize)
+
+peekUVHandleContextResult :: Ptr UVContext -> IO Int
+peekUVHandleContextResult p = fromIntegral <$> (#{peek hs_context_data, buffer_siz} p :: IO CSsize)
 
 newtype UVHandleType = UVHandleType CInt 
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
@@ -126,11 +111,29 @@ newtype UVHandleType = UVHandleType CInt
 
 data UVReq
 
-pokeUVReqData :: Ptr UVReq -> UVSlot -> IO ()
-pokeUVReqData p slot =  #{poke uv_req_t, data} p slot
+peekUVReqContext :: Ptr UVReq -> IO (Ptr UVContext)
+peekUVReqContext p =  #{peek uv_req_t, data} p
 
-initUVReq :: HasCallStack => UVReqType -> Resource (Ptr UVReq)
-initUVReq typ = initResource (throwOOMIfNull (hs_uv_req_alloc typ)) hs_uv_req_free
+initUVReq :: HasCallStack => UVReqType -> Resource (Ptr UVReq, Ptr UVContext)
+initUVReq typ = initResource 
+    (do req <- throwOOMIfNull (hs_uv_req_alloc typ)
+        context <- peekUVReqContext req
+        return (req, context)
+    )
+    (\ (req, _) -> hs_uv_req_free req)
+
+pokeUVReqContextMVar :: StablePtr PrimMVar -> Int -> Ptr UVContext -> IO () 
+pokeUVReqContextMVar mvar cap p = do
+    #{poke hs_context_data, mvar}       p mvar
+    #{poke hs_context_data, cap}        p (fromIntegral cap :: CInt)
+
+pokeUVReqContextBuffer :: Ptr Word8 -> Int -> Ptr UVContext -> IO () 
+pokeUVReqContextBuffer buf bufLen p = do
+    #{poke hs_context_data, buffer}     p buf
+    #{poke hs_context_data, buffer_siz} p (fromIntegral bufLen :: CSsize)
+
+peekUVReqContextResult :: Ptr UVContext -> IO Int
+peekUVReqContextResult p = fromIntegral <$> (#{peek hs_context_data, buffer_siz} p :: IO CSsize)
 
 foreign import ccall unsafe hs_uv_req_alloc :: UVReqType -> IO (Ptr UVReq)
 foreign import ccall unsafe hs_uv_req_free :: Ptr UVReq -> IO ()
@@ -156,7 +159,7 @@ newtype UVReqType = UVReqType CInt
 initUVAsyncWake :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
 initUVAsyncWake loop = initResource 
     (do handle <- throwOOMIfNull (hs_uv_handle_alloc uV_ASYNC)
-        throwUVIfMinus_ (hs_uv_async_wake_init loop handle) `onException` (hs_uv_handle_free handle)
+        throwUVIfMinus_ (hs_uv_async_wake_init loop handle) `onException` (hs_uv_handle_close handle)
         return handle
     )
     (hs_uv_handle_close) -- handle is free in uv_close callback
@@ -172,7 +175,7 @@ foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO CInt
 initUVTimer :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
 initUVTimer loop = initResource 
     (do handle <- throwOOMIfNull (hs_uv_handle_alloc uV_TIMER)
-        throwUVIfMinus_ (uv_timer_init loop handle) `onException` (hs_uv_handle_free handle)
+        throwUVIfMinus_ (uv_timer_init loop handle) `onException` (hs_uv_handle_close handle)
         return handle
     )
     (hs_uv_handle_close) -- handle is free in uv_close callback

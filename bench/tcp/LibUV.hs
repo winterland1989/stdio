@@ -21,9 +21,7 @@ main = do
             (SockAddrInet 8888 inetAny)
             1
             32768
-            (\ uvs ->
-                catch (echo uvs) (\ (e :: SomeException) -> return ())
-            )
+            echo
             print
 
     startServer conf
