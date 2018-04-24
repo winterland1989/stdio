@@ -252,8 +252,9 @@ int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr
 #else
 // we don't consider ipc case in stdio
 int32_t hs_uv_accept(uv_stream_t* server) {
-  int32_t fd = (int32_t)server->accepted_fd;
-  return fd;
+    int32_t fd = (int32_t)server->accepted_fd;
+    server->accepted_fd = -1;
+    return fd;
 }
 #endif
 
@@ -261,30 +262,38 @@ void hs_listen_cb(uv_stream_t* server, int status){
     size_t slot = (size_t)server->data;
     hs_loop_data* loop_data = server->loop->data;
 
-    size_t accepted_number = loop_data->result_table[slot];
+    int32_t* accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
+    size_t accepted_number = loop_data->buffer_size_table[slot];
 
-    if (accepted_number == 0) {
-        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
-        loop_data->event_counter += 1;
-
-       int32_t*  accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
-
-        if (status == 0) {
-            accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);       
-        } else {
-            accept_buf[accepted_number] = (int32_t)status;
-        }
-        loop_data->result_table[slot] = accepted_number + 1;
+    if (status == 0) {
+        accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);       
+    } else {
+        accept_buf[accepted_number] = (int32_t)status;
     }
+    loop_data->buffer_size_table[slot] = accepted_number + 1;
 }
 
 int hs_uv_listen(uv_stream_t* stream, int backlog){
     return uv_listen(stream, backlog, hs_listen_cb);
 }
 
-void hs_uv_listen_resume(uv_stream_t* stream){
-    stream->accepted_fd = -1;
-    uv__io_start(stream->loop, &stream->io_watcher, POLLIN);
+// check if the socket's accept buffer is still filled, if so, unlock the accept thread
+void hs_accept_check_cb(uv_check_t* check){
+    uv_stream_t* server=(uv_stream_t*)check->data;
+    size_t slot = (size_t)server->data;
+    hs_loop_data* loop_data = server->loop->data;
+
+    if (loop_data->buffer_size_table[slot] > 0){
+        loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
+        loop_data->event_counter += 1;
+    }
+}
+
+int hs_uv_accept_check_init(uv_loop_t* loop, uv_check_t* check, uv_stream_t* server){
+    int r = uv_check_init(loop, check);
+    check->data = (void*)server;    // we link server to the buffer field
+    if (r < 0) return r;
+    return uv_check_start(check, hs_accept_check_cb);
 }
 
 /********************************************************************************/

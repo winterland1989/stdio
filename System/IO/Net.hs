@@ -43,29 +43,15 @@ import Control.Concurrent.MVar
 import Foreign.Ptr
 import Foreign.C.Types (CInt(..))
 import Data.Int
+import Data.Vector
 import Data.IORef.Unboxed
 import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.IO.Class
+import Control.Monad.Primitive
 import Data.Primitive.PrimArray
 import Foreign.PrimArray
-
-
-initTCPHandle :: HasCallStack => UVManager -> Resource (Ptr UVHandle)
-initTCPHandle = initUVHandle uV_TCP (\ loop handle -> uv_tcp_init loop handle >> return handle)
-
-initTCPStream :: HasCallStack => Resource UVStream
-initTCPStream = do
-    uvm    <- liftIO getUVManager
-    rslot  <- initUVSlot uvm
-    wslot  <- initUVSlot uvm
-    handle <- initTCPHandle uvm
-    req    <- initUVReq uV_WRITE
-    liftIO $ do
-        pokeUVHandleData handle rslot
-        pokeUVReqData req wslot
-        return (UVStream handle rslot req wslot uvm)
 
 
 initTCPConnection :: HasCallStack
@@ -90,8 +76,6 @@ initTCPConnection target local = do
             throwUVIfMinus_ $ takeMVar m
     return conn
 
-
-
 data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
     { serverAddr :: SockAddr
     , serverBackLog            :: Int
@@ -103,29 +87,36 @@ data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
 
 startServer :: ServerConfig -> IO ()
 startServer ServerConfig{..} =
-    withResource initTCPStream $ \ server ->
-    withSockAddr serverAddr $ \ addrPtr -> do
+    withResource initTCPStream $ \ server -> do
+    let serverHandle = uvsHandle server
+        serverManager = uvsManager server
+        serverSlot = uvsReadSlot server
 
-        let serverHandle = uvsHandle server
-            serverManager = uvsManager server
-            serverSlot = uvsReadSlot server
+    withResource (initUVHandle uV_CHECK
+        (\ loop handle -> hs_uv_accept_check_init loop handle serverHandle >> return handle) serverManager) $ \ _ ->
+            withSockAddr serverAddr $ \ addrPtr -> do
+
 
         m <- getBlockMVar serverManager serverSlot
         acceptBuf <- newPinnedPrimArray serverBackLog
+        let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32))
         tryTakeMVar m
-
 
         handle serverErrorHandler . withUVManager' serverManager $ do
             uvTCPBind serverHandle addrPtr False
-            pokeBufferTable serverManager serverSlot
-                (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32)) 0
+            pokeBufferTable serverManager serverSlot acceptBufPtr 0
             uvListen serverHandle (fromIntegral serverBackLog)
 
         forever $ do
-            accepted_number <- takeMVar m
+            r <- takeMVar m
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
-            forM_ [0..accepted_number-1] $ \ i -> do
-                fd <-  readPrimArray acceptBuf i
+            fds <- withUVManager' serverManager $ do
+                i <- peekBufferTable serverManager serverSlot
+                pokeBufferTable serverManager serverSlot acceptBufPtr 0
+                acceptBuf' <- unsafeFreezePrimArray acceptBuf
+                evaluate . unpack $ PrimVector acceptBuf' 0 i
+
+            forM_ fds $ \ fd -> do
                 if fd < 0
                 then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return fd)
                 else do
@@ -136,14 +127,13 @@ startServer ServerConfig{..} =
                                 uvTCPNodelay (uvsHandle client) True
                             serverWorker client
 
-            withUVManager' serverManager (uvListenResume serverHandle)
-
-
 --------------------------------------------------------------------------------
 
 uvListen :: HasCallStack => Ptr UVHandle -> CInt -> IO ()
 uvListen handle backlog = throwUVIfMinus_ (hs_uv_listen handle backlog)
 foreign import ccall unsafe hs_uv_listen  :: Ptr UVHandle -> CInt -> IO CInt
+
+foreign import ccall unsafe hs_uv_accept_check_init  :: Ptr UVLoop -> Ptr UVHandle -> Ptr UVHandle -> IO CInt
 
 foreign import ccall unsafe "hs_uv_listen_resume" uvListenResume :: Ptr UVHandle -> IO ()
 
