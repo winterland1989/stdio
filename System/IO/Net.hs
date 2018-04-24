@@ -129,7 +129,7 @@ startServer ServerConfig{..} =
                 if fd < 0
                 then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return fd)
                 else do
-                    forkOn 0 . withResource initTCPStream $ \ client -> do
+                    forkBa . withResource initTCPStream $ \ client -> do
                         handle workerErrorHandler $ do
                             withUVManager' (uvsManager client) $ do
                                 uvTCPOpen (uvsHandle client) (fromIntegral fd)
