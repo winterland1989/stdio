@@ -12,10 +12,17 @@ maintainer:          drkoster@qq.com
 -- copyright:           
 category:            Data
 build-type:          Simple
-extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 homepage:            https://github.com/winterland1989/stdio
 bug-reports:         https://github.com/winterland1989/stdio/issues
+
+extra-source-files:  ChangeLog.md
+                     include/hs_uv.h
+                     include/uv.h
+                     cbits/hs_uv.c
+                     cbits/libuv.a
+                     cbits/bytes.c
+
 
 source-repository head
   type:     git
@@ -66,7 +73,17 @@ library
 
     -- other-modules:          System.IO.UV
     -- other-extensions:    
-    extra-libraries:        uv
+    if !os(windows)
+        extra-libraries:        uv
+    else 
+      if arch(x86_64)
+        extra-libraries:        uv
+        extra-lib-dirs:         win/mingw64
+                                win/mingw64/lib
+      else 
+        extra-lib-dirs:         win/mingw64/bin
+                                win/mingw64/lib
+
     build-depends:          base >=4.7 && <5.0
                         ,   ghc-prim  >= 0.4
                         ,   primitive >= 0.6.2
@@ -75,7 +92,18 @@ library
                         ,   unboxed-ref >= 0.4
 
     include-dirs:       include
-    includes:           hs_uv.h
+    
+    if os(windows)  
+      includes:       hs_uv.h
+                      uv.h
+      if arch(x86_64)
+        include-dirs:         win/mingw64/include
+      else 
+        include-dirs:         win/mingw32/include
+
+    else
+        includes:       hs_uv.h
+
     install-includes:   hs_uv.h
     c-sources:          cbits/bytes.c
                         cbits/hs_uv.c

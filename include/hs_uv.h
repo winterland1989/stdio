@@ -25,7 +25,7 @@ int hs_uv_read_start(uv_stream_t* stream);
 int hs_uv_write(uv_write_t* req, uv_stream_t* handle);
 
 
-int hs_uv_tcp_open(uv_tcp_t* handle, uv_os_sock_t sock);
+int hs_uv_tcp_open(uv_tcp_t* handle, int sock);
 int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr* addr);
 
 
@@ -67,17 +67,6 @@ enum {
   UV_HANDLE_BOUND         = 0x40000  /* Handle is bound to an address and port */
 };
 
-
-#endif
-
-#if defined(__linux__)
-# include "linux-syscalls.h"
-#endif /* __linux__ */
-
-#if defined(__MVS__)
-# include "os390-syscalls.h"
-#endif /* __MVS__ */
-
 #if defined(__sun)
 # include <sys/port.h>
 # include <port.h>
@@ -90,3 +79,9 @@ enum {
 #else
 # include <poll.h>
 #endif /* _AIX */
+
+#endif
+
+
+
+

@@ -240,7 +240,10 @@ int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr
 }
 
 #if defined(_WIN32)
-# TODO hack win32 accept code
+int32_t hs_uv_accept(uv_stream_t* server) {
+
+    return 1;
+}
 #else
 // we don't consider ipc case in stdio
 int32_t hs_uv_accept(uv_stream_t* server) {
