@@ -5,11 +5,11 @@ This benchmark compares following I/O multiplexers:
 
 + current one in base, aka. mio     
 
-This is an M:N multiplexers, each OS thread(capability in GHC rts) contain an `uv_loop` poller, and one haskell thread to mananger the poller.
+This is an M:N multiplexers, each OS thread(capability in GHC rts) use a kqueue/epoll fd to do event polling, and one haskell thread to manager the poller.
 
 + libuv I/O manager in stdio
 
-This is an M:N multiplexers just like mio, but use libuv as OSes abstraction. 
+This is an M:N multiplexers just like mio, but use libuv as OSes abstraction, each OS thread(capability in GHC rts) use an `uv_loop` poller, and one haskell thread to mananger the poller.
 
 + golang's netpoller
 
@@ -30,10 +30,10 @@ You should adjust your system's fd limit before running benchmark in case of run
 ```
 cabal build
 
-# mio
+# mio, if you know your CPU's core number x, append a -Nx
 ./dist/build/mio/mio +RTS -s
 
-# stdio
+# stdio, if you know your CPU's core number x, append a -Nx
 ./dist/build/libuv/libuv +RTS -s
 
 # golang
@@ -48,5 +48,7 @@ wrk -c1000 -d10s http://127.0.0.1:8888
 # siege
 siege -c 1000 -r 10 http://127.0.0.1:8888 
 
+# ab
+ab -r -k -c 100 -n 30000 http://127.0.0.1:8888/
 ...
 ```
