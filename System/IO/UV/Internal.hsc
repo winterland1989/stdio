@@ -19,14 +19,11 @@ import System.IO.Net.SockAddr (SockAddr, SocketFamily(..))
 #include "uv.h"
 #include "hs_uv.h"
 
-newtype UVSlot = UVSlot CIntPtr
-    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
-
 --------------------------------------------------------------------------------
 
 data UVLoopData
 
-peekUVEventQueue :: Ptr UVLoopData -> IO (CSize, Ptr UVSlot)
+peekUVEventQueue :: Ptr UVLoopData -> IO (CSize, Ptr CSize)
 peekUVEventQueue p = (,)
     <$> (#{peek hs_loop_data, event_counter          } p)
     <*> (#{peek hs_loop_data, event_queue            } p)
@@ -35,11 +32,7 @@ clearUVEventCounter :: Ptr UVLoopData -> IO ()
 clearUVEventCounter p = do
     #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
 
-peekUVResultTable :: Ptr UVLoopData -> IO (Ptr CSsize)
-peekUVResultTable p = do
-    (#{peek hs_loop_data, result_table          } p)
-
-peekUVBufferTable :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
+peekUVBufferTable :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSsize)
 peekUVBufferTable p = (,)
     <$> (#{peek hs_loop_data, buffer_table          } p)
     <*> (#{peek hs_loop_data, buffer_size_table     } p)
@@ -90,10 +83,10 @@ foreign import ccall unsafe uv_loop_alive :: Ptr UVLoop -> IO CInt
 
 data UVHandle
 
-pokeUVHandleData :: Ptr UVHandle -> UVSlot -> IO ()
-pokeUVHandleData p slot =  #{poke uv_handle_t, data} p slot 
+peekUVHandleData :: Ptr UVHandle -> IO Int
+peekUVHandleData p =  fromIntegral <$> (#{peek uv_handle_t, data} p :: IO CSize) 
 
-foreign import ccall unsafe hs_uv_handle_alloc  :: UVHandleType -> IO (Ptr UVHandle)
+foreign import ccall unsafe hs_uv_handle_alloc  :: Ptr UVLoop -> UVHandleType -> IO (Ptr UVHandle)
 foreign import ccall unsafe hs_uv_handle_close :: Ptr UVHandle -> IO ()
 foreign import ccall unsafe hs_uv_handle_free :: Ptr UVHandle -> IO ()
 
@@ -126,14 +119,11 @@ newtype UVHandleType = UVHandleType CInt
 
 data UVReq
 
-pokeUVReqData :: Ptr UVReq -> UVSlot -> IO ()
-pokeUVReqData p slot =  #{poke uv_req_t, data} p slot
+peekUVReqData :: Ptr UVReq -> IO Int
+peekUVReqData p = fromIntegral <$> (#{peek uv_req_t, data} p :: IO CSize)
 
-initUVReq :: HasCallStack => UVReqType -> Resource (Ptr UVReq)
-initUVReq typ = initResource (throwOOMIfNull (hs_uv_req_alloc typ)) hs_uv_req_free
-
-foreign import ccall unsafe hs_uv_req_alloc :: UVReqType -> IO (Ptr UVReq)
-foreign import ccall unsafe hs_uv_req_free :: Ptr UVReq -> IO ()
+foreign import ccall unsafe hs_uv_req_alloc :: Ptr UVLoop -> UVReqType -> IO (Ptr UVReq)
+foreign import ccall unsafe hs_uv_req_free :: Ptr UVLoop -> Ptr UVReq -> IO ()
 
 newtype UVReqType = UVReqType CInt
     deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
@@ -155,7 +145,7 @@ newtype UVReqType = UVReqType CInt
 
 initUVAsyncWake :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
 initUVAsyncWake loop = initResource 
-    (do handle <- throwOOMIfNull (hs_uv_handle_alloc uV_ASYNC)
+    (do handle <- throwOOMIfNull (hs_uv_handle_alloc loop uV_ASYNC)
         throwUVIfMinus_ (hs_uv_async_wake_init loop handle) `onException` (hs_uv_handle_free handle)
         return handle
     )
@@ -171,7 +161,7 @@ foreign import ccall unsafe uv_async_send :: Ptr UVHandle -> IO CInt
 
 initUVTimer :: HasCallStack => Ptr UVLoop -> Resource (Ptr UVHandle)
 initUVTimer loop = initResource 
-    (do handle <- throwOOMIfNull (hs_uv_handle_alloc uV_TIMER)
+    (do handle <- throwOOMIfNull (hs_uv_handle_alloc loop uV_TIMER)
         throwUVIfMinus_ (uv_timer_init loop handle) `onException` (hs_uv_handle_free handle)
         return handle
     )

@@ -62,18 +62,18 @@ initTCPConnection target local = do
     conn <- initTCPStream
     let uvm = uvsManager conn
         handle = uvsHandle conn
-    connSlot <- initUVSlot uvm
-    connReq <- initUVReq uV_CONNECT
+    connReq <- initUVReq uV_CONNECT uvm
     liftIO $ do
+        connSlot <- peekUVReqData connReq
         forM_ local $ \ local' -> withSockAddr local' $ \ localPtr ->
             uvTCPBind handle localPtr False
 
         withSockAddr target $ \ target' -> do
             m <- getBlockMVar uvm connSlot
             tryTakeMVar m
-            pokeUVReqData connReq connSlot
             withUVManager' uvm $ uvTCPConnect connReq handle target'
-            throwUVIfMinus_ $ takeMVar m
+            takeMVar m
+            throwUVIfMinus_ $ peekBufferTable uvm connSlot
     return conn
 
 data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
