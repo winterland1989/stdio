@@ -231,41 +231,27 @@ withUVManager' uvm f = withUVManager uvm (\ _ -> f)
 
 -- | Start the uv loop
 --
--- Inside loop, we do either blocking wait or non-blocking wait depending on idle counter.
---
 startUVManager :: HasCallStack => UVManager -> IO ()
 startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
 
-    ic <- readIORefU idleCounter
-    e <- if (ic < IDLE_LIMIT)
-        then do         -- we really don't want enter safe FFI too often
-                        -- in fact if we only do unsafe poll with small timeout
-                        -- performance should be better,
-                        -- but if we keep doing short timeout poll
-                        -- we're facing the danger killing idle GC
-                        --
-                        -- polling with 1ms timeout for 100 times seems reasonable
-                        -- 0.1s is a balance between scheduling overhead,
-                        -- and idle GC interval.
-                        --
-            e <- withMVar running $ \ _ -> step uvm False
-            yield
-            return e
-        else do
-            _ <- swapMVar running True         -- after changing this, other thread can wake up us
-            e <- step uvm True                 -- by send async handler, and it's thread safe
+    e <- withMVar running $ \ _ -> step uvm False   -- we borrow mio's non-blocking/blocking poll strategy here
+    if e > 0
+    then yield >> startUVManager uvm       -- we yield here, to let other threads do actual work
+    else do
+        yield
+        e <- withMVar running $ \ _ -> step uvm False   -- we do another non-blocking poll to make sure
+        if e > 0 then yield >> startUVManager uvm
+        else do                                 -- if there's still no events, we directly jump to safe blocking poll
+
+            _ <- swapMVar running True          -- after changing this, other thread can wake up us
+            e <- step uvm True                  -- by send async handler, and it's thread safe
             _ <- swapMVar running False
-            yield                              -- we yield here, to give other thread a chance to register new event
-            return (e+1)                        -- we report event count+1 so that we can always clear idle counter
-                                                -- after a safe blocking poll
 
-    if (e == 0)                            -- bump the idle counter if no events, there's no need to do atomic-ops
-    then writeIORefU idleCounter (ic+1)
-    else writeIORefU idleCounter 0
-
-    startUVManager uvm
+            yield                               -- we yield here, to let other threads do actual work
+            startUVManager uvm
 
   where
+
     -- call uv_run, return the event number
     step :: UVManager -> Bool -> IO CSize
     step (UVManager blockTableRef freeSlotList loop loopData _ _ timer _ _) block = do
@@ -293,11 +279,8 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)
                 r <- peekElemOff resultTable (fromIntegral slot)
-                pokeElemOff resultTable (fromIntegral slot) 0 -- clear the result, accept loop rely on this behavior
                 void $ tryPutMVar lock (fromIntegral r)   -- unlock ghc thread with MVar
-
             return c
-
 
 --------------------------------------------------------------------------------
 
@@ -372,35 +355,9 @@ initUVHandle typ init uvm = initResource
 --
 -- Using libuv based I/O solution has a disadvantage that file handlers are bound to certain
 -- uv_loop, thus certain uv mananger/capability. This makes GHC's work-stealing strategy diffcult
--- to work, we solve this problem with active load-balancing: inside every uv mananger we have
--- a idle counter which cache the uv_loop's idle count, i.e. the count that how many times uv_run
--- have been called without returning any events. This count represents the I/O load on given
--- uv mananger/capability. When we want to fork a new I/O thread, we always try to find the
--- most idle capability, and this strategy greatly improve work balancing in
+-- to work, we solve this problem with simple round-robin load-balancing: forkBa will automatically
+-- distribute your new threads in round-robin manner.
 --
-{-
-forkBa :: IO () -> IO ThreadId
-forkBa io = do
-    !uvmArr <- readIORef uvManagerArray
-    let !siz = sizeofArr uvmArr
-        !firstUVM = indexArr uvmArr 0
-    firstIdle <- readIORefU (uvmIdleCounter firstUVM)
-    mostIdleUVM <- go uvmArr siz 1 firstIdle firstUVM
-    tid <- forkOn (uvmCap mostIdleUVM) io   -- append new thread to target capability's run_queue
-    uvAsyncSend (uvmAsync mostIdleUVM)      -- wake up the target capability's event loop, so that
-                                            -- until new thread start, target's uv manager will not run
-    return tid
-  where
-    go :: Array UVManager -> Int -> Int -> Int -> UVManager -> IO UVManager
-    go !uvmArr !siz !i !maxIdle !uvm
-        | i < siz   = do
-            let !uvm' = indexArr uvmArr i
-            idle <- readIORefU (uvmIdleCounter uvm')
-            if idle >= maxIdle
-            then go uvmArr siz (i+1) idle uvm'
-            else go uvmArr siz (i+1) maxIdle uvm
-        | otherwise = return uvm
--}
 forkBa :: IO () -> IO ThreadId
 forkBa io = do
     i <- atomicAddCounter_ counter 1
