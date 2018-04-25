@@ -1,5 +1,8 @@
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 {-|
 Module      : System.IO.Net
@@ -40,29 +43,15 @@ import Control.Concurrent.MVar
 import Foreign.Ptr
 import Foreign.C.Types (CInt(..))
 import Data.Int
+import Data.Vector
 import Data.IORef.Unboxed
 import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.IO.Class
+import Control.Monad.Primitive
 import Data.Primitive.PrimArray
 import Foreign.PrimArray
-
-
-initTCPHandle :: HasCallStack => UVManager -> Resource (Ptr UVHandle)
-initTCPHandle = initUVHandle uV_TCP (\ loop handle -> uv_tcp_init loop handle >> return handle)
-
-initTCPStream :: HasCallStack => Resource UVStream
-initTCPStream = do
-    uvm    <- liftIO getUVManager
-    rslot  <- initUVSlot uvm
-    wslot  <- initUVSlot uvm
-    handle <- initTCPHandle uvm
-    req    <- initUVReq uV_WRITE
-    liftIO $ do
-        pokeUVHandleData handle rslot
-        pokeUVReqData req wslot
-        return (UVStream handle rslot req wslot uvm)
 
 
 initTCPConnection :: HasCallStack
@@ -87,65 +76,71 @@ initTCPConnection target local = do
             throwUVIfMinus_ $ takeMVar m
     return conn
 
-
-
-data ServerConfig = ServerConfig
+data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
     { serverAddr :: SockAddr
-    , serverListeningThreadNum :: Int
     , serverBackLog            :: Int
     , serverWorker :: UVStream -> IO ()
-    , serverErrorHandler :: SomeIOException -> IO ()
+    , serverErrorHandler :: ex -> IO ()
+    , workerErrorHandler :: ey -> IO ()
     }
+
 
 startServer :: ServerConfig -> IO ()
 startServer ServerConfig{..} =
-    withResource initTCPStream $ \ server ->
-    withSockAddr serverAddr $ \ addrPtr -> do
+    withResource initTCPStream $ \ server -> do
+    let serverHandle = uvsHandle server
+        serverManager = uvsManager server
+        serverSlot = uvsReadSlot server
 
-        let serverHandle = uvsHandle server
-            serverManager = uvsManager server
+    withResource (initUVHandle uV_CHECK
+        (\ loop handle -> hs_uv_accept_check_init loop handle serverHandle >> return handle) serverManager) $ \ _ ->
+            withSockAddr serverAddr $ \ addrPtr -> do
 
-        uvTCPBind serverHandle addrPtr False
-        uvDisableSimultaneousAccept serverHandle
 
-        m <- getBlockMVar serverManager (uvsReadSlot server)
+        m <- getBlockMVar serverManager serverSlot
+        acceptBuf <- newPinnedPrimArray serverBackLog
+        let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32))
         tryTakeMVar m
-        withUVManager' serverManager $ uvListen serverHandle (fromIntegral serverBackLog)
+
+        handle serverErrorHandler . withUVManager' serverManager $ do
+            uvTCPBind serverHandle addrPtr False
+            pokeBufferTable serverManager serverSlot acceptBufPtr 0
+            uvListen serverHandle (fromIntegral serverBackLog)
 
         forever $ do
+            r <- takeMVar m
+            -- we lock uv manager here in case of next uv_run overwrite current accept buffer
+            acceptBufCopy <- withUVManager' serverManager $ do
+                accepted <- peekBufferTable serverManager serverSlot
+                acceptBuf' <- newPrimArray accepted
+                copyMutablePrimArray acceptBuf' 0 acceptBuf 0 accepted
+                pokeBufferTable serverManager serverSlot acceptBufPtr 0
+                unsafeFreezePrimArray acceptBuf'
 
-            throwUVIfMinus_ $ takeMVar m
+            let accepted = sizeofPrimArray acceptBufCopy
 
-            forkBa . withResource initTCPStream $ \ client -> do
-                if uvsManager server == uvsManager client
-                then do
-                    withUVManager' (uvsManager client) $ uvAccept serverHandle (uvsHandle client)
-                    uvTCPNodelay (uvsHandle client) True
-                    serverWorker client
+            forM_ [0..accepted-1] $ \ i -> do
+                let fd = indexPrimArray acceptBufCopy i
+                if fd < 0
+                then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return fd)
                 else do
-                    withUVManager' (uvsManager server) $
-                        withUVManager' (uvsManager client) $
-                            uvAccept serverHandle (uvsHandle client)
-                    uvTCPNodelay (uvsHandle client) True
-                    serverWorker client
+                    forkBa . withResource initTCPStream $ \ client -> do
+                        handle workerErrorHandler $ do
+                            withUVManager' (uvsManager client) $ do
+                                uvTCPOpen (uvsHandle client) (fromIntegral fd)
+                                uvTCPNodelay (uvsHandle client) True
+                            serverWorker client
 
 --------------------------------------------------------------------------------
-
--- | Disable so called simultaneous accept, we can loop accept until EAGAIN in haskell
--- side instead of get multiple event in C side.
---
-uvDisableSimultaneousAccept :: HasCallStack => Ptr UVHandle -> IO ()
-uvDisableSimultaneousAccept handle = throwUVIfMinus_ (uv_tcp_simultaneous_accepts handle 0)
-foreign import ccall unsafe uv_tcp_simultaneous_accepts  :: Ptr UVHandle -> CInt -> IO CInt
 
 uvListen :: HasCallStack => Ptr UVHandle -> CInt -> IO ()
 uvListen handle backlog = throwUVIfMinus_ (hs_uv_listen handle backlog)
 foreign import ccall unsafe hs_uv_listen  :: Ptr UVHandle -> CInt -> IO CInt
 
+foreign import ccall unsafe hs_uv_accept_check_init  :: Ptr UVLoop -> Ptr UVHandle -> Ptr UVHandle -> IO CInt
+
+foreign import ccall unsafe "hs_uv_listen_resume" uvListenResume :: Ptr UVHandle -> IO ()
+
 uvFileno :: HasCallStack => Ptr UVHandle -> IO CInt
 uvFileno = throwUVIfMinus . hs_uv_fileno
 foreign import ccall unsafe hs_uv_fileno :: Ptr UVHandle -> IO CInt
-
-uvAccept :: HasCallStack => Ptr UVHandle -> Ptr UVHandle -> IO ()
-uvAccept server client = throwUVIfMinus_ $ hs_uv_accept server client
-foreign import ccall unsafe hs_uv_accept :: Ptr UVHandle -> Ptr UVHandle -> IO CInt

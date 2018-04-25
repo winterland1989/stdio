@@ -35,6 +35,7 @@ int hs_uv_async_wake_init(uv_loop_t* loop, uv_async_t* async);
 
 
 #if !defined(_WIN32)
+ssize_t read(int fd, void *buf, size_t count); 
 int uv__close(int fd); /* preserves errno */
 int uv__stream_open(uv_stream_t* stream, int fd, int flags);
 typedef struct uv__stream_queued_fds_s uv__stream_queued_fds_t;

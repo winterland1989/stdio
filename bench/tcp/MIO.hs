@@ -14,7 +14,7 @@ main :: IO ()
 main = do
     sock <- socket AF_INET Stream defaultProtocol
     bind sock $ SockAddrInet 8888 iNADDR_ANY
-    listen sock 32768
+    listen sock 128
     cap <- getNumCapabilities
     capCounter <- newCounter 0
     forever $ do
