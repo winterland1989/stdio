@@ -145,20 +145,12 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
     size_t slot = (size_t)stream->data;
     hs_loop_data* loop_data = stream->loop->data;
 
-    if (nread == 0 || nread == UV_ENOBUFS) return;
-
-    if (loop_data->result_table[slot] == 0) {
+    if (nread != 0) {
+        loop_data->result_table[slot] = nread;
         loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
         loop_data->event_counter += 1;
+        uv_read_stop(stream);
     }
-    if (nread > 0) {
-        loop_data->result_table[slot] += nread;
-        loop_data->buffer_table[slot] = buf->base + nread; 
-        loop_data->buffer_size_table[slot] = buf->len - nread;
-    } else if (nread < 0) {
-        loop_data->result_table[slot] = nread;
-    }
-    uv_read_stop(stream);
 }
 
 int hs_uv_read_start(uv_stream_t* stream){

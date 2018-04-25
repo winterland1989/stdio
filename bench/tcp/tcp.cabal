@@ -42,7 +42,7 @@ executable libuv
   includes:           hs_uv.h
   hs-source-dirs:       ./
                         ../../
-  ghc-options:         -O2 -threaded -rtsopts -eventlog -with-rtsopts=-N4
+  ghc-options:         -O2 -threaded -rtsopts -eventlog -with-rtsopts=-N
   default-language:    Haskell2010
 
 
@@ -57,5 +57,5 @@ executable mio
                     ,   bytestring
                     ,   unboxed-ref
   hs-source-dirs:       ./
-  ghc-options:         -O2 -threaded -rtsopts -eventlog -with-rtsopts=-N4
+  ghc-options:         -O2 -threaded -rtsopts -eventlog -with-rtsopts=-N
   default-language:    Haskell2010

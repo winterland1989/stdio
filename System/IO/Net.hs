@@ -110,13 +110,17 @@ startServer ServerConfig{..} =
         forever $ do
             r <- takeMVar m
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
-            fds <- withUVManager' serverManager $ do
-                i <- peekBufferTable serverManager serverSlot
+            acceptBufCopy <- withUVManager' serverManager $ do
+                accepted <- peekBufferTable serverManager serverSlot
+                acceptBuf' <- newPrimArray accepted
+                copyMutablePrimArray acceptBuf' 0 acceptBuf 0 accepted
                 pokeBufferTable serverManager serverSlot acceptBufPtr 0
-                acceptBuf' <- unsafeFreezePrimArray acceptBuf
-                evaluate . unpack $ PrimVector acceptBuf' 0 i
+                unsafeFreezePrimArray acceptBuf'
 
-            forM_ fds $ \ fd -> do
+            let accepted = sizeofPrimArray acceptBufCopy
+
+            forM_ [0..accepted-1] $ \ i -> do
+                let fd = indexPrimArray acceptBufCopy i
                 if fd < 0
                 then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return fd)
                 else do

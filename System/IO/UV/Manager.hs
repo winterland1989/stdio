@@ -294,7 +294,7 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
                 lock <- indexArrM blockTable (fromIntegral slot)
                 r <- peekElemOff resultTable (fromIntegral slot)
                 pokeElemOff resultTable (fromIntegral slot) 0 -- clear the result, accept loop rely on this behavior
-                void $ putMVar lock (fromIntegral r)   -- unlock ghc thread with MVar
+                void $ tryPutMVar lock (fromIntegral r)   -- unlock ghc thread with MVar
 
             return c
 
@@ -378,6 +378,7 @@ initUVHandle typ init uvm = initResource
 -- uv mananger/capability. When we want to fork a new I/O thread, we always try to find the
 -- most idle capability, and this strategy greatly improve work balancing in
 --
+{-
 forkBa :: IO () -> IO ThreadId
 forkBa io = do
     !uvmArr <- readIORef uvManagerArray
@@ -399,3 +400,12 @@ forkBa io = do
             then go uvmArr siz (i+1) idle uvm'
             else go uvmArr siz (i+1) maxIdle uvm
         | otherwise = return uvm
+-}
+forkBa :: IO () -> IO ThreadId
+forkBa io = do
+    i <- atomicAddCounter_ counter 1
+    forkOn i io
+  where
+    counter :: Counter
+    {-# NOINLINE counter #-}
+    counter = unsafePerformIO $ newCounter 0
