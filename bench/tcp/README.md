@@ -39,7 +39,7 @@ cabal build
 # golang
 go run golang/main.go
 
-# nodejs
+# nodejs, if you know your CPU's core number x, set it with env CPU_NUM=x
 node nodejs/main.js
 
 # wrk
