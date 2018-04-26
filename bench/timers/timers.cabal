@@ -20,7 +20,6 @@ executable low-res-timer
   -- other-modules:       
   -- other-extensions:    
   c-sources:          ../../cbits/bytes.c
-                      ../../cbits/win32.c
   build-depends:       base >=4.9 && <5.0
                     ,   stm
                     ,   ghc-prim
