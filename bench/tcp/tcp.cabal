@@ -81,9 +81,10 @@ executable libuv
       , ../../third_party/libuv/src/win/winsock.c
     ghc-options: -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600
     cc-options: -Wall -Wextra -Wno-unused-parameter -Wstrict-prototypes -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600 -I../../third_party/libuv/src -I../../third_party/libuv/src/win
+    extra-libraries:   psapi, Iphlpapi, userenv
 
   else
-    extra-libraries:        uv
+    extra-libraries:   uv
 
   ghc-options:         -O2 -threaded -rtsopts -eventlog -with-rtsopts=-N
   default-language:    Haskell2010
