@@ -108,7 +108,8 @@ startServer ServerConfig{..} =
             uvListen serverHandle (fromIntegral serverBackLog)
 
         forever $ do
-            r <- takeMVar m
+            _ <- takeMVar m
+
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
             acceptBufCopy <- withUVManager' serverManager $ do
                 accepted <- peekBufferTable serverManager serverSlot

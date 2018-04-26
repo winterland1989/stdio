@@ -98,10 +98,6 @@ data UVManager = UVManager
     , uvmTimer       :: {-# UNPACK #-} !(Ptr UVHandle)  -- This timer handle is used to achieve polling with
                                                         -- given timeout
 
-    , uvmIdleCounter :: {-# UNPACK #-} !(Counter)       -- Counter for idle(no event) uv_runs, when counter
-                                                        -- reaches IDLE_LIMIT, we start to increase waiting between
-                                                        -- uv_run, until delay reach 8 milliseconds
-
     , uvmCap ::  {-# UNPACK #-} !Int                -- the capability uv manager should run on, we save this
                                                     -- number for starting uv manager with `forkOn`
     }
@@ -194,9 +190,7 @@ initUVManager siz cap = do
 
         running <- newMVar False
 
-        idleCounter <- newCounter IDLE_LIMIT
-
-        return (UVManager blockTableRef freeSlotList loop loopData running async timer idleCounter cap)
+        return (UVManager blockTableRef freeSlotList loop loopData running async timer cap)
 
 -- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
 --
@@ -232,29 +226,28 @@ withUVManager' uvm f = withUVManager uvm (\ _ -> f)
 -- | Start the uv loop
 --
 startUVManager :: HasCallStack => UVManager -> IO ()
-startUVManager uvm@(UVManager _ _ _ _ running _ _ idleCounter _) = do
-
-    e <- withMVar running $ \ _ -> step uvm False   -- we borrow mio's non-blocking/blocking poll strategy here
-    if e > 0
-    then yield >> startUVManager uvm       -- we yield here, to let other threads do actual work
-    else do
-        yield
-        e <- withMVar running $ \ _ -> step uvm False   -- we do another non-blocking poll to make sure
-        if e > 0 then yield >> startUVManager uvm
-        else do                                 -- if there's still no events, we directly jump to safe blocking poll
-
-            _ <- swapMVar running True          -- after changing this, other thread can wake up us
-            e <- step uvm True                  -- by send async handler, and it's thread safe
-            _ <- swapMVar running False
-
-            yield                               -- we yield here, to let other threads do actual work
-            startUVManager uvm
-
+startUVManager uvm@(UVManager _ _ _ _ running _ _ _) = loop -- use a closure capture uvm in case of stack memory leaking
   where
+    loop = do
+        e <- withMVar running $ \ _ -> step uvm False   -- we borrow mio's non-blocking/blocking poll strategy here
+        if e > 0                                        -- first we do a non-blocking poll, if we got events
+        then yield >> loop                              -- we yield here, to let other threads do actual work
+        else do                                         -- otherwise we still yield once
+            yield                                       -- in case other threads can still progress
+            e <- withMVar running $ \ _ -> step uvm False   -- now we do another non-blocking poll to make sure
+            if e > 0 then yield >> loop             -- if we got events somehow, we yield and go back
+            else do                                 -- if there's still no events, we directly jump to safe blocking poll
+
+                _ <- swapMVar running True          -- after swap this lock, other thread can wake up us
+                e <- step uvm True                  -- by send async handler, and it's thread safe
+                _ <- swapMVar running False
+
+                yield                               -- we yield here, to let other threads do actual work
+                loop
 
     -- call uv_run, return the event number
     step :: UVManager -> Bool -> IO CSize
-    step (UVManager blockTableRef freeSlotList loop loopData _ _ timer _ _) block = do
+    step (UVManager blockTableRef freeSlotList loop loopData _ _ timer _) block = do
             blockTable <- readIORef blockTableRef
             clearUVEventCounter loopData        -- clean event counter
 
@@ -292,7 +285,7 @@ initUVSlot uvm = initResource (allocSlot uvm) (freeSlot uvm)
 -- | Allocate a slot number for given handler or request.
 --
 allocSlot :: HasCallStack => UVManager -> IO UVSlot
-allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _ _) =
+allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> withUVManager' uvm $ do
@@ -322,7 +315,7 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _ _) =
 -- | Return slot back to the uv manager where it allocate from.
 --
 freeSlot :: UVManager -> UVSlot -> IO ()
-freeSlot (UVManager _ freeSlotList _ _ _ _ _ _ _) slot =
+freeSlot (UVManager _ freeSlotList _ _ _ _ _ _) slot =
     modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)
 
 --------------------------------------------------------------------------------

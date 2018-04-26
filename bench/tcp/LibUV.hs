@@ -32,15 +32,13 @@ main = do
         recvbuf <- mallocPlainForeignPtrBytes 2048
         r <- withForeignPtr recvbuf $ \ p -> do
             readInput uvs p 2048
-        when (r /= 0) $ do
 
-            let (B.PS sendbuffp _ l) = sendbuf
-            withForeignPtr sendbuffp $ \ p ->
-                writeOutput uvs p l
+        when (r /= 0) $ do
+            withForeignPtr sendbuffp $ \ p -> writeOutput uvs p l
 
             echo uvs
 
-    sendbuf =
+    (B.PS sendbuffp _ l) =
         "HTTP/1.1 200 OK\r\n\
         \Content-Type: text/html; charset=UTF-8\r\n\
         \Content-Length: 500\r\n\

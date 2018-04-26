@@ -14,10 +14,10 @@ import Control.Concurrent.MVar
 import Control.Monad.IO.Class
 
 data UVStream = UVStream
-    { uvsHandle     :: Ptr UVHandle
-    , uvsReadSlot   :: UVSlot
-    , uvsWriteReq   :: Ptr UVReq
-    , uvsWriteSlot  :: UVSlot
+    { uvsHandle     :: {-# UNPACK #-} !(Ptr UVHandle)
+    , uvsReadSlot   :: {-# UNPACK #-} !UVSlot
+    , uvsWriteReq   :: {-# UNPACK #-} !(Ptr UVReq)
+    , uvsWriteSlot  :: {-# UNPACK #-} !UVSlot
     , uvsManager    :: UVManager
     }
 
