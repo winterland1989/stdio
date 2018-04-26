@@ -35,7 +35,6 @@ main = do
 
         when (r /= 0) $ do
             withForeignPtr sendbuffp $ \ p -> writeOutput uvs p l
-
             echo uvs
 
     (B.PS sendbuffp _ l) =

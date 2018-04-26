@@ -231,9 +231,85 @@ int hs_uv_tcp_connect(uv_connect_t* req, uv_tcp_t* handle, const struct sockaddr
 }
 
 #if defined(_WIN32)
-int32_t hs_uv_accept(uv_stream_t* server) {
+int32_t hs_uv_accept(uv_tcp_t* server) {
+    int fd;
+    switch (server->type) {
+        case UV_TCP:
+            fd = hs_uv_tcp_accept((uv_tcp_t*)server);
+            break;
+        case UV_NAMED_PIPE:
+            fd = hs_uv_pipe_accept((uv_pipe_t*)server);
+            break;
+        default:
+            assert(0);
+    }
+    return fd;
+}
+int32_t hs_uv_tcp_accept(uv_tcp_t* server) {
+  int32_t fd = 0;
 
-    return 1;
+  uv_tcp_accept_t* req = server->tcp.serv.pending_accepts;
+
+  if (!req) {
+    /* No valid connections found, so we error out. */
+    return WSAEWOULDBLOCK;
+  }
+
+  if (req->accept_socket == INVALID_SOCKET) {
+    return WSAENOTCONN;
+  }
+
+  fd = (int32_t)req->accept_socket;
+
+  /* Prepare the req to pick up a new connection */
+
+  server->tcp.serv.pending_accepts = req->next_pending;
+  req->next_pending = NULL;
+  req->accept_socket = INVALID_SOCKET;
+
+  if (!(server->flags & UV__HANDLE_CLOSING)) {
+    /* Check if we're in a middle of changing the number of pending accepts. */
+    if (!(server->flags & UV_HANDLE_TCP_ACCEPT_STATE_CHANGING)) {
+      uv_tcp_queue_accept(server, req);
+    } else {
+      /* We better be switching to a single pending accept. */
+      assert(server->flags & UV_HANDLE_TCP_SINGLE_ACCEPT);
+      server->tcp.serv.processed_accepts++;
+      if (server->tcp.serv.processed_accepts >= uv_simultaneous_server_accepts) {
+        server->tcp.serv.processed_accepts = 0;
+        /*
+         * All previously queued accept requests are now processed.
+         * We now switch to queueing just a single accept.
+         */
+        uv_tcp_queue_accept(server, &server->tcp.serv.accept_reqs[0]);
+        server->flags &= ~UV_HANDLE_TCP_ACCEPT_STATE_CHANGING;
+        server->flags |= UV_HANDLE_TCP_SINGLE_ACCEPT;
+      }
+    }
+  }
+  return fd;
+}
+int hs_uv_pipe_accept(uv_pipe_t* server) {
+    uv_loop_t* loop = server->loop;
+    uv_pipe_accept_t* req;
+
+    int fd;
+    req = server->pipe.serv.pending_accepts;
+    if (!req) {
+      /* No valid connections found, so we error out. */
+      return WSAEWOULDBLOCK;
+    }
+
+    fd = req->pipeHandle;
+
+    /* Prepare the req to pick up a new connection */
+    server->pipe.serv.pending_accepts = req->next_pending;
+    req->next_pending = NULL;
+    req->pipeHandle = INVALID_HANDLE_VALUE;
+    if (!(server->flags & UV__HANDLE_CLOSING)) {
+        uv_pipe_queue_accept(loop, server, req, FALSE);
+    }
+    return fd;
 }
 #else
 // we don't consider ipc case in stdio

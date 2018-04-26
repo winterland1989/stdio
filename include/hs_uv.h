@@ -33,7 +33,21 @@ int hs_uv_async_wake_init(uv_loop_t* loop, uv_async_t* async);
 
 
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+enum {
+  UV__SIGNAL_ONE_SHOT = 0x80000,  /* On signal reception remove sighandler */
+  UV__HANDLE_INTERNAL = 0x8000,
+  UV__HANDLE_ACTIVE   = 0x4000,
+  UV__HANDLE_REF      = 0x2000,
+  UV__HANDLE_CLOSING  = 0 /* no-op on unix */
+};
+#define UV_HANDLE_TCP_SINGLE_ACCEPT             0x08000000
+#define UV_HANDLE_TCP_ACCEPT_STATE_CHANGING     0x10000000
+extern unsigned int uv_simultaneous_server_accepts;
+extern void uv_tcp_queue_accept(uv_tcp_t* handle, uv_tcp_accept_t* req);
+int32_t hs_uv_tcp_accept(uv_tcp_t* server);
+int32_t hs_uv_pipe_accept(uv_pipe_t* server);
+#else
 ssize_t read(int fd, void *buf, size_t count); 
 int uv__close(int fd); /* preserves errno */
 int uv__stream_open(uv_stream_t* stream, int fd, int flags);
