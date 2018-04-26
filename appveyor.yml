@@ -21,6 +21,7 @@ install:
   - refreshenv
 
 build_script:
+  - git submodule update --init
   - cabal install Cabal
   - cabal install --only-dependencies --enable-tests --enable-benchmarks
   - cabal configure --enable-tests --enable-benchmarks --extra-lib-dirs=%EXTRA_DIR%\mingw64\lib --extra-include-dirs=%EXTRA_DIR%\mingw64\include
