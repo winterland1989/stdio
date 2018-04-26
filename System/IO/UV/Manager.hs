@@ -66,7 +66,7 @@ import System.IO.UV.Internal
 --------------------------------------------------------------------------------
 
 data UVManager = UVManager
-    { uvmBlockTable   :: {-# UNPACK #-} !(IORef (UnliftedArray (MVar Int))) -- a array to store threads blocked on async I/O
+    { uvmBlockTable   :: {-# UNPACK #-} !(IORef (UnliftedArray (MVar ()))) -- a array to store threads blocked on async I/O
                                                                             -- Int inside MVar is the async action's result.
 
     , uvmFreeSlotList :: {-# UNPACK #-} !(MVar [UVSlot])    -- the slot is attached as the data field of
@@ -139,7 +139,7 @@ getUVManager = do
 
 -- | Get 'MVar' from blocking table with given slot.
 --
-getBlockMVar :: UVManager -> UVSlot -> IO (MVar Int)
+getBlockMVar :: UVManager -> UVSlot -> IO (MVar ())
 {-# INLINABLE getBlockMVar #-}
 getBlockMVar uvm slot = do
     blockTable <- readIORef (uvmBlockTable uvm)
@@ -179,17 +179,12 @@ initUVManager siz cap = do
 
     liftIO $ do
         mblockTable <- newArr siz
-        forM_ [0..siz-1] $ \ i ->
-            writeArr mblockTable i =<< newEmptyMVar
+        forM_ [0..siz-1] $ \ i -> writeArr mblockTable i =<< newEmptyMVar
         blockTable <- unsafeFreezeArr mblockTable
         blockTableRef <- newIORef blockTable
-
         freeSlotList <- newMVar [0..(fromIntegral siz)-1]
-
         loopData <- peekUVLoopData loop
-
         running <- newMVar False
-
         return (UVManager blockTableRef freeSlotList loop loopData running async timer cap)
 
 -- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
@@ -267,12 +262,10 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ _) = loop -- use a closure cap
                 void $ uvRun loop uV_RUN_NOWAIT
 
             (c, q) <- peekUVEventQueue loopData
-            resultTable <- peekUVResultTable (uvmLoopData uvm)
             forM_ [0..(fromIntegral c-1)] $ \ i -> do
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)
-                r <- peekElemOff resultTable (fromIntegral slot)
-                void $ tryPutMVar lock (fromIntegral r)   -- unlock ghc thread with MVar
+                tryPutMVar lock ()   -- unlock ghc thread with MVar
             return c
 
 --------------------------------------------------------------------------------
@@ -342,7 +335,6 @@ initUVHandle typ init uvm = initResource
             return handle
         )
         (withUVManager' uvm . hs_uv_handle_close) -- handle is free in uv_close callback
-
 
 -- | Fork a new GHC thread with active load-balancing.
 --

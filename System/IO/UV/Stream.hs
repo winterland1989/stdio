@@ -42,7 +42,8 @@ instance Input UVStream where
         withUVManager' uvm $ do
             pokeBufferTable uvm rslot buf len
             uvReadStart handle
-        r <- takeMVar m
+        takeMVar m
+        r <- peekBufferTable uvm rslot
         if  | r > 0  -> return r
             -- r == 0 should be impossible, since we guard this situation in c side, but we handle it anyway
             -- nread might be 0, which does not indicate an error or EOF. This is equivalent to EAGAIN or EWOULDBLOCK under read(2)
@@ -61,7 +62,8 @@ instance Output UVStream where
         withUVManager' uvm $ do
             pokeBufferTable uvm wslot buf len
             uvWrite req handle
-        throwUVIfMinus_ $ takeMVar m
+        takeMVar m
+        throwUVIfMinus_ $ peekBufferTable uvm wslot
 
 uvWrite :: Ptr UVReq -> Ptr UVHandle -> IO ()
 uvWrite req handle = throwUVIfMinus_ $ hs_uv_write req handle

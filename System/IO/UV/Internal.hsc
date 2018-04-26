@@ -35,11 +35,7 @@ clearUVEventCounter :: Ptr UVLoopData -> IO ()
 clearUVEventCounter p = do
     #{poke hs_loop_data, event_counter          } p $ (0 :: CSize)
 
-peekUVResultTable :: Ptr UVLoopData -> IO (Ptr CSsize)
-peekUVResultTable p = do
-    (#{peek hs_loop_data, result_table          } p)
-
-peekUVBufferTable :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSize)
+peekUVBufferTable :: Ptr UVLoopData -> IO (Ptr (Ptr Word8), Ptr CSsize)
 peekUVBufferTable p = (,)
     <$> (#{peek hs_loop_data, buffer_table          } p)
     <*> (#{peek hs_loop_data, buffer_size_table     } p)

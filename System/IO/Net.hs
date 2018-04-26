@@ -73,7 +73,8 @@ initTCPConnection target local = do
             tryTakeMVar m
             pokeUVReqData connReq connSlot
             withUVManager' uvm $ uvTCPConnect connReq handle target'
-            throwUVIfMinus_ $ takeMVar m
+            takeMVar m
+            throwUVIfMinus_ $ peekBufferTable uvm connSlot
     return conn
 
 data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
@@ -88,6 +89,7 @@ data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
 startServer :: ServerConfig -> IO ()
 startServer ServerConfig{..} =
     withResource initTCPStream $ \ server -> do
+
     let serverHandle = uvsHandle server
         serverManager = uvsManager server
         serverSlot = uvsReadSlot server
@@ -108,7 +110,7 @@ startServer ServerConfig{..} =
             uvListen serverHandle (fromIntegral serverBackLog)
 
         forever $ do
-            _ <- takeMVar m
+            takeMVar m
 
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
             acceptBufCopy <- withUVManager' serverManager $ do

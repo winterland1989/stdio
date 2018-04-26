@@ -22,16 +22,13 @@ uv_loop_t* hs_uv_loop_init(size_t siz){
         
     size_t* event_queue = malloc(siz*sizeof(size_t));
     char** buffer_table = malloc(siz*sizeof(char*));
-    size_t* buffer_size_table = malloc(siz*sizeof(size_t));
-    ssize_t* result_table = calloc(siz, sizeof(ssize_t));
+    ssize_t* buffer_size_table = malloc(siz*sizeof(ssize_t));
 
-    if (loop_data == NULL || event_queue == NULL || buffer_table == NULL || 
-            buffer_size_table == NULL || result_table == NULL){
+    if (loop_data == NULL || event_queue == NULL || buffer_table == NULL || buffer_size_table == NULL){
         free(event_queue);
         free(loop_data);
         free(buffer_table);
         free(buffer_size_table);
-        free(result_table);
 
         uv_loop_close(loop);
         free(loop);
@@ -42,7 +39,6 @@ uv_loop_t* hs_uv_loop_init(size_t siz){
         loop_data->event_queue             = event_queue;
         loop_data->buffer_table            = buffer_table;
         loop_data->buffer_size_table       = buffer_size_table;
-        loop_data->result_table            = result_table;
         loop->data = loop_data;
         return loop;
     }
@@ -54,22 +50,18 @@ uv_loop_t* hs_uv_loop_resize(uv_loop_t* loop, size_t siz){
     hs_loop_data* loop_data = loop->data;
     size_t* event_queue_new       = realloc(loop_data->event_queue, (siz*sizeof(size_t)));
     char** buffer_table_new       = realloc(loop_data->buffer_table, (siz*sizeof(char*)));
-    size_t* buffer_size_table_new = realloc(loop_data->buffer_size_table, (siz*sizeof(size_t)));
-    ssize_t* result_table_new      = calloc(siz, sizeof(ssize_t));
+    ssize_t* buffer_size_table_new = realloc(loop_data->buffer_size_table, (siz*sizeof(ssize_t)));
 
-    if (event_queue_new == NULL || buffer_table_new == NULL || 
-            buffer_size_table_new == NULL || result_table_new == NULL){
+    if (event_queue_new == NULL || buffer_table_new == NULL || buffer_size_table_new == NULL){
         // release new memory
         if (event_queue_new != loop_data->event_queue) free(event_queue_new);
         if (buffer_table_new != loop_data->buffer_table) free(buffer_table_new);
         if (buffer_size_table_new != loop_data->buffer_size_table) free(buffer_size_table_new);
-        free(result_table_new);
         return NULL;
     } else {
         loop_data->event_queue             = event_queue_new;
         loop_data->buffer_table            = buffer_table_new;
         loop_data->buffer_size_table       = buffer_size_table_new;
-        loop_data->result_table            = result_table_new;
         return loop;
     }
 }
@@ -93,7 +85,6 @@ void hs_uv_loop_close(uv_loop_t* loop){
     free(loop_data->event_queue);
     free(loop_data->buffer_table);
     free(loop_data->buffer_size_table);
-    free(loop_data->result_table);
 }
 
 /********************************************************************************/
@@ -146,7 +137,7 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
     hs_loop_data* loop_data = stream->loop->data;
 
     if (nread != 0) {
-        loop_data->result_table[slot] = nread;
+        loop_data->buffer_size_table[slot] = nread;
         loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
         loop_data->event_counter += 1;
         uv_read_stop(stream);
@@ -161,7 +152,7 @@ void hs_write_cb(uv_write_t* req, int status){
     size_t slot = (size_t)req->data;
     hs_loop_data* loop_data = req->handle->loop->data;
 
-    loop_data->result_table[slot] = (ssize_t)status;                   // 0 in case of success, < 0 otherwise.
+    loop_data->buffer_size_table[slot] = (ssize_t)status;                   // 0 in case of success, < 0 otherwise.
 
     loop_data->event_queue[loop_data->event_counter] = slot;   // push the slot to event queue
     loop_data->event_counter += 1;
@@ -230,7 +221,7 @@ void hs_connect_cb(uv_connect_t* req, int status){
     size_t slot = (size_t)req->data;
     hs_loop_data* loop_data = req->handle->loop->data;       // uv_connect_t has handle field
 
-    loop_data->result_table[slot] = status;                  // 0 in case of success, < 0 otherwise.
+    loop_data->buffer_size_table[slot] = status;                  // 0 in case of success, < 0 otherwise.
     loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
     loop_data->event_counter += 1;
 }
