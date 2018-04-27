@@ -47,7 +47,7 @@ script:
     if [[ ${GHCVER} > 8 ]]; then   
         cabal test               # type application which only available on GHC > 8
     fi
- - cabal check
+ # - cabal check
  - cabal sdist   # tests that a source-distribution can be generated
 
 # Check that the resulting source distribution can be built & installed.

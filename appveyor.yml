@@ -27,5 +27,5 @@ build_script:
   - cabal configure --enable-tests --enable-benchmarks --extra-lib-dirs=%EXTRA_DIR%\mingw64\lib --extra-include-dirs=%EXTRA_DIR%\mingw64\include
   - cabal build   # this builds all libraries and executables (including tests/benchmarks)
   - cabal test
-  - cabal check
+  # - cabal check
   - cabal sdist   # tests that a source-distribution can be generated
