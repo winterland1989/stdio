@@ -10,10 +10,6 @@ env:
  - CABALVER=1.24 GHCVER=8.2.1
 # - CABALVER=head GHCVER=head   # see section about GHC HEAD snapshots
 
-matrix:
-  allow_failures:
-    - env: CABALVER=1.22 GHCVER=7.10.3
-
 # Note: the distinction between `before_install` and `install` is not important.
 before_install:
  - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
@@ -26,7 +22,6 @@ before_install:
  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
 
 install:
- - git submodule update --init
  - cabal --version
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
  - travis_retry cabal update
@@ -51,7 +46,7 @@ script:
     if [[ ${GHCVER} > 8 ]]; then   
         cabal test               # type application which only available on GHC > 8
     fi
- # - cabal check
+ - cabal check
  - cabal sdist   # tests that a source-distribution can be generated
 
 # Check that the resulting source distribution can be built & installed.
