@@ -48,6 +48,8 @@ import Data.Primitive.PrimArray
 import Data.Word
 import Data.IORef
 import Data.IORef.Unboxed
+import Control.Concurrent.STM.TVar
+import Control.Concurrent.STM
 import Foreign hiding (void, with)
 import Foreign.C
 import Control.Concurrent.MVar
@@ -64,6 +66,8 @@ import System.IO.UV.Internal
 #define IDLE_LIMIT 20
 
 --------------------------------------------------------------------------------
+
+data UVMState = UVM_LOCKED | UVM_POLLING | UVM_FREE
 
 data UVManager = UVManager
     { uvmBlockTable   :: {-# UNPACK #-} !(IORef (UnliftedArray (MVar ()))) -- a array to store threads blocked on async I/O
@@ -83,7 +87,7 @@ data UVManager = UVManager
     , uvmLoop        :: {-# UNPACK #-} !(Ptr UVLoop)        -- the uv loop refrerence
     , uvmLoopData    :: {-# UNPACK #-} !(Ptr UVLoopData)    -- cached pointer to uv_loop_t's data field
 
-    , uvmRunning     :: {-# UNPACK #-} !(MVar Bool)     -- only uv manager thread will modify this value
+    , uvmState     :: {-# UNPACK #-} !(TVar UVMState)     -- only uv manager thread will modify this value
                                                         -- 'True' druing uv_run and 'False' otherwise.
                                                         --
                                                         -- unlike epoll/ONESHOT, uv loop are NOT thread safe,
@@ -184,7 +188,7 @@ initUVManager siz cap = do
         blockTableRef <- newIORef blockTable
         freeSlotList <- newMVar [0..(fromIntegral siz)-1]
         loopData <- peekUVLoopData loop
-        running <- newMVar False
+        running <- newTVarIO UVM_FREE
         return (UVManager blockTableRef freeSlotList loop loopData running async timer cap)
 
 -- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
@@ -192,21 +196,16 @@ initUVManager siz cap = do
 -- libuv is not thread safe, use this function to perform any action which will mutate uv_loop's state.
 --
 withUVManager :: HasCallStack => UVManager -> (Ptr UVLoop -> IO a) -> IO a
-withUVManager uvm f = do
+withUVManager uvm f = bracket_
+    (atomically $ do
+        state <- readTVar (uvmState uvm)
+        case state of
+            UVM_LOCKED -> retry
+            UVM_POLLING -> uvAsyncSendSTM (uvmAsync uvm) >> retry
+            UVM_FREE -> swapTVar (uvmState uvm) UVM_LOCKED)
+    (atomically $ swapTVar (uvmState uvm) UVM_FREE)
+    (f (uvmLoop uvm))
 
-    r <- withMVar (uvmRunning uvm) $ \ running ->
-        if running
-        then do
-            uvAsyncSend (uvmAsync uvm) -- if uv_run is running, it will stop
-                                       -- if uv_run is not running, next running won't block
-            return Nothing
-        else do
-            r <- f (uvmLoop uvm)
-            return (Just r)
-
-    case r of
-        Just r' -> return r'
-        _       -> yield >> withUVManager uvm f -- we yield here, because uv_run is probably not finished yet
 
 -- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
 --
@@ -224,26 +223,33 @@ startUVManager :: HasCallStack => UVManager -> IO ()
 startUVManager uvm@(UVManager _ _ _ _ running _ _ _) = loop -- use a closure capture uvm in case of stack memory leaking
   where
     loop = do
-        e <- withMVar running $ \ _ -> step uvm False   -- we borrow mio's non-blocking/blocking poll strategy here
+        e <- step uvm False   -- we borrow mio's non-blocking/blocking poll strategy here
         if e > 0                                        -- first we do a non-blocking poll, if we got events
-        then yield >> loop                              -- we yield here, to let other threads do actual work
-        else do                                         -- otherwise we still yield once
+        then do
+            yield
+            loop                              -- we yield here, to let other threads do actual work
+        else do
             yield                                       -- in case other threads can still progress
-            e <- withMVar running $ \ _ -> step uvm False   -- now we do another non-blocking poll to make sure
-            if e > 0 then yield >> loop             -- if we got events somehow, we yield and go back
-            else do                                 -- if there's still no events, we directly jump to safe blocking poll
-
-                _ <- swapMVar running True          -- after swap this lock, other thread can wake up us
+            e <- step uvm False   -- now we do another non-blocking poll to make sure
+            if e > 0 then do
+                yield
+                loop             -- if we got events somehow, we yield and go back
+            else do              -- if there's still no events, we directly jump to safe blocking poll
                 e <- step uvm True                  -- by send async handler, and it's thread safe
-                _ <- swapMVar running False
-
                 yield                               -- we yield here, to let other threads do actual work
                 loop
 
     -- call uv_run, return the event number
     step :: UVManager -> Bool -> IO CSize
-    step (UVManager blockTableRef freeSlotList loop loopData _ _ timer _) block = do
-            blockTable <- readIORef blockTableRef
+    step (UVManager blockTableRef _ loop loopData _ _ timer _) block = bracket_
+        (atomically $ do
+            state <- readTVar (uvmState uvm)
+            case state of
+                UVM_LOCKED -> retry
+                UVM_POLLING -> return () -- this is impossible
+                UVM_FREE -> void $ swapTVar (uvmState uvm) UVM_POLLING)
+        (atomically $ swapTVar (uvmState uvm) UVM_FREE)
+        (do blockTable <- readIORef blockTableRef
             clearUVEventCounter loopData        -- clean event counter
 
             if block
@@ -266,7 +272,7 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ _) = loop -- use a closure cap
                 slot <- peekElemOff q i
                 lock <- indexArrM blockTable (fromIntegral slot)
                 tryPutMVar lock ()   -- unlock ghc thread with MVar
-            return c
+            return c)
 
 --------------------------------------------------------------------------------
 

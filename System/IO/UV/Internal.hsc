@@ -15,6 +15,7 @@ import System.Posix.Types (CSsize(..))
 import System.IO.Exception
 import Data.Bits
 import System.IO.Net.SockAddr (SockAddr, SocketFamily(..))
+import GHC.Conc.Sync (unsafeIOToSTM, STM)
 
 #include "uv.h"
 #include "hs_uv.h"
@@ -158,6 +159,10 @@ initUVAsyncWake loop = initResource
     (hs_uv_handle_close) -- handle is free in uv_close callback
 
 foreign import ccall unsafe hs_uv_async_wake_init :: Ptr UVLoop -> Ptr UVHandle -> IO CInt
+
+
+uvAsyncSendSTM :: Ptr UVHandle -> STM ()
+uvAsyncSendSTM = unsafeIOToSTM . uvAsyncSend 
 
 uvAsyncSend :: HasCallStack => Ptr UVHandle -> IO ()
 uvAsyncSend = throwUVIfMinus_ . uv_async_send
