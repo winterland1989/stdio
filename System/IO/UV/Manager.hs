@@ -281,7 +281,7 @@ allocSlot :: HasCallStack => UVManager -> IO UVSlot
 allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
-        []     -> withUVManager' uvm $ do
+        []     -> do
             -- free list is empty, we double it
             -- but we shouldn't do it if uv_run doesn't finish yet
             -- because we may re-allocate loop data in another thread
@@ -300,7 +300,7 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
 
             writeIORef blockTableRef iBlockTable'
 
-            uvLoopResize loop (fromIntegral newSiz)
+            withUVManager' uvm $ uvLoopResize loop (fromIntegral newSiz)
 
             return ([fromIntegral oldSiz+1 .. fromIntegral newSiz-1], fromIntegral oldSiz)    -- fill the free slot list
 
