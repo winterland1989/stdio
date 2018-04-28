@@ -1,4 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE UnliftedFFITypes #-}
+{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
@@ -50,6 +52,7 @@ import Data.IORef
 import Data.IORef.Unboxed
 import Foreign hiding (void, with)
 import Foreign.C
+import Foreign.PrimArray
 import Control.Concurrent.MVar
 import Control.Concurrent
 import Control.Concurrent.QSemN
@@ -69,7 +72,7 @@ data UVManager = UVManager
     { uvmBlockTable   :: {-# UNPACK #-} !(IORef (UnliftedArray (MVar ()))) -- a array to store threads blocked on async I/O
                                                                             -- Int inside MVar is the async action's result.
 
-    , uvmFreeSlotList :: {-# UNPACK #-} !(MVar [UVSlot])    -- the slot is attached as the data field of
+    , uvmFreeSlotTable :: {-# UNPACK #-} !(MVar (MutablePrimArray RealWorld Word8))  -- the slot is attached as the data field of
                                                             -- c struct uv_handle_t, thus will be available
                                                             -- to c callbacks, which are static functions.
                                                             --
@@ -182,10 +185,12 @@ initUVManager siz cap = do
         forM_ [0..siz-1] $ \ i -> writeArr mblockTable i =<< newEmptyMVar
         blockTable <- unsafeFreezeArr mblockTable
         blockTableRef <- newIORef blockTable
-        freeSlotList <- newMVar [0..(fromIntegral siz)-1]
+        freeSlotTable <- newArr siz
+        setArr freeSlotTable 0 siz 0
+        freeSlotTableRef <- newMVar freeSlotTable
         loopData <- peekUVLoopData loop
         running <- newMVar False
-        return (UVManager blockTableRef freeSlotList loop loopData running async timer cap)
+        return (UVManager blockTableRef freeSlotTableRef loop loopData running async timer cap)
 
 -- | Lock an uv mananger, so that we can safely mutate its uv_loop's state.
 --
@@ -278,38 +283,50 @@ initUVSlot uvm = initResource (allocSlot uvm) (freeSlot uvm)
 -- | Allocate a slot number for given handler or request.
 --
 allocSlot :: HasCallStack => UVManager -> IO UVSlot
-allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
-    modifyMVar freeSlotList $ \ freeList -> case freeList of
-        (s:ss) -> return (ss, s)
-        []     -> withUVManager' uvm $ do
-            -- free list is empty, we double it
-            -- but we shouldn't do it if uv_run doesn't finish yet
-            -- because we may re-allocate loop data in another thread
-            -- so we take the running lock first
+allocSlot uvm@(UVManager blockTableRef freeSlotTableRef loop _ _ _ _ _) =
+    modifyMVar freeSlotTableRef $ \ freeSlotTable -> do
+        slot <- withMutablePrimArrayUnsafe freeSlotTable $ \ ba# _ -> c_strlen ba#
+        siz <- sizeofMutableArr freeSlotTable
+        if slot < siz - 1
+        then do
+            writeArr freeSlotTable slot 1
+            return (freeSlotTable, fromIntegral slot)
+        else do
+            freeSlotTable' <- newArr (siz * 2)
+            setArr freeSlotTable' 0 siz 1
+            setArr freeSlotTable' siz siz 0
 
-            blockTable <- readIORef blockTableRef
-            let oldSiz = sizeofArr blockTable
-                newSiz = oldSiz * 2
+            withUVManager' uvm $ do
+                -- free list is empty, we double it
+                -- but we shouldn't do it if uv_run doesn't finish yet
+                -- because we may re-allocate loop data in another thread
+                -- so we take the running lock first
 
-            blockTable' <- newArr newSiz
-            copyArr blockTable' 0 blockTable 0 oldSiz
+                blockTable <- readIORef blockTableRef
+                let oldSiz = sizeofArr blockTable
+                    newSiz = oldSiz * 2
 
-            forM_ [oldSiz..newSiz-1] $ \ i ->
-                writeArr blockTable' i =<< newEmptyMVar
-            !iBlockTable' <- unsafeFreezeArr blockTable'
+                blockTable' <- newArr newSiz
+                copyArr blockTable' 0 blockTable 0 oldSiz
 
-            writeIORef blockTableRef iBlockTable'
+                forM_ [oldSiz..newSiz-1] $ \ i ->
+                    writeArr blockTable' i =<< newEmptyMVar
+                !iBlockTable' <- unsafeFreezeArr blockTable'
 
-            uvLoopResize loop (fromIntegral newSiz)
+                writeIORef blockTableRef iBlockTable'
 
-            return ([fromIntegral oldSiz+1 .. fromIntegral newSiz-1], fromIntegral oldSiz)    -- fill the free slot list
+                uvLoopResize loop (fromIntegral newSiz)
+
+            return (freeSlotTable', fromIntegral slot)    -- fill the free slot list
 
 
 -- | Return slot back to the uv manager where it allocate from.
 --
 freeSlot :: UVManager -> UVSlot -> IO ()
-freeSlot (UVManager _ freeSlotList _ _ _ _ _ _) slot =
-    modifyMVar_ freeSlotList $ \ freeList -> return (slot:freeList)
+freeSlot (UVManager _ freeSlotTableRef _ _ _ _ _ _) slot = do
+    modifyMVar_ freeSlotTableRef $ \ freeSlotTable -> do
+        writeArr freeSlotTable (fromIntegral slot) 0
+        return freeSlotTable
 
 --------------------------------------------------------------------------------
 
@@ -351,3 +368,5 @@ forkBa io = do
     counter :: Counter
     {-# NOINLINE counter #-}
     counter = unsafePerformIO $ newCounter 0
+
+foreign import ccall unsafe "string.h strlen" c_strlen :: MutableByteArray# RealWorld -> IO Int
