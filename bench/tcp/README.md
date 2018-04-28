@@ -30,6 +30,11 @@ You should adjust your system's fd limit before running benchmark in case of run
 ```
 cabal build
 
+# Adding a proper heap size hint is important for haskell programs because
+# the way GHC's GC works.
+# You should use a -Hx parammeter if the concurrent level go beyong ~1k.
+# Quick formula: concurrent level(in K) * 10M, for example use -H128M for C10K.
+
 # mio, if you know your CPU's core number x, append a -Nx
 ./dist/build/mio/mio +RTS -s
 
