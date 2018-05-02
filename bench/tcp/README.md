@@ -23,7 +23,7 @@ This is a single threaded multiplexers, but use multiples process to take advant
 Run test
 --------
 
-This benchmark will start a server on your localhost's 8888 port, read some input(and ignore them), them servering 500 bytes of zeros in HTTP protocal, so that you can use HTTP benchmark tools such as `siege` or `wrk` to bench. A small respond size is choosen to highlight overhead each multiplexer added.
+This benchmark will start a server on your localhost's 8888 port(or use PORT environment varible if available), read some input(and ignore them), them servering 500 bytes of zeros in HTTP protocal, so that you can use HTTP benchmark tools such as `siege` or `wrk` to bench. A small respond size is choosen to highlight overhead each multiplexer added.
 
 You should adjust your system's fd limit before running benchmark in case of running out of fd.
 

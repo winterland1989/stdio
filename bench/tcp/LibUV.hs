@@ -29,13 +29,17 @@ main = do
     startServer conf
   where
     echo uvs = do
-        recvbuf <- mallocPlainForeignPtrBytes 2048
-        r <- withForeignPtr recvbuf $ \ p -> do
-            readInput uvs p 2048
+        recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
+                                                    -- since node use slab, which is in face a memory pool
+        loop recvbuf
+      where
+        loop recvbuf = do
+            r <- withForeignPtr recvbuf $ \ p -> do
+                readInput uvs p 2048
 
-        when (r /= 0) $ do
-            withForeignPtr sendbuffp $ \ p -> writeOutput uvs p l
-            echo uvs
+            when (r /= 0) $ do
+                withForeignPtr sendbuffp $ \ p -> writeOutput uvs p l
+                loop recvbuf
 
     (B.PS sendbuffp _ l) =
         "HTTP/1.1 200 OK\r\n\
