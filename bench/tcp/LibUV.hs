@@ -15,12 +15,15 @@ import System.IO.Exception
 import System.IO.UV.Stream
 import System.IO
 import Data.IORef.Unboxed
+import System.Environment
+import Text.Read                        (readMaybe)
 
 main :: IO ()
 main = do
-    hSetBuffering stdout LineBuffering
+    portStr <- lookupEnv "PORT"
+    let port = maybe 8888 id (readMaybe =<< portStr)
     let conf = ServerConfig
-            (SockAddrInet 8888 inetAny)
+            (SockAddrInet port inetAny)
             128
             echo
             (print :: SomeException -> IO())
