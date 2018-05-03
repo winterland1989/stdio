@@ -25,7 +25,6 @@ net.createServer().listen(
 -}
 
 module System.IO.Net (
-    UVStream
   , initTCPConnection
   , ServerConfig(..)
   , defaultServerConfig
@@ -89,7 +88,9 @@ data ServerConfig = forall e. Exception e => ServerConfig
     , serverWorkerHandler :: e -> IO ()
     }
 
--- | A default hello world server
+-- | A default hello world server on localhost:8888
+--
+-- Test it with @main = startServer defaultServerConfig@, now try @nc -v 127.0.0.1 8888@
 --
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig
@@ -99,7 +100,7 @@ defaultServerConfig = ServerConfig
     True
     (print :: SomeException -> IO())
 
--- | Start server's accept loop
+-- | Start a server
 --
 -- Fork new worker thread upon a new connection.
 --

@@ -224,3 +224,10 @@ foreign import ccall unsafe hs_uv_tcp_connect :: Ptr UVReq -> Ptr UVHandle -> Pt
 
 --------------------------------------------------------------------------------
 
+newtype UVTTYMode = UVTTYMode CInt
+    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
+
+#{enum UVTTYMode, UVTTYMode,
+    uV_TTY_MODE_NORMAL      = UV_TTY_MODE_NORMAL,
+    uV_TTY_MODE_RAW         = UV_TTY_MODE_RAW,
+    uV_TTY_MODE_IO          = UV_TTY_MODE_IO }

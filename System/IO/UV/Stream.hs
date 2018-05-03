@@ -13,6 +13,9 @@ import Data.Word
 import Control.Concurrent.MVar
 import Control.Monad.IO.Class
 
+-- | A higher level wrappe for uv_stream_t
+--
+--
 data UVStream = UVStream
     { uvsHandle     :: {-# UNPACK #-} !(Ptr UVHandle)
     , uvsReadSlot   :: {-# UNPACK #-} !UVSlot
