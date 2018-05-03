@@ -4,17 +4,23 @@ module Main where
 
 import Network.Socket hiding (send, recv)
 import Network.Socket.ByteString
+import GHC.ForeignPtr
+import Foreign.ForeignPtr
 import Control.Concurrent
 import Control.Monad
 import qualified Data.ByteString as B
 import Control.Concurrent.MVar
 import Data.IORef.Unboxed
+import System.Environment
+import Text.Read                        (readMaybe)
 
 main :: IO ()
 main = do
+    portStr <- lookupEnv "PORT"
+    let port = maybe 8888 id (readMaybe =<< portStr)
     sock <- socket AF_INET Stream defaultProtocol
-    bind sock $ SockAddrInet 8888 iNADDR_ANY
-    listen sock 32768
+    bind sock $ SockAddrInet port iNADDR_ANY
+    listen sock 128
     cap <- getNumCapabilities
     capCounter <- newCounter 0
     forever $ do
@@ -25,12 +31,17 @@ main = do
             echo sock'
   where
     echo sock = do
-        r <- recv sock 2048
-        if (B.length r /= 0)
-        then do
-            sendAll sock sendbuf
-            echo sock
-        else close sock
+        recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
+                                                    -- since node use slab, which is in face a memory pool
+        loop recvbuf
+      where
+        loop recvbuf = do
+            r <- withForeignPtr recvbuf $ \ p -> do
+                recvBuf sock p 2048
+
+            when (r /= 0) $ do
+                sendAll sock sendbuf
+                loop recvbuf
 
     sendbuf =
         "HTTP/1.1 200 OK\r\n\

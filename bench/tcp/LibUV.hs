@@ -6,41 +6,45 @@ module Main where
 import System.IO.Net
 import System.IO.Buffered
 import Control.Concurrent
-import Foreign
+import Foreign.ForeignPtr
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
 import GHC.ForeignPtr
 import Control.Monad
 import System.IO.Exception
+import System.IO.UV.Stream
 import System.IO
+import Data.IORef.Unboxed
+import System.Environment
+import Text.Read                        (readMaybe)
 
 main :: IO ()
 main = do
-    hSetBuffering stdout LineBuffering
+    portStr <- lookupEnv "PORT"
+    let port = maybe 8888 id (readMaybe =<< portStr)
     let conf = ServerConfig
-            (SockAddrInet 8888 inetAny)
-            1
-            32768
+            (SockAddrInet port inetAny)
+            0
+            128
             echo
             print
 
     startServer conf
-
   where
     echo uvs = do
-        recvbuf <- mallocPlainForeignPtrBytes 2048
-        r <- withForeignPtr recvbuf $ \ p -> do
-            readInput uvs p 2048
+        recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
+                                                    -- since node use slab, which is in face a memory pool
+        loop recvbuf
+      where
+        loop recvbuf = do
+            r <- withForeignPtr recvbuf $ \ p -> do
+                readInput uvs p 2048
 
-        when (r /= 0) $ do
+            when (r /= 0) $ do
+                withForeignPtr sendbuffp $ \ p -> writeOutput uvs p l
+                loop recvbuf
 
-            let (B.PS sendbuffp _ l) = sendbuf
-            withForeignPtr sendbuffp $ \ p ->
-                writeOutput uvs p l
-
-            echo uvs
-
-    sendbuf =
+    (B.PS sendbuffp _ l) =
         "HTTP/1.1 200 OK\r\n\
         \Content-Type: text/html; charset=UTF-8\r\n\
         \Content-Length: 500\r\n\
