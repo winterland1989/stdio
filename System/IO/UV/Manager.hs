@@ -232,7 +232,6 @@ startUVManager uvm@(UVManager _ _ _ _ running _ _ _) = loop -- use a closure cap
             e <- withMVar running $ \ _ -> step uvm False   -- now we do another non-blocking poll to make sure
             if e > 0 then yield >> loop             -- if we got events somehow, we yield and go back
             else do                                 -- if there's still no events, we directly jump to safe blocking poll
-
                 _ <- swapMVar running True          -- after swap this lock, other thread can wake up us
                 e <- step uvm True                  -- by send async handler, and it's thread safe
                 _ <- swapMVar running False

@@ -25,7 +25,7 @@ net.createServer().listen(
 -}
 
 module System.IO.Net (
-  , initTCPConnection
+    initTCPConnection
   , ServerConfig(..)
   , defaultServerConfig
   , startServer
