@@ -98,6 +98,7 @@ void hs_read_cb (uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf){
         hs_context_data* data = (hs_context_data*)stream->data;
         data->buffer_siz = nread;                   // save the read result_table,
                                                     // > 0 in case of success, < 0 otherwise.
+        stream->loop->data += 1;
         uv_read_stop(stream);
         hs_try_putmvar(data->cap, data->mvar);
     }
@@ -110,6 +111,7 @@ int hs_uv_read_start(uv_stream_t* stream){
 void hs_write_cb(uv_write_t* req, int status){
     hs_context_data* data = (hs_context_data*)req->data;
     data->buffer_siz = (ssize_t)status;                   // 0 in case of success, < 0 otherwise.
+    req->handle->loop->data += 1;
     hs_try_putmvar(data->cap, data->mvar);
 }
 
@@ -221,6 +223,7 @@ void hs_accept_check_cb(uv_check_t* check){
 
     if (server_data->buffer_siz > 0 && server_data->buffer != NULL){
         server_data->buffer = NULL;
+        check->loop->data += 1;
         hs_try_putmvar(check_data->cap, check_data->mvar);
         uv__io_stop(server->loop, &server->io_watcher, POLLIN);
     }

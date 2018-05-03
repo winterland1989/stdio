@@ -169,49 +169,39 @@ lockUVManager' uvm f = lockUVManager uvm (\ _ -> f)
 
 -- | Start the uv loop
 --
--- Inside loop, we do either blocking wait or non-blocking wait depending on idle counter.
---
 startUVManager :: HasCallStack => UVManager -> IO ()
-startUVManager uvm@(UVManager _ running _ _ idleCounter _) = do
-
-    ic <- readIORefU idleCounter
-    e <- if
-        | ic < UV_IDLE_LIMIT -> do        -- we really don't want enter safe FFI too often
-                                -- but if we keep doing short timeout poll
-                                -- we're facing the danger killing idle GC
-                                -- polling with 1ms timeout for 100 times seems reasonable
-                                -- 0.1s is a balance between scheduling overhead,
-                                -- and idle GC interval.
-            e <- withMVar running $ \ _ -> step uvm False
-            yield
-            return 0
-        | otherwise -> do
-            -- let's do a blocking poll
-            _ <- swapMVar running True         -- after changing this, other thread can wake up us
-            e <- step uvm True                 -- by send async handler, and it's thread safe
-            _ <- swapMVar running False
-            yield                              -- we yield here, to give other thread a chance to register new event
-            return 1
-
-    if (e == 0)                            -- bump the idle counter if no events, there's no need to do atomic-ops
-    then writeIORefU idleCounter (ic+1)
-    else writeIORefU idleCounter 0
-
-    startUVManager uvm
-
+startUVManager uvm@(UVManager _ running _ _ _ _) = loop -- use a closure capture uvm in case of stack memory leaking
   where
+    loop = do
+        e <- withMVar running $ \ _ -> step uvm False   -- we borrow mio's non-blocking/blocking poll strategy here
+        if e > 0                                        -- first we do a non-blocking poll, if we got events
+        then yield >> loop                              -- we yield here, to let other threads do actual work
+        else do                                         -- otherwise we still yield once
+            yield                                       -- in case other threads can still progress
+            e <- withMVar running $ \ _ -> step uvm False   -- now we do another non-blocking poll to make sure
+            if e > 0 then yield >> loop             -- if we got events somehow, we yield and go back
+            else do                                 -- if there's still no events, we directly jump to safe blocking poll
+
+                _ <- swapMVar running True          -- after swap this lock, other thread can wake up us
+                e <- step uvm True                  -- by send async handler, and it's thread safe
+                _ <- swapMVar running False
+
+                yield                               -- we yield here, to let other threads do actual work
+                loop
+
     -- call uv_run, return the event number
-    step :: UVManager -> Bool -> IO ()
+    step :: UVManager -> Bool -> IO CSize
     step (UVManager loop _ _ timer _ _) block = do
+            clearUVLoopData loop        -- clean event counter
 
             if block
             then if rtsSupportsBoundThreads
                 then do
-                    -- if rts support multiple capability, we choose safe FFI call with run once mode
+                    uvTimerStop timer
                     void $ uvRunSafe loop uV_RUN_ONCE
                 else do
-                    -- use a 4ms timeout blocking poll on non-threaded rts
-                    uvTimerWakeStart timer 4
+                    -- use a 2ms timeout blocking poll on non-threaded rts
+                    uvTimerWakeStart timer 2
                     void $ uvRun loop uV_RUN_ONCE
             else do
                 -- we use uV_RUN_ONCE with 1ms timeout instead of uV_RUN_NOWAIT
@@ -219,6 +209,7 @@ startUVManager uvm@(UVManager _ running _ _ idleCounter _) = do
                 -- and 1ms is the shortest timeout we can achieve with libuv's timer
                 void $ uvRun loop uV_RUN_NOWAIT
 
+            peekUVLoopData loop
 
 --------------------------------------------------------------------------------
 

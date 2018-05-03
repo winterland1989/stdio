@@ -34,8 +34,12 @@ newtype UVRunMode = UVRunMode CInt
   uV_RUN_NOWAIT  = UV_RUN_NOWAIT}
 
 -- | Peek loop data pointer from uv loop  pointer.
-peekUVLoopData :: Ptr UVLoop -> IO Int
+peekUVLoopData :: Ptr UVLoop -> IO CSize
 peekUVLoopData p = fromIntegral <$> (#{peek uv_loop_t, data} p :: IO CIntPtr)
+
+-- | Poke loop data pointer from uv loop  pointer.
+clearUVLoopData :: Ptr UVLoop -> IO ()
+clearUVLoopData p = #{poke uv_loop_t, data} p (0 :: CSize)
 
 -- | Initialize an uv loop.
 initUVLoop :: HasCallStack => Int -> Resource (Ptr UVLoop)
