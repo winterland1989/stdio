@@ -24,18 +24,29 @@ data UVStream = UVStream
     , uvsManager    :: UVManager
     }
 
-initTCPStream :: HasCallStack => Resource UVStream
-initTCPStream = do
+initUVStream :: HasCallStack => (UVManager -> Resource (Ptr UVHandle)) -> Resource UVStream
+initUVStream handleRes = do
     uvm    <- liftIO getUVManager
     rslot  <- initUVSlot uvm
     wslot  <- initUVSlot uvm
-    handle <- initUVHandle uV_TCP (\ loop handle -> uv_tcp_init loop handle >> return handle) uvm
+    handle <- handleRes uvm
     req    <- initUVReq uV_WRITE
     liftIO $ do
         pokeUVHandleData handle rslot
         pokeUVReqData req wslot
         return (UVStream handle rslot req wslot uvm)
 
+initTCPStream :: HasCallStack => Resource UVStream
+initTCPStream = initUVStream $
+    initUVHandle uV_TCP (\ loop handle -> uvTCPInit loop handle >> return handle)
+
+initPipeStream :: HasCallStack => Resource UVStream
+initPipeStream = initUVStream $
+    initUVHandle uV_NAMED_PIPE (\ loop handle -> uvPipeInit loop handle >> return handle)
+
+initTTYStream :: HasCallStack => UVFD -> Resource UVStream
+initTTYStream fd = initUVStream $
+    initUVHandle uV_TTY (\ loop handle -> uvTTYInit loop handle fd >> return handle)
 
 instance Input UVStream where
     -- readInput :: HasCallStack => UVStream -> Ptr Word8 ->  Int -> IO Int

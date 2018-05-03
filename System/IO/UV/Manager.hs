@@ -183,7 +183,7 @@ initUVManager siz cap = do
         forM_ [0..siz-1] $ \ i -> writeArr mblockTable i =<< newEmptyMVar
         blockTable <- unsafeFreezeArr mblockTable
         blockTableRef <- newIORef blockTable
-        freeSlotList <- newMVar [0..(fromIntegral siz)-1]
+        freeSlotList <- newMVar [0 .. siz-1]
         loopData <- peekUVLoopData loop
         running <- newMVar False
         return (UVManager blockTableRef freeSlotList loop loopData running async timer cap)
@@ -282,10 +282,9 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do
-
             blockTable <- readIORef blockTableRef
             let oldSiz = sizeofArr blockTable
-                newSiz = oldSiz * 2
+                newSiz = oldSiz `shiftL` 2
 
             blockTable' <- newArr newSiz
             copyArr blockTable' 0 blockTable 0 oldSiz
@@ -299,9 +298,9 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
             -- but we shouldn't do resize if uv_run doesn't finish yet
             -- so we take the running lock first
             --
-            withUVManager' uvm $ uvLoopResize loop (fromIntegral newSiz)
+            withUVManager' uvm $ uvLoopResize loop newSiz
 
-            return ([fromIntegral oldSiz+1 .. fromIntegral newSiz-1], fromIntegral oldSiz)    -- fill the free slot list
+            return ([oldSiz+1 .. newSiz-1], oldSiz)    -- fill the free slot list
 
 
 -- | Return slot back to the uv manager where it allocate from.

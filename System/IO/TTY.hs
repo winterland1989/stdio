@@ -19,19 +19,29 @@ This module provides an API for opening tty as 'UVStream'. In most case, it will
 
 module System.IO.TTY(
     UVStream
-  , initTTY
+  , stdin
+  , stdout
+  , stderr
   ) where
 
-import System.IO.UV.Internal
-
-
-initTTY :: Int ->
-foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> CInt -> CInt -> IO CInt
+import System.IO.UV.Stream
+import System.IO.Exception
+import System.IO.Unsafe
 
 stdin :: UVStream
-stdin = unsafePerformIO $
+{-# NOINLINE stdin #-}
+stdin = unsafePerformIO $ do
+    (stdin, _ ) <- acquire (initTTYStream 0)    -- well, stdin live across whole program
+    return stdin                                -- so we give up resource management
 
 stdout :: UVStream
+{-# NOINLINE stdout #-}
+stdout = unsafePerformIO $ do
+    (stdin, _ ) <- acquire (initTTYStream 1)
+    return stdin
 
 stderr :: UVStream
-
+{-# NOINLINE stderr #-}
+stderr = unsafePerformIO $ do
+    (stdin, _ ) <- acquire (initTTYStream 2)
+    return stdin

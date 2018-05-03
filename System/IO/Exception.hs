@@ -74,7 +74,7 @@ module System.IO.Exception
   , throwUVIfMinus
   , throwUVIfMinus_
     -- * Resource management
-  , Resource
+  , Resource(..)
   , initResource
   , initResource_
   , withResource
@@ -277,7 +277,8 @@ throwUVError e info
 -- | A 'Resource' is an 'IO' action which acquires some resource of type a and
 -- also returns a finalizer of type IO () that releases the resource.
 --
--- The only safe way to use a 'Resource' is 'with' \/ 'with\''.
+-- The only safe way to use a 'Resource' is 'with' \/ 'with\'', You should NEVER
+-- use the `acquire` field directly, unless you want to give up resource management.
 --
 -- 'MonadIO' instance is provided so that you can lift 'IO' computation inside
 -- 'Resource', this is convenient for propagate 'Resource' around since many

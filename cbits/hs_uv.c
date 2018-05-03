@@ -105,11 +105,11 @@ void hs_uv_handle_close(uv_handle_t* handle){
 }
 
 // Get handle's OS file
-int hs_uv_fileno(uv_handle_t* handle){
+int32_t hs_uv_fileno(uv_handle_t* handle){
     uv_os_fd_t fd;
     int r;
     r = uv_fileno(handle, &fd);
-    if (r < 0) { return r; } else { return (int)fd; }
+    if (r < 0) { return (int32_t)r; } else { return (int32_t)fd; }
 }
 
 // Initialize a uv_req_t with give type, return NULL on fail.
@@ -203,7 +203,7 @@ void uv_connection_init(uv_stream_t* handle){
   handle->stream.conn.shutdown_req = NULL;
 }
 
-int hs_uv_tcp_open(uv_tcp_t* handle, int sock) {
+int hs_uv_tcp_open(uv_tcp_t* handle, int32_t sock) {
   int r = uv_tcp_open(handle, (uv_os_sock_t)sock);
   if (r == 0) {
     uv_connection_init((uv_stream_t*)handle);
@@ -212,7 +212,7 @@ int hs_uv_tcp_open(uv_tcp_t* handle, int sock) {
   return r;
 }
 #else
-int hs_uv_tcp_open(uv_tcp_t* handle, int sock) {
+int hs_uv_tcp_open(uv_tcp_t* handle, int32_t sock) {
   return uv_tcp_open(handle, (uv_os_sock_t)sock);
 }
 #endif

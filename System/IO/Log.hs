@@ -1,3 +1,5 @@
+{-# LANGUAGE ExistentialQuantification #-}
+
 module System.IO.Log where
 
 newtype Logger = forall o. Output o => Logger

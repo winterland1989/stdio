@@ -57,7 +57,7 @@ library
                             System.IO.UV.Manager
 
                             System.IO.TTY
-                            System.IO.Log
+                            -- System.IO.Log
 
                             System.IO.Net
                             System.IO.Net.SockAddr

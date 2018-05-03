@@ -119,7 +119,7 @@ startServer ServerConfig{..} =
 
         m <- getBlockMVar serverManager serverSlot
         acceptBuf <- newPinnedPrimArray serverBackLog
-        let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32))
+        let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr UVFD))
         tryTakeMVar m
 
         withUVManager' serverManager $ do
@@ -162,7 +162,3 @@ foreign import ccall unsafe hs_uv_listen  :: Ptr UVHandle -> CInt -> IO CInt
 foreign import ccall unsafe hs_uv_accept_check_init  :: Ptr UVLoop -> Ptr UVHandle -> Ptr UVHandle -> IO CInt
 
 foreign import ccall unsafe "hs_uv_listen_resume" uvListenResume :: Ptr UVHandle -> IO ()
-
-uvFileno :: HasCallStack => Ptr UVHandle -> IO CInt
-uvFileno = throwUVIfMinus . hs_uv_fileno
-foreign import ccall unsafe hs_uv_fileno :: Ptr UVHandle -> IO CInt
