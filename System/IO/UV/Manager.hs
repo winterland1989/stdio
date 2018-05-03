@@ -41,6 +41,7 @@ module System.IO.UV.Manager
   ) where
 
 import GHC.Stack.Compat
+import GHC.Conc.Sync (labelThread)
 import qualified System.IO.Exception as E
 import qualified System.IO.UV.Exception as E
 import Data.Array
@@ -66,12 +67,11 @@ import System.IO.UV.Internal
 --------------------------------------------------------------------------------
 
 data UVManager = UVManager
-    { uvmBlockTable   :: {-# UNPACK #-} !(IORef (UnliftedArray (MVar ()))) -- a array to store threads blocked on async I/O
-                                                                            -- Int inside MVar is the async action's result.
+    { uvmBlockTable   :: {-# UNPACK #-} !(IORef (UnliftedArray (MVar ()))) -- a array to store threads blocked on async I/O.
 
     , uvmFreeSlotList :: {-# UNPACK #-} !(MVar [UVSlot])    -- the slot is attached as the data field of
-                                                            -- c struct uv_handle_t, thus will be available
-                                                            -- to c callbacks, which are static functions.
+                                                            -- c struct uv_handle_t/uv_req_t,
+                                                            -- thus will be available to c callbacks.
                                                             --
                                                             -- inside callback we increase event counter and
                                                             -- push slot into event queue.
@@ -81,9 +81,10 @@ data UVManager = UVManager
                                                             -- as index to unblock threads in block queue.
 
     , uvmLoop        :: {-# UNPACK #-} !(Ptr UVLoop)        -- the uv loop refrerence
+
     , uvmLoopData    :: {-# UNPACK #-} !(Ptr UVLoopData)    -- cached pointer to uv_loop_t's data field
 
-    , uvmRunning     :: {-# UNPACK #-} !(MVar Bool)     -- only uv manager thread will modify this value
+    , uvmRunning     :: {-# UNPACK #-} !(MVar Bool)     -- only uv manager thread will modify this value.
                                                         -- 'True' druing uv_run and 'False' otherwise.
                                                         --
                                                         -- unlike epoll/ONESHOT, uv loop are NOT thread safe,
@@ -96,10 +97,9 @@ data UVManager = UVManager
 
 
     , uvmTimer       :: {-# UNPACK #-} !(Ptr UVHandle)  -- This timer handle is used to achieve polling with
-                                                        -- given timeout
+                                                        -- given timeout, only used on non-threaded rts.
 
-    , uvmCap ::  {-# UNPACK #-} !Int                -- the capability uv manager should run on, we save this
-                                                    -- number for starting uv manager with `forkOn`
+    , uvmCap ::  {-# UNPACK #-} !Int                -- the capability uv manager run on.
     }
 
 instance Show UVManager where
@@ -121,6 +121,7 @@ uvManagerArray = unsafePerformIO $ do
     forM [0..numCaps-1] $ \ i -> do
         -- fork uv manager thread
         forkOn i . withResource (initUVManager initTableSize i) $ \ m -> do
+            myThreadId >>= (`labelThread` ("uv manager on " ++ show i))
             writeArr uvmArray i m
             signalQSemN s 1
             startUVManager m
@@ -281,10 +282,6 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
     modifyMVar freeSlotList $ \ freeList -> case freeList of
         (s:ss) -> return (ss, s)
         []     -> do
-            -- free list is empty, we double it
-            -- but we shouldn't do it if uv_run doesn't finish yet
-            -- because we may re-allocate loop data in another thread
-            -- so we take the running lock first
 
             blockTable <- readIORef blockTableRef
             let oldSiz = sizeofArr blockTable
@@ -299,6 +296,9 @@ allocSlot uvm@(UVManager blockTableRef freeSlotList loop _ _ _ _ _) =
 
             writeIORef blockTableRef iBlockTable'
 
+            -- but we shouldn't do resize if uv_run doesn't finish yet
+            -- so we take the running lock first
+            --
             withUVManager' uvm $ uvLoopResize loop (fromIntegral newSiz)
 
             return ([fromIntegral oldSiz+1 .. fromIntegral newSiz-1], fromIntegral oldSiz)    -- fill the free slot list
@@ -338,9 +338,11 @@ initUVHandle typ init uvm = initResource
 -- | Fork a new GHC thread with active load-balancing.
 --
 -- Using libuv based I/O solution has a disadvantage that file handlers are bound to certain
--- uv_loop, thus certain uv mananger/capability. This makes GHC's work-stealing strategy diffcult
--- to work, we solve this problem with simple round-robin load-balancing: forkBa will automatically
--- distribute your new threads in round-robin manner.
+-- uv_loop, thus certain uv mananger/capability. Worker threads that migrate to other capability
+-- may facing contention since various API here is protected by a running lock, this makes GHC's
+-- work-stealing strategy unsuitable for certain workload, such as a webserver.
+-- we solve this problem with simple round-robin load-balancing: forkBa will automatically
+-- distribute your new threads to all capabilities in round-robin manner. Thus its name forkBa(lance).
 --
 forkBa :: IO () -> IO ThreadId
 forkBa io = do

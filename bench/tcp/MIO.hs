@@ -28,20 +28,19 @@ main = do
         c <- atomicAddCounter_ capCounter 1
         forkOn c $ do
             setSocketOption sock' NoDelay 1
-            echo sock'
+            recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
+                                                        -- since node use slab, which is in face a memory pool
+            echo sock' recvbuf
   where
-    echo sock = do
-        recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
-                                                    -- since node use slab, which is in face a memory pool
-        loop recvbuf
+    echo sock recvbuf = loop
       where
-        loop recvbuf = do
+        loop = do
             r <- withForeignPtr recvbuf $ \ p -> do
                 recvBuf sock p 2048
 
             when (r /= 0) $ do
                 sendAll sock sendbuf
-                loop recvbuf
+                loop
 
     sendbuf =
         "HTTP/1.1 200 OK\r\n\

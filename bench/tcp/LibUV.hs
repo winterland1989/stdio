@@ -25,24 +25,23 @@ main = do
     let conf = ServerConfig
             (SockAddrInet port inetAny)
             128
-            echo
+            (\ uvs -> do
+                recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
+                                                            -- since node use slab, which is in face a memory pool
+                echo uvs recvbuf)
             True
             (print :: SomeException -> IO())
 
     startServer conf
   where
-    echo uvs = do
-        recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
-                                                    -- since node use slab, which is in face a memory pool
-        loop recvbuf
+    echo uvs recvbuf = loop
       where
-        loop recvbuf = do
+        loop = do
             r <- withForeignPtr recvbuf $ \ p -> do
                 readInput uvs p 2048
-
             when (r /= 0) $ do
                 withForeignPtr sendbuffp $ \ p -> writeOutput uvs p l
-                loop recvbuf
+                loop
 
     (B.PS sendbuffp _ l) =
         "HTTP/1.1 200 OK\r\n\

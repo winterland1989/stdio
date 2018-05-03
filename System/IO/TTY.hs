@@ -25,7 +25,6 @@ module System.IO.TTY(
 import System.IO.UV.Internal
 
 
-
 initTTY :: Int ->
 foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> CInt -> CInt -> IO CInt
 

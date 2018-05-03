@@ -50,12 +50,14 @@ library
                             -- System.IO.Handle
                             System.LowResTimer
 
-                            -- System.IO.TTY
                             
                             System.IO.UV.Exception 
                             System.IO.UV.Stream
                             System.IO.UV.Internal
                             System.IO.UV.Manager
+
+                            System.IO.TTY
+                            System.IO.Log
 
                             System.IO.Net
                             System.IO.Net.SockAddr
