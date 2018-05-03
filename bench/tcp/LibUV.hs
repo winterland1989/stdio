@@ -26,7 +26,7 @@ main = do
             (SockAddrInet port inetAny)
             128
             echo
-            (print :: SomeException -> IO())
+            True
             (print :: SomeException -> IO())
 
     startServer conf

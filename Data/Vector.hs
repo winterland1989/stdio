@@ -45,11 +45,11 @@ module Data.Vector (
   , Vector(..)
   , pattern VecPat
   , PrimVector(..)
-  , pvW16
+  , vW16
   -- ** 'Word8' vector
   , Bytes
   , pattern BytesPat
-  , bAsc
+  , vASCII
   , w2c, c2w
   -- * Basic creating
   , create, creating, createN
@@ -265,12 +265,12 @@ data PrimVector a = PrimVector
     {-# UNPACK #-} !Int         -- length in elements of type a rather than in bytes
   deriving (Typeable, Data)
 
-pvW16 :: Q.QuasiQuoter
-pvW16 = Q.QuasiQuoter
+vW16 :: Q.QuasiQuoter
+vW16 = Q.QuasiQuoter
     (Q.word16LiteralLE $ \ len addr -> [| PrimVector (Q.word16ArrayFromAddr len $(addr)) 0 len |])
-    (error "Cannot use bAsc as a pattern")
-    (error "Cannot use bAsc as a type")
-    (error "Cannot use bAsc as a dec")
+    (error "Cannot use vASCII as a pattern")
+    (error "Cannot use vASCII as a type")
+    (error "Cannot use vASCII as a dec")
 
 instance Prim a => Vec PrimVector a where
     type MArray PrimVector = MutablePrimArray
@@ -371,12 +371,12 @@ c2w :: Char -> Word8
 {-# INLINE c2w #-}
 c2w (C# c#) = W8# (int2Word# (ord# c#))
 
-bAsc :: Q.QuasiQuoter
-bAsc = Q.QuasiQuoter
+vASCII :: Q.QuasiQuoter
+vASCII = Q.QuasiQuoter
     (asciiLiteral $ \ len addr -> [| bytesFromAddr len $(addr) |])
-    (error "Cannot use bAsc as a pattern")
-    (error "Cannot use bAsc as a type")
-    (error "Cannot use bAsc as a dec")
+    (error "Cannot use vASCII as a pattern")
+    (error "Cannot use vASCII as a type")
+    (error "Cannot use vASCII as a dec")
 
 bytesFromAddr :: Int -> Addr# -> Bytes
 {-# NOINLINE bytesFromAddr #-} -- don't dump every literal with this code

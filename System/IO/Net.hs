@@ -28,6 +28,7 @@ module System.IO.Net (
     UVStream
   , initTCPConnection
   , ServerConfig(..)
+  , defaultServerConfig
   , startServer
   , module System.IO.Net.SockAddr
   ) where
@@ -41,6 +42,7 @@ import System.IO.UV.Stream
 import System.IO.UV.Internal
 import Control.Concurrent.MVar
 import Foreign.Ptr
+import GHC.Ptr
 import Foreign.C.Types (CInt(..))
 import Data.Int
 import Data.Vector
@@ -77,15 +79,30 @@ initTCPConnection target local = do
             throwUVIfMinus_ $ peekBufferTable uvm connSlot
     return conn
 
-data ServerConfig = forall ex ey. (Exception ex, Exception ey) => ServerConfig
-    { serverAddr :: SockAddr
-    , serverBackLog            :: Int
-    , serverWorker :: UVStream -> IO ()
-    , serverErrorHandler :: ex -> IO ()
-    , workerErrorHandler :: ey -> IO ()
+-- | A TCP/Pipe server configuration
+--
+data ServerConfig = forall e. Exception e => ServerConfig
+    { serverAddr       :: SockAddr
+    , serverBackLog    :: Int
+    , serverWorker     :: UVStream -> IO ()
+    , serverWorkerNoDelay :: Bool
+    , serverWorkerHandler :: e -> IO ()
     }
 
+-- | A default hello world server
+--
+defaultServerConfig :: ServerConfig
+defaultServerConfig = ServerConfig
+    (SockAddrInet 8888 inetAny)
+    128
+    (\ uvs -> writeOutput uvs (Ptr "hello world"#) 11)
+    True
+    (print :: SomeException -> IO())
 
+-- | Start server's accept loop
+--
+-- Fork new worker thread upon a new connection.
+--
 startServer :: ServerConfig -> IO ()
 startServer ServerConfig{..} =
     withResource initTCPStream $ \ server -> do
@@ -104,7 +121,7 @@ startServer ServerConfig{..} =
         let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32))
         tryTakeMVar m
 
-        handle serverErrorHandler . withUVManager' serverManager $ do
+        withUVManager' serverManager $ do
             uvTCPBind serverHandle addrPtr False
             pokeBufferTable serverManager serverSlot acceptBufPtr 0
             uvListen serverHandle (fromIntegral serverBackLog)
@@ -125,13 +142,14 @@ startServer ServerConfig{..} =
             forM_ [0..accepted-1] $ \ i -> do
                 let fd = indexPrimArray acceptBufCopy i
                 if fd < 0
-                then forkIO . handle workerErrorHandler $ throwUVIfMinus_ (return fd)
+                then throwUVIfMinus_ (return fd)    -- minus fd indicate a server error and we should close server
                 else do
-                    forkBa . withResource initTCPStream $ \ client -> do
-                        handle workerErrorHandler $ do
+                    void . forkBa . withResource initTCPStream $ \ client -> do
+                        handle serverWorkerHandler $ do
                             withUVManager' (uvsManager client) $ do
                                 uvTCPOpen (uvsHandle client) (fromIntegral fd)
-                                uvTCPNodelay (uvsHandle client) True
+                                when serverWorkerNoDelay $
+                                    uvTCPNodelay (uvsHandle client) True
                             serverWorker client
 
 --------------------------------------------------------------------------------
