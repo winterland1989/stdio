@@ -1,8 +1,8 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
 {-|
-Module      : StdIO.Net.SockAddr
-Description : Low resolution (0.1s) timing wheel
+Module      : System.IO.Net.SockAddr
+Description : TCP/UDP socket address API
 Copyright   : (c) Winterland, 2018
 License     : BSD
 Maintainer  : drkoster@qq.com

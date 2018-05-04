@@ -251,3 +251,39 @@ uvTTYInit :: HasCallStack => Ptr UVLoop -> Ptr UVHandle -> UVFD -> IO ()
 uvTTYInit loop handle fd = throwUVIfMinus_ $ uv_tty_init loop handle (fromIntegral fd)
 foreign import ccall unsafe uv_tty_init :: Ptr UVLoop -> Ptr UVHandle -> CInt -> IO CInt
 
+--------------------------------------------------------------------------------
+
+type UVFSCallBack = FunPtr (Ptr UVReq -> IO ())
+
+foreign import ccall "hs_uv.h &hs_uv_fs_callback" uvFSCallBack :: UVFSCallBack
+
+newtype UVDirEntType = UVDirEntType CInt
+    deriving (Bounded, Enum, Eq, Integral, Num, Ord, Read, Real, Show, FiniteBits, Bits, Storable)
+
+#{enum UVDirEntType, UVDirEntType,
+    uV_DIRENT_UNKNOWN = UV_DIRENT_UNKNOWN,
+    uV_DIRENT_FILE    = UV_DIRENT_FILE,
+    uV_DIRENT_DIR     = UV_DIRENT_DIR,
+    uV_DIRENT_LINK    = UV_DIRENT_LINK,
+    uV_DIRENT_FIFO    = UV_DIRENT_FIFO,
+    uV_DIRENT_SOCKET  = UV_DIRENT_SOCKET,
+    uV_DIRENT_CHAR    = UV_DIRENT_CHAR,
+    uV_DIRENT_BLOCK   = UV_DIRENT_BLOCK}
+
+data UVDirEnt
+
+initUVDirEnt :: Resource (Ptr UVDirEnt)
+initUVDirEnt = initResource hs_uv_dirent_alloc hs_uv_dirent_free
+foreign import ccall unsafe hs_uv_dirent_alloc :: IO (Ptr UVDirEnt)
+foreign import ccall unsafe hs_uv_dirent_free :: Ptr UVDirEnt -> IO ()
+
+peekUVDirEnt :: Ptr UVDirEnt -> IO (CString, UVDirEntType)
+peekUVDirEnt p = (,) 
+    <$> (#{peek struct uv_dirent_s, name          } p)
+    <*> (#{peek struct uv_dirent_s, type          } p)
+
+uvFSScandir :: Ptr UVLoop -> Ptr UVReq -> CString -> Bool -> IO ()
+uvFSScandir loop req path block = 
+    throwUVIfMinus_ $ uv_fs_scandir loop req path 0 (if block then uvFSCallBack else nullFunPtr)
+foreign import ccall unsafe uv_fs_scandir :: Ptr UVLoop -> Ptr UVReq -> CString -> CInt -> UVFSCallBack -> IO CInt
+foreign import ccall unsafe uv_fs_scandir_next :: Ptr UVReq -> Ptr UVDirEnt -> IO CInt

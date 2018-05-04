@@ -375,3 +375,18 @@ int hs_uv_async_wake_init(uv_loop_t* loop, uv_async_t* async){
     return uv_async_init(loop, async, NULL);
 }
 
+/********************************************************************************/
+
+uv_dirent_t* hs_uv_dirent_alloc(){
+    return malloc(sizeof(uv_dirent_t));
+}
+
+void hs_uv_dirent_free(uv_dirent_t* ent){
+    free(ent);
+}
+
+void hs_uv_fs_callback(uv_fs_t* req){
+    hs_loop_data* loop_data = req->loop->data;
+    loop_data->event_queue[loop_data->event_counter] = (size_t)req->data; // push the slot to event queue
+    loop_data->event_counter += 1;
+}

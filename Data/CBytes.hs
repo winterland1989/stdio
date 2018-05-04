@@ -1,10 +1,12 @@
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE UnliftedFFITypes #-}
 {-# LANGUAGE BangPatterns #-}
 
 module Data.CBytes where
 
 import Foreign.C
 import Data.Primitive.PrimArray
+import Data.Primitive.ByteArray
 import Control.Monad.Primitive
 import Data.Foldable (foldlM)
 import Data.IORef
@@ -29,10 +31,9 @@ import qualified System.IO.Exception as E
 -- compatibility layer like 'WideCharToMultiByte/MultiByteToWideChar' and keep the same
 -- interface.
 --
--- We neither store length info, nor support O(1) slice for 'CBytes': This will defeat the
--- purpose of null-terminated string which is to save memory, in practice this is not an
--- issue: most 'CBytes's are very small, e.g. filepath, hostname, etc. And 'strlen' runs
--- very fast.
+-- We neither guarantee to store length info, nor support O(1) slice for 'CBytes':
+-- This will defeat the purpose of null-terminated string which is to save memory,
+-- and 'strlen' runs very fast.
 --
 -- It can be used with @OverloadedString@, literal encoding is UTF-8 with some modifications:
 -- @\NUL@ char is encoded to 'C0 80', and '\xD800' ~ '\xDFFF' is encoded as a three bytes
@@ -42,11 +43,10 @@ import qualified System.IO.Exception as E
 -- Note most of the unix API is not unicode awared though, you may find a `scandir` call
 -- return a filename which is not proper encoded in any unicode encoding at all.
 -- But still, UTF-8 is recommanded to be used everywhere, so we use that assumption in
--- various places, such as displaying and converting literals.
+-- various places, such as displaying 'CBytes' and converting literals.
 --
 data CBytes
     = CBytesOnHeap  {-# UNPACK #-} !(MutablePrimArray RealWorld Word8)   -- ^ On heap pinned 'MutablePrimArray'
-    | CBytesPtr     {-# UNPACK #-} !CString  {-# UNPACK #-} !(IORef ())  -- ^ C pointers with finalizer
     | CBytesLiteral {-# UNPACK #-} !CString                              -- ^ String literals with static address
 
 instance Show CBytes where
@@ -124,51 +124,53 @@ unpackCBytes cbytes = unsafeDupablePerformIO . withCBytes cbytes $ \ (Ptr addr#)
 
 --------------------------------------------------------------------------------
 
--- | Wrap a 'CString' type into a 'CBytes', return Nothing if the pointer is NULL.
+-- | Copy a 'CString' type into a 'CBytes', return Nothing if the pointer is NULL.
 --
--- The first argument is a free function to free the 'CString' pointers, e.g. memory allocated
--- by @malloc@ can be automatically freed by 'free'
+--  After copying you're free to free the 'CString' 's memory.
 --
-fromCString :: (CString -> IO ())        -- finalizer
-            -> CString
-            -> IO (Maybe CBytes)
-{-# INLINABLE fromCString #-}
-fromCString free cstring = do
+fromCStringMaybe :: HasCallStack => CString -> IO (Maybe CBytes)
+{-# INLINABLE fromCStringMaybe #-}
+fromCStringMaybe cstring = do
     if cstring == nullPtr
     then return Nothing
     else do
-        ref <- newIORef ()
-        _ <- mkWeakIORef ref (free cstring)
-        return (Just $ CBytesPtr cstring ref)
+        len <- c_strlen cstring
+        mpa@(MutablePrimArray (MutableByteArray mba#)) <- newPinnedPrimArray (fromIntegral len+1)
+        c_strcpy mba# cstring
+        return (Just (CBytesOnHeap mpa))
+
 
 -- | Same with 'fromCString', but throw 'E.InvalidArgument' when meet a null pointer.
 --
--- The first argument is a function to free the 'CString' pointers, e.g. memory allocated
--- by @malloc@ can be automatically freed by 'free'
---
-fromCStringThrow :: HasCallStack
-                 => (CString -> IO ())   -- finalizer
-                 -> CString
-                 -> IO CBytes
-{-# INLINABLE fromCStringThrow #-}
-fromCStringThrow free cstring = do
+fromCString :: HasCallStack
+            => CString
+            -> IO CBytes
+{-# INLINABLE fromCString #-}
+fromCString cstring = do
     if cstring == nullPtr
     then E.throwIO (E.InvalidArgument
         (E.IOEInfo "" "unexpected null pointer" callStack))
     else do
-        ref <- newIORef ()
-        _ <- mkWeakIORef ref (free cstring)
-        return (CBytesPtr cstring ref)
+        len <- c_strlen cstring
+        mpa@(MutablePrimArray (MutableByteArray mba#)) <- newPinnedPrimArray (fromIntegral len+1)
+        c_strcpy mba# cstring
+        return (CBytesOnHeap mpa)
 
 -- | Pass 'CBytes' to foreign function as a @char*@.
 --
 withCBytes :: CBytes -> (CString -> IO a) -> IO a
 {-# INLINABLE withCBytes #-}
 withCBytes (CBytesOnHeap mba) f = withMutablePrimArrayContents mba (f . castPtr)
-withCBytes (CBytesPtr ptr ref) f = do { r <- f ptr; touch ref; return r }
 withCBytes (CBytesLiteral ptr) f = f ptr
 
 --------------------------------------------------------------------------------
 
-foreign import ccall unsafe "cstring.h strcmp"
+foreign import ccall unsafe "string.h strcmp"
     c_strcmp :: CString -> CString -> IO CInt
+
+foreign import ccall unsafe "string.h strlen"
+    c_strlen :: CString -> IO CSize
+
+foreign import ccall unsafe "string.h strcpy"
+    c_strcpy :: MutableByteArray# RealWorld -> CString -> IO ()
+
