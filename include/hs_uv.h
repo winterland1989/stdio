@@ -44,7 +44,7 @@ enum {
 #define UV_HANDLE_TCP_SINGLE_ACCEPT             0x08000000
 #define UV_HANDLE_TCP_ACCEPT_STATE_CHANGING     0x10000000
 extern unsigned int uv_simultaneous_server_accepts;
-extern void uv_tcp_queue_accept(uv_tcp_t* handle, uv_tcp_accept_t* req);
+void uv_tcp_queue_accept(uv_tcp_t* handle, uv_tcp_accept_t* req);
 int32_t hs_uv_tcp_accept(uv_tcp_t* server);
 int32_t hs_uv_pipe_accept(uv_pipe_t* server);
 #else

@@ -120,11 +120,12 @@ startServer ServerConfig{..} =
         m <- getBlockMVar serverManager serverSlot
         acceptBuf <- newPinnedPrimArray serverBackLog
         let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr Int32))
+
         tryTakeMVar m
 
         withUVManager' serverManager $ do
             uvTCPBind serverHandle addrPtr False
-            pokeBufferTable serverManager serverSlot acceptBufPtr 0
+            pokeBufferTable serverManager serverSlot acceptBufPtr (-serverBackLog)
             uvListen serverHandle (fromIntegral serverBackLog)
 
         forever $ do
@@ -132,10 +133,16 @@ startServer ServerConfig{..} =
 
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
             acceptBufCopy <- withUVManager' serverManager $ do
-                accepted <- peekBufferTable serverManager serverSlot
-                acceptBuf' <- newPrimArray accepted
-                copyMutablePrimArray acceptBuf' 0 acceptBuf 0 accepted
-                pokeBufferTable serverManager serverSlot acceptBufPtr 0
+                acceptedOffset <- peekBufferTable serverManager serverSlot
+                let acceptedOffset' = if acceptedOffset > 0 then acceptedOffset else serverBackLog
+
+                -- We use the sign bit to indicate c side we can begin accepting fresh
+                -- this sign bit will be removed if we successfully accept fds during uv_run
+                pokeBufferTable serverManager serverSlot acceptBufPtr (-serverBackLog)
+
+                let acceptedNum = serverBackLog - acceptedOffset'
+                acceptBuf' <- newPrimArray acceptedNum
+                copyMutablePrimArray acceptBuf' 0 acceptBuf acceptedOffset' acceptedNum
                 unsafeFreezePrimArray acceptBuf'
 
             let accepted = sizeofPrimArray acceptBufCopy
@@ -158,6 +165,8 @@ startServer ServerConfig{..} =
 uvListen :: HasCallStack => Ptr UVHandle -> CInt -> IO ()
 uvListen handle backlog = throwUVIfMinus_ (hs_uv_listen handle backlog)
 foreign import ccall unsafe hs_uv_listen  :: Ptr UVHandle -> CInt -> IO CInt
+
+foreign import ccall unsafe hs_uv_listen_resume  :: Ptr UVHandle -> IO ()
 
 foreign import ccall unsafe hs_uv_accept_check_init  :: Ptr UVLoop -> Ptr UVHandle -> Ptr UVHandle -> IO CInt
 

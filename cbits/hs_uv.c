@@ -325,27 +325,38 @@ void hs_listen_cb(uv_stream_t* server, int status){
     hs_loop_data* loop_data = server->loop->data;
 
     int32_t* accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
-    size_t accepted_number = loop_data->buffer_size_table[slot];
+    ssize_t accepted_number = loop_data->buffer_size_table[slot];
 
-    if (status == 0) {
-        accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);       
-    } else {
-        accept_buf[accepted_number] = (int32_t)status;
+    if (accepted_number < 0) {
+        // remove the sign bit first
+        accepted_number = -accepted_number;
     }
-    loop_data->buffer_size_table[slot] = accepted_number + 1;
+    if (accepted_number == 0) {
+        uv__close(hs_uv_accept(server));    // we do our own backlog logic here
+    }
+    if (accepted_number > 0) {
+        accepted_number--;
+        if (status == 0) {
+            accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);       
+        } else {
+            accept_buf[accepted_number] = (int32_t)status;
+        }
+        loop_data->buffer_size_table[slot] = accepted_number;
+    }
 }
 
 int hs_uv_listen(uv_stream_t* stream, int backlog){
     return uv_listen(stream, backlog, hs_listen_cb);
 }
 
+
 // check if the socket's accept buffer is still filled, if so, unlock the accept thread
 void hs_accept_check_cb(uv_check_t* check){
     uv_stream_t* server=(uv_stream_t*)check->data;
     size_t slot = (size_t)server->data;
     hs_loop_data* loop_data = server->loop->data;
-
-    if (loop_data->buffer_size_table[slot] > 0){
+    // check the sign bit
+    if (loop_data->buffer_size_table[slot] >= 0){
         loop_data->event_queue[loop_data->event_counter] = slot; // push the slot to event queue
         loop_data->event_counter += 1;
     }
