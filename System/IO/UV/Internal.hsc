@@ -23,6 +23,8 @@ import System.IO.Net.SockAddr (SockAddr, SocketFamily(..))
 type UVSlot = Int 
 type UVFD = Int32
 
+aCCEPT_BUFFER_SIZE = #const ACCEPT_BUFFER_SIZE
+
 --------------------------------------------------------------------------------
 
 data UVLoopData

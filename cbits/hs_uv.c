@@ -335,13 +335,19 @@ void hs_listen_cb(uv_stream_t* server, int status){
         }
         loop_data->buffer_size_table[slot] = accepted_number + 1;
     } else {
+#if defined(_WIN32)
+        closesocket(hs_uv_accept(server));  // this should not happen since simultaneous_accepts is small
+#else
         uv__io_stop(server->loop, &server->io_watcher, POLLIN);
+#endif
     }
 
 }
 
 int hs_uv_listen(uv_stream_t* stream, int backlog){
+#if !defined(_WIN32)
     return uv_listen(stream, backlog, hs_listen_cb);
+#endif
 }
 
 void hs_uv_listen_resume(uv_stream_t* stream){

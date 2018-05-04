@@ -42,7 +42,7 @@ import System.IO.UV.Internal
 import Control.Concurrent.MVar
 import Foreign.Ptr
 import GHC.Ptr
-import Foreign.C.Types (CInt(..))
+import Foreign.C.Types (CInt(..), CSize(..))
 import Data.Int
 import Data.Vector
 import Data.IORef.Unboxed
@@ -53,7 +53,6 @@ import Control.Monad.IO.Class
 import Control.Monad.Primitive
 import Data.Primitive.PrimArray
 import Foreign.PrimArray
-
 
 initTCPConnection :: HasCallStack
         => SockAddr
@@ -116,9 +115,8 @@ startServer ServerConfig{..} =
         (\ loop handle -> hs_uv_accept_check_init loop handle serverHandle >> return handle) serverManager) $ \ _ ->
             withSockAddr serverAddr $ \ addrPtr -> do
 
-
         m <- getBlockMVar serverManager serverSlot
-        acceptBuf <- newPinnedPrimArray serverBackLog
+        acceptBuf <- newPinnedPrimArray (fromIntegral aCCEPT_BUFFER_SIZE)
         let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr UVFD))
         tryTakeMVar m
 
@@ -153,7 +151,7 @@ startServer ServerConfig{..} =
                                     uvTCPNodelay (uvsHandle client) True
                             serverWorker client
 
-            when (accepted == 1024) $
+            when (accepted == fromIntegral aCCEPT_BUFFER_SIZE) $
                 withUVManager' serverManager $ uvListenResume serverHandle
 
 --------------------------------------------------------------------------------
