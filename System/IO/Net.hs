@@ -163,6 +163,9 @@ startServer ServerConfig{..} =
                                     uvTCPNodelay (uvsHandle client) True
                             serverWorker client
 
+            when (accepted == serverBackLog) $
+                withUVManager' serverManager $ hs_uv_listen_resume serverHandle
+
 --------------------------------------------------------------------------------
 
 uvListen :: HasCallStack => Ptr UVHandle -> CInt -> IO ()

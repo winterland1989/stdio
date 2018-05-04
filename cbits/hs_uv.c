@@ -311,12 +311,18 @@ int hs_uv_pipe_accept(uv_pipe_t* server) {
     }
     return fd;
 }
+// we don't stop under windows
+void hs_uv_listen_resume(uv_stream_t* stream){
+}
 #else
 // we don't consider ipc case in stdio
 int32_t hs_uv_accept(uv_stream_t* server) {
     int32_t fd = (int32_t)server->accepted_fd;
     server->accepted_fd = -1;
     return fd;
+}
+void hs_uv_listen_resume(uv_stream_t* stream){
+    uv__io_start(stream->loop, &stream->io_watcher, POLLIN);
 }
 #endif
 
@@ -332,7 +338,11 @@ void hs_listen_cb(uv_stream_t* server, int status){
         accepted_number = -accepted_number;
     }
     if (accepted_number == 0) {
-        uv__close(hs_uv_accept(server));    // we do our own backlog logic here
+#if defined(_WIN32)
+        uv__close(hs_uv_accept(server));    // This is very unlikely to happen since under windows
+#else                                       // the simultaneous accept number is small
+        uv__io_stop(server->loop, &server->io_watcher, POLLIN); // this is the right thing to do under unix
+#endif
     }
     if (accepted_number > 0) {
         accepted_number--;

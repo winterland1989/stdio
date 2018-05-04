@@ -53,6 +53,7 @@ int uv__close(int fd); /* preserves errno */
 int uv__stream_open(uv_stream_t* stream, int fd, int flags);
 typedef struct uv__stream_queued_fds_s uv__stream_queued_fds_t;
 void uv__io_start(uv_loop_t* loop, uv__io_t* w, unsigned int events);
+void uv__io_stop(uv_loop_t* loop, uv__io_t* w, unsigned int events);
 struct uv__stream_queued_fds_s {
   unsigned int size;
   unsigned int offset;
