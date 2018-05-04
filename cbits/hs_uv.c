@@ -350,8 +350,15 @@ int hs_uv_listen(uv_stream_t* stream, int backlog){
 #endif
 }
 
-void hs_uv_listen_resume(uv_stream_t* stream){
-    uv__io_stop(stream->loop, &stream->io_watcher, POLLIN);
+void hs_uv_listen_resume(uv_stream_t* server){
+    size_t slot = (size_t)server->data;
+    hs_loop_data* loop_data = server->loop->data;
+    int32_t* accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
+    size_t accepted_number = loop_data->buffer_size_table[slot];
+    accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);
+    loop_data->buffer_size_table[slot] = accepted_number + 1;
+
+    uv__io_start(server->loop, &server->io_watcher, POLLIN);
 }
 
 // check if the socket's accept buffer is still filled, if so, unlock the accept thread
