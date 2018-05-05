@@ -118,9 +118,9 @@ startServer ServerConfig{..} =
         m <- getBlockMVar serverManager serverSlot
         acceptBuf <- newPinnedPrimArray (fromIntegral aCCEPT_BUFFER_SIZE)
         let acceptBufPtr = (coerce (mutablePrimArrayContents acceptBuf :: Ptr UVFD))
-        tryTakeMVar m
 
         withUVManager' serverManager $ do
+            tryTakeMVar m
             uvTCPBind serverHandle addrPtr False
             pokeBufferTable serverManager serverSlot acceptBufPtr 0
             uvListen serverHandle (fromIntegral serverBackLog)
@@ -130,6 +130,7 @@ startServer ServerConfig{..} =
 
             -- we lock uv manager here in case of next uv_run overwrite current accept buffer
             acceptBufCopy <- withUVManager' serverManager $ do
+                tryTakeMVar m
                 accepted <- peekBufferTable serverManager serverSlot
                 acceptBuf' <- newPrimArray accepted
                 copyMutablePrimArray acceptBuf' 0 acceptBuf 0 accepted

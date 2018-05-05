@@ -52,8 +52,8 @@ instance Input UVStream where
     -- readInput :: HasCallStack => UVStream -> Ptr Word8 ->  Int -> IO Int
     readInput uvs@(UVStream handle rslot _ _ uvm) buf len = do
         m <- getBlockMVar uvm rslot
-        tryTakeMVar m
         withUVManager' uvm $ do
+            tryTakeMVar m
             pokeBufferTable uvm rslot buf len
             uvReadStart handle
         takeMVar m
@@ -72,8 +72,8 @@ instance Output UVStream where
     -- writeOutput :: HasCallStack => UVStream -> Ptr Word8 -> Int -> IO ()
     writeOutput (UVStream handle _ req wslot uvm) buf len = do
         m <- getBlockMVar uvm wslot
-        tryTakeMVar m
         withUVManager' uvm $ do
+            tryTakeMVar m
             pokeBufferTable uvm wslot buf len
             uvWrite req handle
         takeMVar m
