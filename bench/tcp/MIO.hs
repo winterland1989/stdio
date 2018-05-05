@@ -35,7 +35,7 @@ main = do
         (close sock)
 
   where
-    echo sock recvbuf = loop
+    echo sock recvbuf = loop >> close sock
       where
         loop = do
             r <- withForeignPtr recvbuf $ \ p -> do
@@ -45,7 +45,6 @@ main = do
             then do
                 sendAll sock sendbuf
                 loop
-            else close sock
 
     sendbuf =
         "HTTP/1.1 200 OK\r\n\
