@@ -10,6 +10,7 @@ import Control.Concurrent
 import Control.Monad
 import qualified Data.ByteString as B
 import Control.Concurrent.MVar
+import Control.Exception
 import Data.IORef.Unboxed
 import System.Environment
 import Text.Read                        (readMaybe)
@@ -23,14 +24,16 @@ main = do
     listen sock 128
     cap <- getNumCapabilities
     capCounter <- newCounter 0
-    forever $ do
+    onException (forever $ do
         (sock' , addr) <- accept sock
         c <- atomicAddCounter_ capCounter 1
         forkOn c $ do
             setSocketOption sock' NoDelay 1
             recvbuf <- mallocPlainForeignPtrBytes 2048  -- we reuse buffer as golang does,
                                                         -- since node use slab, which is in face a memory pool
-            echo sock' recvbuf
+            echo sock' recvbuf)
+        (close sock)
+
   where
     echo sock recvbuf = loop
       where
@@ -38,9 +41,11 @@ main = do
             r <- withForeignPtr recvbuf $ \ p -> do
                 recvBuf sock p 2048
 
-            when (r /= 0) $ do
+            if (r /= 0)
+            then do
                 sendAll sock sendbuf
                 loop
+            else close sock
 
     sendbuf =
         "HTTP/1.1 200 OK\r\n\
