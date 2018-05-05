@@ -340,6 +340,7 @@ void hs_listen_cb(uv_stream_t* server, int status){
             // set back accepted_fd so that libuv break from accept loop
             // upon next resuming, we clear this accepted_fd with -1 and call uv__io_start
             server->accepted_fd = accept_buf[accepted_number];
+            loop_data->buffer_size_table[slot] = accepted_number + 1;
 #endif
         }
     } else {
