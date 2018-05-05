@@ -1,7 +1,10 @@
 var net = require('net');
 var cluster = require('cluster');
-var numCPUs = process.env.CPU_NUM | 4;
-var port = process.env.PORT | 8888;
+var numCPUs = 4;
+var port = 8888;
+
+if ( process.env.PORT ) { port = process.env.PORT }
+if ( process.env.CPU_NUM ) { numCPUs = process.env.CPU_NUM }
 
 if (cluster.isMaster) {
     for (var i = 0; i < numCPUs; i++) {
