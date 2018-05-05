@@ -41,8 +41,7 @@ main = do
             r <- withForeignPtr recvbuf $ \ p -> do
                 recvBuf sock p 2048
 
-            if (r /= 0)
-            then do
+            when (r /= 0) $
                 sendAll sock sendbuf
                 loop
 
