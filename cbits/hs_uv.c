@@ -327,19 +327,24 @@ void hs_listen_cb(uv_stream_t* server, int status){
     int32_t* accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
     size_t accepted_number = loop_data->buffer_size_table[slot];
 
-    if (accepted_number < ACCEPT_BUFFER_SIZE) {
-        if (status == 0) {
+    if (status == 0) {
+        if (accepted_number < ACCEPT_BUFFER_SIZE - 1) {
             accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);       
+            loop_data->buffer_size_table[slot] = accepted_number + 1;
         } else {
-            accept_buf[accepted_number] = (int32_t)status;
-        }
-        loop_data->buffer_size_table[slot] = accepted_number + 1;
-    } else {
 #if defined(_WIN32)
-        closesocket(hs_uv_accept(server));  // this should not happen since simultaneous_accepts is small
+            closesocket(hs_uv_accept(server));  // this should not happen since simultaneous_accepts is small
 #else
-        uv__io_stop(server->loop, &server->io_watcher, POLLIN);
+            // do last accept
+            accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);       
+            // set back accepted_fd so that libuv break from accept loop
+            // upon next resuming, we clear this accepted_fd with -1 and call uv__io_start
+            server->accepted_fd = accept_buf[accepted_number];
 #endif
+        }
+    } else {
+        accept_buf[accepted_number] = (int32_t)status;
+        loop_data->buffer_size_table[slot] = accepted_number + 1;
     }
 
 }
@@ -351,13 +356,7 @@ int hs_uv_listen(uv_stream_t* stream, int backlog){
 }
 
 void hs_uv_listen_resume(uv_stream_t* server){
-    size_t slot = (size_t)server->data;
-    hs_loop_data* loop_data = server->loop->data;
-    int32_t* accept_buf = (int32_t*)loop_data->buffer_table[slot];      // fetch accept buffer from buffer_table table
-    size_t accepted_number = loop_data->buffer_size_table[slot];
-    accept_buf[accepted_number] = (int32_t)hs_uv_accept(server);
-    loop_data->buffer_size_table[slot] = accepted_number + 1;
-
+    server->accepted_fd = -1;
     uv__io_start(server->loop, &server->io_watcher, POLLIN);
 }
 
