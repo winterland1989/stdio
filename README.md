@@ -11,14 +11,17 @@ Please head to the [offcial repo](https://github.com/haskell-stdio/stdio). This 
 
 + `fix_accept3`, this is the final choosen branch for offical repo based on performance.
 
-+ `hs_try_putmvar`, this branch uses the `hs_try_putmvar`(present since GHC 8.2) RTS function to unblock thread.
++ `hs_try_putmvar`, this branch uses the `hs_try_putmvar`(present since GHC 8.2) RTS function to unblock thread. Currently it's slow due to global stable pointer table's lock, and the table always need to be scanned even in minor GC. And my benchmark seems to indicate the malloc/free overhead of `PutMVar` struct is quite large.
 
-+ `strlen-slot-allocator`, this branch uses a least-unused-integer allocator based on a 0-1 slot buffer and C `strlen` function.
++ `strlen-slot-allocator`, this branch uses a least-unused-integer allocator based on a 0-1 slot buffer and C `strlen` function. This allocator saves little memory compare to current linked-list solution, thus we choose the later.
 
-+ `stm-wake-up`, this branch uses STM to notify threads which are blocked on waiting uv manager thread to wake up.
++ `stm-wake-up`, this branch uses `STM` to notify threads which are blocked on waiting uv manager thread to wake up. Under high workload `STM` 's overhead is just too much.
 
 + `fix_acceptX`, these branches record various ideas on doing socket/pipe accepting, and some of them contain bugs, which are fixed in `fix_accept3`.
 
++ `new_errno`, this branch tried to unify errno handling with typeclass `IOReturn`. While nice and haskellish as it seems, a more pratical approach is choosen later based on libuv's `uv_translate_sys_error`. and this branch leads to the discovery of a [ghc bug](https://ghc.haskell.org/trac/ghc/ticket/14125) (you can get the basic idea from the trac's issue code).
+
+Most of the other branches are early experiments which are buggy and incomplete, they served to give approximately performance data. Luckily though i got many detail things wrong, but i didn't miss the large elephant: libuv is definitely up to the task.
 
 User Guide
 ----------
