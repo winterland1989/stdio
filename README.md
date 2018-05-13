@@ -7,7 +7,7 @@ Haskell stdio: haskell standard input and output
 Notice
 ------
 
-Please head to the [offcial repo](https://github.com/haskell-stdio/stdio). This is the historical experimental repo of stdio, which records many interesting ideas and exploration, and some of these ideas may get revived if needed. Notable branches:
+Please head to the [official repo](https://github.com/haskell-stdio/stdio). This is the historical experimental repo of stdio, which records many interesting ideas and exploration, and some of these ideas may get revived if needed. Notable branches:
 
 + `fix_accept3`, this is the final choosen branch for offical repo based on performance.
 
